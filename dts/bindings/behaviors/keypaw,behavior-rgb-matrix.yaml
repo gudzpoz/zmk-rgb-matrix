@@ -1,0 +1,48 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Keypaw RGB Matrix control
+
+compatible: "keypaw,behavior-rgb-matrix"
+
+include: two_param.yaml
+
+properties:
+  max-brightness:
+    type: int
+    default: 40
+    description: Capped RGB brightness in percent (0..100).
+
+  idle-brightness:
+    type: int
+    default: 30
+    description: |
+      RGB brightness in percent (0..100) to use while the keyboard is idle
+      (ZMK activity not ACTIVE). Only observable with
+      CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n, which keeps the LEDs on instead
+      of turning them off when idle.
+
+  initial-brightness:
+    type: int
+    default: 30
+    description: Initial brightness in percent (0..100).
+
+  initial-duration-ms:
+    type: int
+    default: 1000
+    description: |
+      Animation period, in milliseconds, given at boot to every effect that does
+      not set its own `duration`. Clamped to
+      CONFIG_KEYPAW_RGB_MATRIX_DURATION_{MIN,MAX}_MS, so it is never zero.
+
+  initial-effect:
+    type: int
+    default: 0
+    description: Initial effect index; falls back to the first registered effect if absent.
+
+  initial-on:
+    type: boolean
+    description: |
+      Start the matrix enabled. A boolean cannot carry `default:` (edtlib
+      rejects that), so the driver treats the property as "enabled unless
+      explicitly set to false".

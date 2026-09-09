@@ -1,0 +1,16 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Radial ripple RGB matrix effect.
+compatible: "keypaw,rgb-matrix-ripple"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  background-brightness:
+    type: int
+    required: false
+    default: 10
+    description: |
+      Brightness (percent of the effect colour) of the unlit background the
+      ripples expand over. Effect local: this is not the keyboard-wide idle
+      brightness, which lives on the &kprgb node as `idle-brightness`.

@@ -1,0 +1,48 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Position-aware WS2812 matrix.
+
+  Every LED carries an (x, y) position in the same units as the
+  zmk,physical-layout (keypaw48: 100 = one key width) plus the key position it
+  sits under. That is what lets effects use real geometry instead of treating
+  the strip as an unnamed line.
+
+compatible: "keypaw,rgb-matrix"
+
+properties:
+  label:
+    type: string
+    required: false
+    deprecated: true
+    description: Ignored; declared only because Zephyr 4.1 rejects undeclared properties.
+
+  strip:
+    type: phandle
+    required: true
+    description: |
+      The LED strip device driving these LEDs. Its chain-length is the single
+      source of truth for the LED count; the "mapping" length must agree with
+      it.
+
+  physical-layout:
+    type: phandle
+    required: true
+    description: |
+      The zmk,physical-layout node whose key attributes are used to place every
+      per-key LED. A "mapping" entry that is a plain integer is treated as a key
+      position into this layout; the LED's (x, y) centre is computed from the
+      key's (x, y, width, height). LEDs not under a key use KP_RGB_NO_KEY(x, y)
+      in the "mapping" instead.
+
+  mapping:
+    type: array
+    required: true
+    description: |
+      Flat array, one entry per LED, in WS2812 chain order. Each entry is
+      either a global key position (0..N-1) whose keycap sits above the LED --
+      its centre is derived from "physical-layout" -- or KP_RGB_NO_KEY(x, y)
+      for an LED not under a key (an edge/underglow LED) carrying explicit (x,
+      y) coordinates in physical-layout units (100 = one key width). Length
+      must equal the chain-length of "strip".

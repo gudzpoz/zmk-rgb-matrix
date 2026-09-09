@@ -1,0 +1,65 @@
+config KEYPAW_RGB_MATRIX
+    bool "Keypaw position-aware RGB matrix"
+    default y
+    depends on DT_HAS_KEYPAW_RGB_MATRIX_ENABLED
+    select LED_STRIP
+    select ZMK_LOW_PRIORITY_WORK_QUEUE
+    help
+      Drives a WS2812 strip with per-key, position-aware effects. The LED
+      geometry (leds/mapping) comes from the keypaw,rgb-matrix devicetree
+      node and the strip itself from its "strip" phandle.
+
+if KEYPAW_RGB_MATRIX
+
+config KEYPAW_RGB_MATRIX_TICK_MS
+    int "Animation tick period (ms)"
+    default 32
+    help
+      Upstream underglow uses 50 ms; 32 ms is noticeably smoother for the
+      reactive and ripple effects. One update costs ~1.5 ms of blocking SPI.
+
+config KEYPAW_RGB_MATRIX_HUE_STEP
+    int "Hue adjustment step"
+    default 10
+
+config KEYPAW_RGB_MATRIX_SAT_STEP
+    int "Saturation adjustment step"
+    default 10
+
+config KEYPAW_RGB_MATRIX_BRT_STEP
+    int "Brightness adjustment step"
+    default 10
+
+config KEYPAW_RGB_MATRIX_DURATION_STEP
+    int "Duration adjustment step (ms)"
+    default 100
+    help
+      Animation "speed" is expressed as a period: a shorter duration animates
+      faster. This is added to (or subtracted from) the active effect's period
+      by the Duration Up/Down commands. An additive step is used because the
+      relative press is resolved to an absolute value on the split central, and
+      adding is exact regardless of the current period.
+
+config KEYPAW_RGB_MATRIX_DURATION_MIN_MS
+    int "Fastest animation period (ms)"
+    default 100
+
+config KEYPAW_RGB_MATRIX_DURATION_MAX_MS
+    int "Slowest animation period (ms)"
+    default 10000
+
+
+config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
+    bool "Turn the matrix off when the keyboard goes idle"
+    default y
+    help
+      Without this the strip might latch at its last color through deep sleep
+      and keeps drawing current.
+
+endif # KEYPAW_RGB_MATRIX
+
+config KEYPAW_BEHAVIOR_RGB_MATRIX
+    bool "RGB matrix control behavior"
+    default y
+    depends on DT_HAS_KEYPAW_BEHAVIOR_RGB_MATRIX_ENABLED
+    select KEYPAW_RGB_MATRIX

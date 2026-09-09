@@ -1,0 +1,22 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+properties:
+  index:
+    type: int
+    required: true
+    description: Unique, stable effect index used on the wire.
+
+  color:
+    type: int
+    required: false
+    default: 0xFFFFFF
+    description: 24-bit RGB preset colour.
+
+  duration:
+    type: int
+    required: false
+    default: 0
+    description: |
+      Animation period in milliseconds; shorter means faster. Zero (the default)
+      takes the &kprgb node's `initial-duration-ms`.
