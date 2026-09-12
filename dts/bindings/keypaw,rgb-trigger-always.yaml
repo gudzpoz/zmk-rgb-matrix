@@ -1,0 +1,11 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Unconditional trigger, for use as the final catch-all: list it last so it
+  fires whenever no earlier trigger matched. Nothing enforces that ordering --
+  placed early it would shadow every trigger after it.
+
+compatible: "keypaw,rgb-trigger-always"
+
+include: ["keypaw,rgb-trigger-common.yaml"]

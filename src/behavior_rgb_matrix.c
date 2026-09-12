@@ -50,19 +50,30 @@ struct kp_rgb_tuning kp_rgb_tuning = {
 static const struct device *kp_effects[KP_RGB_NEFFECTS];
 static size_t effect_index;
 
+/* Effects excluded from RGB_EFF/EFR cycling, indexed by effect index (which the
+ * registry BUILD_ASSERT pins to the child position). Device presence is not
+ * enough: a `no-cycle` effect is registered and selectable by index, it just
+ * never shows up while cycling. */
+#define KP_RGB_NO_CYCLE_ONE(node_id) DT_PROP(node_id, no_cycle),
+static const uint8_t kp_effect_no_cycle[] = {
+  DT_FOREACH_CHILD(KP_RGB_BEHAVIOR, KP_RGB_NO_CYCLE_ONE)};
+
+static bool kp_effect_cyclable(size_t index) {
+  return kp_effects[index] != NULL && !kp_effect_no_cycle[index];
+}
+
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta) {
   int16_t norm_delta = delta % (int16_t)KP_RGB_NEFFECTS;
   uint16_t start = (current + norm_delta + KP_RGB_NEFFECTS) % KP_RGB_NEFFECTS;
 
-  const struct device *fx = kp_effects[start];
-  if (fx != NULL) {
+  if (kp_effect_cyclable(start)) {
     return start;
   }
 
   int direction = (delta < 0) ? -1 : 1;
   for (int i = 1; i < KP_RGB_NEFFECTS; i++) {
     size_t index = (start + (i * direction) + KP_RGB_NEFFECTS) % KP_RGB_NEFFECTS;
-    if (kp_effects[index] != NULL) {
+    if (kp_effect_cyclable(index)) {
       return index;
     }
   }

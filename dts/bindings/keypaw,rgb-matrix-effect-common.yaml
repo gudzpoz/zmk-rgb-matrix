@@ -34,3 +34,10 @@ properties:
     description: |
       Draw no indicators at all for this effect. Only meaningful for effects that
       would otherwise inherit the matrix-wide list.
+
+  no-cycle:
+    type: boolean
+    description: |
+      Skip this effect when cycling with RGB_EFF/RGB_EFR. Explicit selection still
+      works (RGB_EFS, a trigger, `initial-effect`). Use on variants that are only
+      meant to be reached from a trigger, so they do not clutter the cycle.

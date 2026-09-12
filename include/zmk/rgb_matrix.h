@@ -16,6 +16,7 @@
 
 #include <zmk/behavior.h>
 #include <zmk/event_manager.h>
+#include <zmk/keymap.h>
 #include <drivers/behavior.h>
 
 /* The engine's devicetree node. Effects are separate device instances (their own
@@ -312,6 +313,66 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
   DEVICE_DT_DEFINE(DT_DRV_INST(inst), cfg_inst##_init, NULL, &cfg_inst##_data, \
                    &cfg_inst##_cfg, POST_KERNEL,                               \
                    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
+
+/* -------------------------------------------------------------------------
+ * Triggers
+ *
+ * A trigger is a non-behavior device holding a condition plus the `&kprgb`
+ * bindings to invoke when that condition wins. Triggers are the children of a
+ * keypaw,rgb-trigger-table node, and their declaration order is their
+ * precedence: the first trigger whose condition is active wins, and its
+ * bindings run only when the winner changes. That edge behaviour is what lets a
+ * manual RGB_EFF/RGB_EFS survive until the mapping actually changes, and stops
+ * relative commands (RGB_HUI, RGB_BRI, ...) from re-firing on unrelated layer
+ * events.
+ *
+ * The table cannot be &kprgb itself (its children are the effect registry) and
+ * cannot hold a phandle list of its own children (a node depends on its parent,
+ * so that is a devicetree cycle), hence the separate node and declaration
+ * order.
+ *
+ * Evaluation needs the keymap, so it runs on the split central only; the
+ * emitted commands still reach both halves because &kprgb is
+ * BEHAVIOR_LOCALITY_GLOBAL.
+ * ------------------------------------------------------------------------- */
+
+struct kp_rgb_trigger_api {
+  bool (*active)(const struct device *dev);
+};
+
+/* Kind-agnostic part of a trigger's config; must be its first member. */
+struct kp_rgb_trigger_common_config {
+  const struct zmk_behavior_binding *bindings;
+  size_t bindings_len;
+};
+
+/* Declare the binding array for one trigger instance. The property must be
+ * named `bindings`: ZMK_KEYMAP_EXTRACT_BINDING hardcodes it, and each element
+ * carries the target behavior's cells (two, for &kprgb). */
+#define KP_RGB_TRIGGER_BINDING_ARRAY(inst, cfg_inst)                           \
+  static const struct zmk_behavior_binding cfg_inst##_bindings[] = {           \
+      LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), bindings),                        \
+              ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(inst))}
+
+/* Member-wise initializer for the common part of a kind's config. */
+#define KP_RGB_TRIGGER_COMMON(node_id, cfg_inst)                               \
+  {.bindings = cfg_inst##_bindings, .bindings_len = DT_PROP_LEN(node_id, bindings)}
+
+/* Declare the device. Triggers carry no mutable state, so they pass no data
+ * pointer and need no init function. */
+#define KP_RGB_TRIGGER_DEFINE(inst, active_fn, cfg_inst)                       \
+  BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
+                       sizeof(struct kp_rgb_trigger_common_config) &&          \
+                   (const void *)&cfg_inst##_cfg ==                            \
+                       (const void *)&cfg_inst##_cfg.common,                   \
+               "trigger config must embed "                                    \
+               "struct kp_rgb_trigger_common_config as the first field");      \
+  static const struct kp_rgb_trigger_api cfg_inst##_api = {                    \
+      .active = active_fn,                                                     \
+  };                                                                           \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL, &cfg_inst##_cfg,       \
+                   POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,           \
+                   &cfg_inst##_api)
 
 int zmk_rgb_matrix_toggle(void);
 int zmk_rgb_matrix_on(void);

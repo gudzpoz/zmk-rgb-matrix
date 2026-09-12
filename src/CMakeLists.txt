@@ -24,3 +24,10 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   effects/reactive.c
   effects/ripple.c
 )
+
+# Trigger table: central-only, because its conditions read keymap layer state.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_TRIGGERS
+  rgb_triggers.c
+  triggers/layer.c
+  triggers/always.c
+)

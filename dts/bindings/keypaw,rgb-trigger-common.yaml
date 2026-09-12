@@ -1,0 +1,19 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+# Shared properties for every RGB matrix trigger. Trigger kinds (cores in this
+# module or in a third-party one) include this fragment and add only the
+# properties describing the condition, the same way indicators include
+# keypaw,rgb-indicator-common.yaml.
+
+properties:
+  bindings:
+    type: phandle-array
+    required: true
+    description: |
+      Commands to invoke, in order, when this trigger becomes the winning one.
+      Each element is a full behavior binding, normally targeting &kprgb, e.g.
+      `bindings = <&kprgb RGB_EFS_CMD 7>;`. Relative commands (RGB_HUI, RGB_BRI,
+      ...) are resolved to absolute values on the central before being sent, so
+      both halves converge. Keep the list short: each command is one packet per
+      peripheral half.

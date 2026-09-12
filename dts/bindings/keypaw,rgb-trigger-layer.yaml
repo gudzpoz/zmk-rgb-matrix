@@ -1,0 +1,20 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Layer trigger: matches while a given keymap layer is active. Because the first
+  matching trigger in the keypaw,rgb-trigger-table wins, the declaration order
+  of the table's children -- not this node -- is what resolves precedence when
+  several layers are held at once.
+
+compatible: "keypaw,rgb-trigger-layer"
+
+include: ["keypaw,rgb-trigger-common.yaml"]
+
+properties:
+  layer:
+    type: int
+    required: true
+    description: |
+      Layer id this trigger watches. This is a layer id, not an index, matching
+      the `layer` property of keypaw,rgb-indicator-layer.

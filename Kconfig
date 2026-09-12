@@ -83,3 +83,17 @@ config KEYPAW_BEHAVIOR_RGB_MATRIX
     default y
     depends on DT_HAS_KEYPAW_BEHAVIOR_RGB_MATRIX_ENABLED
     select KEYPAW_RGB_MATRIX
+
+config KEYPAW_RGB_TRIGGERS
+    bool "RGB matrix trigger table"
+    default y
+    depends on KEYPAW_BEHAVIOR_RGB_MATRIX
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    help
+      Ordered condition -> RGB command rules, declared as `triggers = <...>;` on
+      the behavior node. The first trigger whose condition is active wins, and
+      its bindings run when the winner changes.
+
+      Built for the split central only: conditions read keymap layer state,
+      which does not exist on a peripheral. The commands still reach both halves
+      because the behavior is BEHAVIOR_LOCALITY_GLOBAL.
