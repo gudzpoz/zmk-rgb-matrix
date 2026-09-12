@@ -122,6 +122,23 @@ static struct led_rgb pixels[KP_LED_COUNT];
 static uint32_t last_tick;
 static struct k_mutex kp_rgb_lock;
 
+/* A devicetree array cannot be empty, so "this effect wants no indicators" is
+ * expressed by pointing at this zero-length list instead. */
+const struct device *const kp_rgb_no_indicators[1] = {NULL};
+
+/* Indicators composited over every effect, in paint order, unless the active
+ * effect overrides the list. */
+COND_CODE_1(DT_NODE_HAS_PROP(KP_RGB_NODE, indicators),
+            (static const struct device *const kp_rgb_indicators[] = {
+                 LISTIFY(DT_PROP_LEN(KP_RGB_NODE, indicators),
+                         KP_RGB_INDICATORS_AT_IDX, (,), KP_RGB_NODE)};),
+            ())
+static const struct device *const *const kp_rgb_default_indicators =
+    COND_CODE_1(DT_NODE_HAS_PROP(KP_RGB_NODE, indicators), (kp_rgb_indicators),
+                (kp_rgb_no_indicators));
+static const size_t kp_rgb_default_indicator_count =
+    DT_PROP_LEN_OR(KP_RGB_NODE, indicators, 0);
+
 #define KP_TRY_LOCK() k_mutex_lock(&kp_rgb_lock, K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS))
 
 void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
@@ -173,6 +190,17 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     const struct kp_rgb_effect_api *api =
       (const struct kp_rgb_effect_api *)kp_rgb_state.active_fx->api;
     api->render(kp_rgb_state.active_fx, &frame);
+
+    /* An effect may replace the matrix-wide list, or ask for none at all. */
+    const struct device *const *indicators =
+      api->indicators != NULL ? api->indicators : kp_rgb_default_indicators;
+    size_t count =
+      api->indicators != NULL ? api->indicators_len : kp_rgb_default_indicator_count;
+    for (size_t i = 0; i < count; i++) {
+      const struct kp_rgb_indicator_api *ind =
+        (const struct kp_rgb_indicator_api *)indicators[i]->api;
+      ind->render(indicators[i], &frame);
+    }
   }
   k_mutex_unlock(&kp_rgb_lock);
 

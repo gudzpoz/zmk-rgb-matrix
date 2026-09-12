@@ -46,3 +46,11 @@ properties:
       for an LED not under a key (an edge/underglow LED) carrying explicit (x,
       y) coordinates in physical-layout units (100 = one key width). Length
       must equal the chain-length of "strip".
+
+  indicators:
+    type: phandles
+    required: false
+    description: |
+      Indicators composited over the active effect, in the order listed: later
+      entries win where they overlap. An effect may replace this list for itself
+      with `indicators` on its own node, or opt out with `no-indicators`.

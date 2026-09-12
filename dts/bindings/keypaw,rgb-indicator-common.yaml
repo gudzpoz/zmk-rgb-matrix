@@ -1,0 +1,38 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+# Shared properties for every RGB matrix indicator. Indicator kinds (cores in this
+# module or in a third-party one) include this fragment and add only the
+# properties specific to the state they show, the same way effects include
+# keypaw,rgb-matrix-effect-common.yaml.
+
+properties:
+  keys:
+    type: array
+    required: false
+    description: |
+      Key positions in the zmk,physical-layout whose LEDs this indicator paints.
+      Resolved through the same mapping the effects use, so one list works on
+      both halves. With neither `keys` nor `leds` given, every LED of the half is
+      targeted.
+
+  leds:
+    type: array
+    required: false
+    description: |
+      Raw WS2812 chain indices, for LEDs that are not under a key (the
+      KP_RGB_NO_KEY entries in `mapping`).
+
+  color:
+    type: int
+    required: false
+    default: 0xFFFFFF
+    description: 24-bit RGB painted onto the targeted LEDs.
+
+  brightness:
+    type: int
+    required: false
+    default: 100
+    description: |
+      Paint strength in percent: 100 replaces the effect's pixels on the targeted
+      LEDs, lower values mix the indicator colour over them.

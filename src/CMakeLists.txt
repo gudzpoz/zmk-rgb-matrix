@@ -8,6 +8,11 @@ zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX rgb_matrix.c rgb_utils.c)
 
+# Indicators are gated by their own DT-presence-derived Kconfig, so a device
+# always exists for every node that references one.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_INDICATOR_CAPS_LOCK indicators/caps_lock.c)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_INDICATOR_LAYER indicators/layer.c)
+
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   # controller
   behavior_rgb_matrix.c

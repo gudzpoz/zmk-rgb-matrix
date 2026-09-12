@@ -68,6 +68,55 @@ struct led_rgb kp_rgb_rgb_scale(struct led_rgb rgb, uint8_t pct) {
   };
 }
 
+struct led_rgb kp_rgb_rgb_mix(struct led_rgb base, struct led_rgb over, uint8_t pct) {
+  pct = MIN(pct, 100);
+  return (struct led_rgb){
+      .r = (uint8_t)(base.r + ((int32_t)over.r - (int32_t)base.r) * pct / 100),
+      .g = (uint8_t)(base.g + ((int32_t)over.g - (int32_t)base.g) * pct / 100),
+      .b = (uint8_t)(base.b + ((int32_t)over.b - (int32_t)base.b) * pct / 100),
+  };
+}
+
+size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
+                              const uint32_t *leds, size_t leds_len, size_t *out,
+                              size_t out_max) {
+  size_t n = 0;
+
+  for (size_t i = 0; i < keys_len && n < out_max; i++) {
+    size_t led = kp_rgb_led_for_position(keys[i]);
+    if (led != SIZE_MAX) {
+      out[n++] = led;
+    }
+  }
+
+  for (size_t i = 0; i < leds_len && n < out_max; i++) {
+    if (leds[i] < KP_LED_COUNT) {
+      out[n++] = leds[i];
+    }
+  }
+
+  /* Neither spec given means the whole half; an explicit spec that resolves to
+   * nothing stays empty rather than silently lighting everything. */
+  if (keys_len == 0 && leds_len == 0) {
+    for (size_t i = 0; i < KP_LED_COUNT && n < out_max; i++) {
+      out[n++] = i;
+    }
+  }
+
+  return n;
+}
+
+void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
+                            size_t led_count, struct led_rgb color, uint8_t strength) {
+  struct led_rgb painted = kp_rgb_rgb_scale(color, kp_rgb_brightness_pct(frame));
+
+  for (size_t i = 0; i < led_count; i++) {
+    if (leds[i] < frame->count) {
+      frame->pixels[leds[i]] = kp_rgb_rgb_mix(frame->pixels[leds[i]], painted, strength);
+    }
+  }
+}
+
 struct kp_rgb_hsb kp_rgb_hex_to_hsb(uint32_t hex) {
   uint32_t r = (hex >> 16) & 0xFF;
   uint32_t g = (hex >> 8) & 0xFF;
