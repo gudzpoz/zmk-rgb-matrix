@@ -14,17 +14,25 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_INDICATOR_CAPS_LOCK indicators/ca
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_INDICATOR_LAYER indicators/layer.c)
 
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
-  # controller
+  # controller and effect persistence
   behavior_rgb_matrix.c
-  # effect persistence
   rgb_settings.c
-  # built-in effects
+  # global oscillators and static fields
   effects/solid.c
   effects/breathe.c
   effects/spectrum.c
-  effects/swirl.c
+  effects/static.c
+  # reactive fields
   effects/reactive.c
   effects/ripple.c
+  # moving spatial fields
+  effects/rainbow.c
+  effects/band.c
+  # stochastic fields
+  effects/rain.c
+  effects/starlight.c
+  effects/heatmap.c
+  effects/digital_rain.c
 )
 
 # Trigger table: central-only, because its conditions read keymap layer state.

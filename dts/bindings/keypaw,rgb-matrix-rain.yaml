@@ -1,0 +1,21 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Randomly lit keys with random colours, covering QMK's PIXEL_RAIN, PIXEL_FLOW,
+  RAINDROPS, JELLYBEAN_RAINDROPS and PIXEL_FRACTAL via the `mode` attribute.
+compatible: "keypaw,rgb-matrix-rain"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  mode:
+    type: string
+    required: false
+    default: "pixel"
+    enum: ["pixel", "flow", "drops", "jellybean", "fractal"]
+    description: |
+      "pixel"/"drops" light random keys with random hues (PIXEL_RAIN /
+      RAINDROPS), "jellybean" also randomises saturation (JELLYBEAN_RAINDROPS),
+      "flow" runs a cursor along the LED chain with random hues (PIXEL_FLOW), and
+      "fractal" pulses a single hue outward from the board centre
+      (PIXEL_FRACTAL).

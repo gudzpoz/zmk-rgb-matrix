@@ -58,6 +58,7 @@ static const uint32_t kp_map[KP_LED_COUNT] = DT_PROP(KP_RGB_NODE, mapping);
  * effects through the frame and kp_rgb_led_coord(). */
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
 static uint16_t kp_rgb_board_length;
+static uint16_t kp_rgb_board_height;
 /* Key index to LED index mapping */
 static size_t kp_key_to_led[KP_NKEYS];
 
@@ -102,7 +103,9 @@ static void kp_resolve_layout(const struct zmk_physical_layout *layout) {
 
   /* Never 0 to save some effects from zero division. */
   kp_rgb_board_length = MAX((uint16_t)MAX(max_x - min_x, max_y - min_y), 100);
-  LOG_DBG("RGB matrix half extent %u layout units", kp_rgb_board_length);
+  kp_rgb_board_height = MAX((uint16_t)(max_y - min_y), 100);
+  LOG_DBG("RGB matrix half extent %u x %u layout units", kp_rgb_board_length,
+          kp_rgb_board_height);
 }
 
 size_t kp_rgb_led_for_position(uint32_t position) {
@@ -178,6 +181,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     .pixels = pixels,
     .elapsed = elapsed,
     .board_length = kp_rgb_board_length,
+    .board_height = kp_rgb_board_height,
     .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
   };
 

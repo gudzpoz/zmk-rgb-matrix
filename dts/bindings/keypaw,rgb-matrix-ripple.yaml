@@ -11,6 +11,6 @@ properties:
     required: false
     default: 10
     description: |
-      Brightness (percent of the effect colour) of the unlit background the
-      ripples expand over. Effect local: this is not the keyboard-wide idle
+      Brightness (0..100 percent of the effect colour) of the unlit background
+      the ripples expand over. Effect local: this is not the keyboard-wide idle
       brightness, which lives on the &kprgb node as `idle-brightness`.

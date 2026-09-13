@@ -1,7 +1,8 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Reactive keypress fade RGB matrix effect.
+description: Reactive keypress-fade RGB matrix effect, extended with spread shapes
+  and a gradient palette (SOLID_REACTIVE_* / *_CROSS / *_NEXUS / SPLASH families).
 compatible: "keypaw,rgb-matrix-reactive"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
 
@@ -11,6 +12,42 @@ properties:
     required: false
     default: 10
     description: |
-      Brightness (percent of the effect colour) of an LED whose key is not
-      pressed. Effect local: this is not the keyboard-wide idle brightness,
+      Brightness (0..100 percent of the effect colour) of an LED whose key is
+      not pressed. Effect local: this is not the keyboard-wide idle brightness,
       which lives on the &kprgb node as `idle-brightness`.
+
+  spread:
+    type: string
+    required: false
+    default: "point"
+    enum: ["point", "disc", "cross", "nexus"]
+    description: |
+      Shape around the pressed key that lights up. "point" lights only the key
+      (SOLID_REACTIVE_SIMPLE/_REACTIVE). "disc" lights a radius around it
+      (SOLID_REACTIVE_WIDE). "cross" lights its row and column
+      (SOLID_REACTIVE_CROSS). "nexus" lights everything except the row/column,
+      fading with distance (SOLID_REACTIVE_NEXUS).
+
+  spread-radius:
+    type: int
+    required: false
+    default: 250
+    description: |
+      Falloff radius for "disc" and "nexus", in the same physical-layout units
+      as the LEDs (100 = one key width).
+
+  multi:
+    type: boolean
+    required: false
+    description: |
+      Accumulate several simultaneous keypresses instead of tracking only the
+      most recent one (SOLID_REACTIVE_MULTIWIDE / _MULTICROSS / _MULTINEXUS).
+
+  palette:
+    type: string
+    required: false
+    default: "solid"
+    enum: ["solid", "gradient"]
+    description: |
+      "solid" (default) pulses with the effect's single hue. "gradient" paints
+      each lit LED with a position-based hue (SPLASH / MULTISPLASH families).

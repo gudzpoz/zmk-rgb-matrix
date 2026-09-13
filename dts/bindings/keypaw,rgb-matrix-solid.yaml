@@ -1,6 +1,18 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Static single-colour RGB matrix effect.
+description: Static single-colour RGB matrix effect (SOLID_COLOR), extended with a
+  static gradient mode (GRADIENT_UP_DOWN / GRADIENT_LEFT_RIGHT).
 compatible: "keypaw,rgb-matrix-solid"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  axis:
+    type: string
+    required: false
+    default: "none"
+    enum: ["none", "vertical", "horizontal"]
+    description: |
+      "none" (default) is a flat single colour. "vertical" sweeps the hue across
+      the board's y axis (GRADIENT_UP_DOWN); "horizontal" sweeps across x
+      (GRADIENT_LEFT_RIGHT). The preset hue sets the start of the sweep.

@@ -19,6 +19,9 @@
 #include <zmk/keymap.h>
 #include <drivers/behavior.h>
 
+#include <zephyr/devicetree.h>
+#include <zephyr/sys/util_macro.h>
+
 /* The engine's devicetree node. Effects are separate device instances (their own
  * DT_DRV_COMPAT), so they cannot use DT_DRV_INST() to reach the strip: an
  * effect's own DT_DRV_INST(0) would resolve to the effect node. Spell the
@@ -82,6 +85,40 @@ struct kp_rgb_hsb {
 
 struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
 
+/* -------------------------------------------------------------------------
+ * Devicetree string-enum -> C enum helpers
+ *
+ * Usage (inside an effect .c, after `#define DT_DRV_COMPAT ...`):
+ *
+ *     DEFINE_DT_ENUM(axis, none, vertical, horizontal);
+ *
+ * The value list is the enum values in the binding YAML. The DT value is
+ * converted into this enum with:
+ *
+ *     .axis = CONV_DT_ENUM(inst, axis),
+ *
+ * and compared in render code either against the bare constant or via
+ * DT_ENUM_CONST, which keeps the property name for readability:
+ *
+ *     if (cfg->axis == DT_ENUM_CONST(axis, vertical)) { ... }
+ * ------------------------------------------------------------------------- */
+
+#define KP_ENUM_ENTRY(idx, val, prop)                                          \
+  CONCAT(DT_DRV_COMPAT, _, prop, _, val) = idx
+/* Define an enum with device-tree string enum values. */
+#define DEFINE_DT_ENUM(prop, ...)                                              \
+  typedef enum {                                                               \
+    FOR_EACH_IDX_FIXED_ARG(KP_ENUM_ENTRY, (, ), prop, __VA_ARGS__),            \
+  } CONCAT(prop, _t)
+
+/* Resolve an instance's property to its named constant. */
+#define CONV_DT_ENUM(inst, prop)                                              \
+  CONCAT(DT_DRV_COMPAT, _, prop, _, DT_STRING_TOKEN(DT_DRV_INST(inst), prop))
+
+/* Resolve a DT enum name to its named constant. */
+#define DT_ENUM_CONST(prop, val) CONCAT(DT_DRV_COMPAT, _, prop, _, val)
+
+
 /* Brightness helpers. Effects render at full scale and then dim the result, so
  * that a single global brightness setting applies uniformly.
  */
@@ -131,6 +168,10 @@ struct kp_rgb_frame {
   uint32_t elapsed;
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
+  /* Vertical extent of this half's LEDs (max y - min y), in layout units
+   * (never 0). Needed by vertical-basis effects (gradient up/down, cycle up/down,
+   * chevron, radial extent). */
+  uint16_t board_height;
   /* The keyboard is not ZMK_ACTIVITY_ACTIVE. */
   bool is_idle;
 };

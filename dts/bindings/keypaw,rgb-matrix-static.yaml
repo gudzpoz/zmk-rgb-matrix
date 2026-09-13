@@ -1,0 +1,20 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Static per-LED colour map: each LED is painted with a colour from the
+  `led-colors` array, indexed by LED chain index. A superset of QMK's
+  ALPHAS_MODS (just assign different colours to alpha vs modifier keys) and any
+  other fixed per-key art.
+compatible: "keypaw,rgb-matrix-static"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  led-colors:
+    type: array
+    required: false
+    default: [ ]
+    description: |
+      List of 24-bit RGB values, one per LED, indexed by the LED's position in
+      the strip chain (0 = first LED). LEDs beyond the list length are left off.
+      The list length must not exceed the number of LEDs.

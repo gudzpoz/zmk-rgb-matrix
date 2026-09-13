@@ -1,0 +1,46 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Per-key heat map of recent keypresses, decaying over time. Port of QMK's
+  TYPING_HEATMAP.
+compatible: "keypaw,rgb-matrix-heatmap"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  decrease-delay-ms:
+    type: int
+    required: false
+    default: 25
+    description: |
+      How many milliseconds of inactivity before one "shade" of heat is lost.
+      Must be nonnegative and fit the effect's unsigned storage.
+
+  spread:
+    type: int
+    required: false
+    default: 40
+    description: |
+      Nonnegative layout-unit radius over which a press heats neighbouring keys.
+
+  area-limit:
+    type: int
+    required: false
+    default: 16
+    description: |
+      Nonnegative cap on the heat a neighbouring key receives from a single
+      press.
+
+  increase-step:
+    type: int
+    required: false
+    default: 32
+    description: |
+      Nonnegative shades of heat added per keypress (lower = more keystrokes to
+      reach full).
+
+  slim:
+    type: boolean
+    required: false
+    description: |
+      Only heat the pressed key itself, not its neighbours.

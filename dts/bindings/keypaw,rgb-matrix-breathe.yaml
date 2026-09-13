@@ -1,6 +1,22 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Brightness breathing RGB matrix effect.
+description: Brightness breathing RGB matrix effect (BREATHING), extended with
+  position-offset "river" flow (RIVERFLOW) and hue variants (HUE_BREATHING,
+  HUE_PENDULUM, HUE_WAVE).
 compatible: "keypaw,rgb-matrix-breathe"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  mode:
+    type: string
+    required: false
+    default: "brightness"
+    enum: ["brightness", "river", "hue", "pendulum", "wave"]
+    description: |
+      "brightness" (default) fades the whole board up and down (BREATHING).
+      "river" offsets the fade by each LED's x position so the pulse travels
+      across the board (RIVERFLOW). "hue" oscillates a small hue offset while
+      brightness stays put (HUE_BREATHING). "pendulum" moves that offset across
+      x and reverses direction (HUE_PENDULUM). "wave" rolls the offset
+      continuously in the opposite direction (HUE_WAVE).

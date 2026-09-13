@@ -13,8 +13,12 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
+/* none = SOLID_COLOR, vertical = GRADIENT_UP_DOWN, horizontal = GRADIENT_LEFT_RIGHT. */
+DEFINE_DT_ENUM(axis, none, vertical, horizontal);
+
 struct kp_eff_solid_config {
   struct kp_rgb_effect_common_config common;
+  axis_t axis; /* enum keypaw_rgb_matrix_solid_axis */
 };
 struct kp_eff_solid_data {
   struct kp_rgb_effect_common_data common;
@@ -22,17 +26,36 @@ struct kp_eff_solid_data {
 
 static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f) {
   const struct kp_eff_solid_data *data = dev->data;
-  struct led_rgb rgb =
-      kp_rgb_rgb_scale(kp_rgb_hsb_to_rgb(data->common.color), kp_rgb_brightness_pct(f));
+  const struct kp_eff_solid_config *cfg = dev->config;
+  struct kp_rgb_hsb base = data->common.color;
+  uint8_t pct = kp_rgb_brightness_pct(f);
 
+  if (cfg->axis == DT_ENUM_CONST(axis, none)) {
+    struct led_rgb rgb =
+        kp_rgb_rgb_scale(kp_rgb_hsb_to_rgb(base), pct);
+    for (size_t i = 0; i < f->count; i++) {
+      f->pixels[i] = rgb;
+    }
+    return;
+  }
+
+  /* Gradient: the hue sweeps the full wheel across one board axis. */
+  uint16_t span = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->board_height
+                                                             : f->board_length;
+  span = MAX(span, 1u);
   for (size_t i = 0; i < f->count; i++) {
-    f->pixels[i] = rgb;
+    uint32_t pos = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->coords[i].y
+                                                              : f->coords[i].x;
+    struct kp_rgb_hsb hsb = base;
+    hsb.h = (uint16_t)((base.h + pos * KP_RGB_HUE_MAX / span) % KP_RGB_HUE_MAX);
+    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
 }
 
 #define KP_EFF_SOLID_DEFINE(inst)                                              \
   static const struct kp_eff_solid_config kp_eff_solid_##inst##_cfg = {        \
       .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .axis = CONV_DT_ENUM(inst, axis),                                        \
   };                                                                           \
   static struct kp_eff_solid_data kp_eff_solid_##inst##_data = {               \
       .common =                                                                \

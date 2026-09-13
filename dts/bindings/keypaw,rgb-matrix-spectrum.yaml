@@ -1,6 +1,7 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Full-spectrum hue-cycle RGB matrix effect.
+description: Full-spectrum hue-cycle RGB matrix effect (CYCLE_ALL). Every LED
+  shares the same global hue phase.
 compatible: "keypaw,rgb-matrix-spectrum"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]

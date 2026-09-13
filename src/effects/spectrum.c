@@ -26,19 +26,18 @@ struct kp_eff_spectrum_data {
   uint32_t phase_ms;
 };
 
+/* CYCLE_ALL: every LED shares the same hue cycle. */
+
 static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame *f) {
   struct kp_eff_spectrum_data *data = dev->data;
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = data->phase_ms % period;
-  struct kp_rgb_hsb base = data->common.color;
+  struct kp_rgb_hsb hsb = data->common.color;
+  uint8_t pct = kp_rgb_brightness_pct(f);
 
-  struct kp_rgb_hsb hsb = {
-      .h = (uint16_t)((base.h + phase * KP_RGB_HUE_MAX / period) % KP_RGB_HUE_MAX),
-      .s = KP_RGB_SAT_MAX,
-      .b = base.b,
-  };
-  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, kp_rgb_brightness_pct(f)));
-
+  hsb.h = (uint16_t)((hsb.h + phase * KP_RGB_HUE_MAX / period) % KP_RGB_HUE_MAX);
+  hsb.s = KP_RGB_SAT_MAX;
+  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   for (size_t i = 0; i < f->count; i++) {
     f->pixels[i] = rgb;
   }

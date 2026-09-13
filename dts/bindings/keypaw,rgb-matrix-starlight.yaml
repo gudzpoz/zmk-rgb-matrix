@@ -1,0 +1,29 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  LEDs turn on and off at random at varying brightness, keeping the user colour
+  (with optional hue/sat jitter). Covers QMK's STARLIGHT, STARLIGHT_SMOOTH,
+  STARLIGHT_DUAL_HUE and STARLIGHT_DUAL_SAT.
+compatible: "keypaw,rgb-matrix-starlight"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  smooth:
+    type: boolean
+    required: false
+    description: |
+      Ramp brightness up and down instead of switching instantly
+      (STARLIGHT_SMOOTH).
+
+  dual-hue:
+    type: boolean
+    required: false
+    description: |
+      Jitter each lit LED's hue by +/-30 (STARLIGHT_DUAL_HUE).
+
+  dual-sat:
+    type: boolean
+    required: false
+    description: |
+      Jitter each lit LED's saturation by +/-30 (STARLIGHT_DUAL_SAT).

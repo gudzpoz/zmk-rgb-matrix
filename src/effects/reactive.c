@@ -14,13 +14,22 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/sys/util.h>
 
 #include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_matrix_math.h>
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
+
+/* spread: point = key only, disc = filled circle, cross = row+column,
+ * nexus = everything but the cross lines. */
+/* palette: solid = user hue, gradient = position-based hue. */
+DEFINE_DT_ENUM(spread, point, disc, cross, nexus);
+DEFINE_DT_ENUM(palette, solid, gradient);
 
 struct kp_eff_reactive_config {
   /* Must embed the common config as its first member. */
@@ -28,12 +37,53 @@ struct kp_eff_reactive_config {
   /* Unlit-LED brightness relative to the effect colour, in percent. Effect
    * local on purpose: it is not the keyboard-wide idle brightness. */
   uint8_t background_brightness;
+  spread_t spread;
+  uint16_t radius; /* layout units, for disc/nexus falloff */
+  bool multi;      /* accumulate several presses vs. just the latest */
+  palette_t palette;
 };
 
 struct kp_eff_reactive_data {
   struct kp_rgb_effect_common_data common;
   uint8_t levels[KP_LED_COUNT];
 };
+
+
+/* Contribution (0..255) of a key hit at (px, py) onto an LED at (x, y). */
+static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
+                                 uint16_t px, uint16_t py, uint16_t x, uint16_t y) {
+  int32_t dx = (int32_t)x - px;
+  int32_t dy = (int32_t)y - py;
+
+  switch (cfg->spread) {
+  case DT_ENUM_CONST(spread, disc): { /* disc: filled circle, brightness falls off to the radius */
+    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
+    int32_t r = cfg->radius;
+    if ((int32_t)dist >= r) {
+      return 0;
+    }
+    return (uint8_t)(255u * (r - (int32_t)dist) / r);
+  }
+  case DT_ENUM_CONST(spread, cross): { /* cross: same column or row as the pressed key */
+    uint16_t tol = 100; /* ~ one key width in layout units */
+    return (abs(dx) <= (int32_t)tol || abs(dy) <= (int32_t)tol) ? 255 : 0;
+  }
+  case DT_ENUM_CONST(spread, nexus): { /* nexus: everything except the cross lines, radial falloff */
+    uint16_t tol = 100;
+    if (abs(dx) <= (int32_t)tol || abs(dy) <= (int32_t)tol) {
+      return 0;
+    }
+    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
+    int32_t r = cfg->radius;
+    if ((int32_t)dist >= r) {
+      return 0;
+    }
+    return (uint8_t)(255u * (r - (int32_t)dist) / r);
+  }
+  default: /* point */
+    return (dx == 0 && dy == 0) ? 255 : 0;
+  }
+}
 
 static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame *f) {
   struct kp_eff_reactive_data *data = dev->data;
@@ -43,11 +93,16 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
+  uint16_t span = MAX(f->board_length, 1u);
 
   for (size_t i = 0; i < f->count; i++) {
     uint8_t level = data->levels[i];
-    struct kp_rgb_hsb hsb = base;
-
+    uint16_t hue = base.h;
+    if (cfg->palette == DT_ENUM_CONST(palette, gradient)) {
+      hue = (uint16_t)((base.h + (uint32_t)f->coords[i].x * KP_RGB_HUE_MAX / span) %
+                       KP_RGB_HUE_MAX);
+    }
+    struct kp_rgb_hsb hsb = {.h = hue, .s = base.s};
     hsb.b = MAX((uint8_t)((uint32_t)base.b * level / 255u), floor_b);
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
 
@@ -62,16 +117,45 @@ static void kp_eff_reactive_event(const struct device *dev, const zmk_event_t *e
     return;
   }
 
+  struct kp_eff_reactive_data *data = dev->data;
+  const struct kp_eff_reactive_config *cfg = dev->config;
   size_t led = kp_rgb_led_for_position(ev->position);
-  if (led != SIZE_MAX) {
-    ((struct kp_eff_reactive_data *)dev->data)->levels[led] = 255;
+  const struct kp_rgb_coord *origin = kp_rgb_led_coord(led);
+  if (origin == NULL) {
+    return;
+  }
+
+  /* Single-press modes reset every LED first so only the latest hit is live;
+   * multi-press modes accumulate several hits additively. */
+  if (!cfg->multi) {
+    memset(data->levels, 0, sizeof(data->levels));
+  }
+  for (size_t i = 0; i < KP_LED_COUNT; i++) {
+    const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
+    if (c == NULL) {
+      continue;
+    }
+    uint8_t contrib = kp_reactive_shape(cfg, origin->x, origin->y, c->x, c->y);
+    if (contrib == 0) {
+      continue;
+    }
+    if (cfg->multi) {
+      data->levels[i] = MIN(255u, (uint32_t)data->levels[i] + contrib);
+    } else {
+      data->levels[i] = contrib;
+    }
   }
 }
 
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
       .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
-      .background_brightness = DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), \
+      .background_brightness = (uint8_t)CLAMP(                                \
+          DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),  \
+      .spread = CONV_DT_ENUM(inst, spread),                                   \
+      .radius = DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250),             \
+      .multi = DT_PROP_OR(DT_DRV_INST(inst), multi, 0),                        \
+      .palette = CONV_DT_ENUM(inst, palette),                                  \
   };                                                                           \
   static struct kp_eff_reactive_data kp_eff_reactive_##inst##_data = {         \
       .common =                                                                \

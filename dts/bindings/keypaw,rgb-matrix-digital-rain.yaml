@@ -1,0 +1,13 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Matrix-style falling columns: each LED is binned into a column by its layout x,
+  and a head falls down each column leaving a fading green (or preset-hue) tail.
+  Ported from QMK's DIGITAL_RAIN.
+
+  `color` and `duration` are inherited from the common effect binding. Set `color`
+  on the node for a non-green hue; `duration` controls fall speed (shorter is
+  faster). Defaults are applied in the effect's C define.
+compatible: "keypaw,rgb-matrix-digital-rain"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]

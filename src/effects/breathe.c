@@ -16,26 +16,89 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
+/* brightness = BREATHING (whole-board fade), river = RIVERFLOW (x-offset
+ * pulse), hue = HUE_BREATHING, pendulum = HUE_PENDULUM, and wave = HUE_WAVE. */
+DEFINE_DT_ENUM(mode, brightness, river, hue, pendulum, wave);
+
 struct kp_eff_breathe_config {
   struct kp_rgb_effect_common_config common;
+  mode_t mode;
 };
 struct kp_eff_breathe_data {
   struct kp_rgb_effect_common_data common;
   uint32_t phase_ms;
 };
 
+/* Triangle wave in [0, 255] for a phase in [0, period). */
+static uint32_t kp_breathe_tri(uint32_t phase, uint32_t period) {
+  uint32_t half = MAX(period / 2u, 1u);
+  uint32_t ramp = phase < half ? phase : period - phase;
+  return ramp * 255u / half;
+}
+
+#define KP_BREATHE_HUE_DELTA 12u
+
+static uint8_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
+                                     uint16_t x, uint16_t span, mode_t mode) {
+  uint32_t position;
+  if (mode == DT_ENUM_CONST(mode, hue)) {
+    return (uint8_t)(kp_breathe_tri(phase, period) * KP_BREATHE_HUE_DELTA / 255u);
+  }
+
+  span = MAX(span, 1u);
+  if (mode == DT_ENUM_CONST(mode, pendulum)) {
+    uint32_t half = MAX(period / 2u, 1u);
+    uint32_t travel = phase < half ? phase : period - phase;
+    uint32_t target = travel * span / half;
+    position = x > target ? x - target : target - x;
+    position = MIN(position, span);
+  } else {
+    position = (x + (uint32_t)phase * span / period) % span;
+  }
+  return (uint8_t)(position * KP_BREATHE_HUE_DELTA / span);
+}
 static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame *f) {
   struct kp_eff_breathe_data *data = dev->data;
+  const struct kp_eff_breathe_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t half = MAX(period / 2u, 1u);
   uint32_t phase = data->phase_ms % period;
+  uint8_t pct = kp_rgb_brightness_pct(f);
+  struct kp_rgb_hsb base = data->common.color;
 
-  struct kp_rgb_hsb hsb = data->common.color;
-  /* Triangle: dimmest at the period edges, full at the half-way point. */
-  uint32_t ramp = phase < half ? phase : period - phase;
-  hsb.b = (uint8_t)((uint32_t)hsb.b * ramp / half);
-  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, kp_rgb_brightness_pct(f)));
+  if (cfg->mode == DT_ENUM_CONST(mode, hue) ||
+      cfg->mode == DT_ENUM_CONST(mode, pendulum) ||
+      cfg->mode == DT_ENUM_CONST(mode, wave)) {
+    uint16_t span = MAX(f->board_length, 1u);
+    for (size_t i = 0; i < f->count; i++) {
+      uint8_t offset = kp_breathe_hue_offset(phase, period, f->coords[i].x,
+                                             span, cfg->mode);
+      struct kp_rgb_hsb hsb = base;
+      hsb.h = (uint16_t)((base.h + offset) % KP_RGB_HUE_MAX);
+      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    }
+    data->phase_ms = (phase + f->elapsed) % period;
+    return;
+  }
 
+  if (cfg->mode == DT_ENUM_CONST(mode, river)) {
+    /* RIVERFLOW: brightness wave offset by x position, so the pulse travels. */
+    uint16_t span = MAX(f->board_length, 1u);
+    for (size_t i = 0; i < f->count; i++) {
+      uint32_t local = (phase + (uint32_t)f->coords[i].x * period / span) % period;
+      uint8_t b = (uint8_t)((uint32_t)base.b * kp_breathe_tri(local, period) / 255u);
+      struct kp_rgb_hsb hsb = base;
+      hsb.b = b;
+      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    }
+    data->phase_ms = (phase + f->elapsed) % period;
+    return;
+  }
+
+  /* BREATHING: whole board fades up and down. */
+  uint8_t tri = (uint8_t)kp_breathe_tri(phase, period);
+  struct kp_rgb_hsb hsb = base;
+  hsb.b = (uint8_t)((uint32_t)base.b * tri / 255u);
+  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   for (size_t i = 0; i < f->count; i++) {
     f->pixels[i] = rgb;
   }
@@ -46,6 +109,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
 #define KP_EFF_BREATHE_DEFINE(inst)                                            \
   static const struct kp_eff_breathe_config kp_eff_breathe_##inst##_cfg = {    \
       .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .mode = CONV_DT_ENUM(inst, mode),                                       \
   };                                                                           \
   static struct kp_eff_breathe_data kp_eff_breathe_##inst##_data = {           \
       .common =                                                                \

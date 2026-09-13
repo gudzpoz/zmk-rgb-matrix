@@ -1,0 +1,28 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Single-hue board with a moving band that fades either saturation or brightness,
+  covering QMK's BAND_SAT / BAND_VAL and their pinwheel / spiral variants
+  (BAND_PINWHEEL_SAT/VAL, BAND_SPIRAL_SAT/VAL).
+compatible: "keypaw,rgb-matrix-band"
+include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+
+properties:
+  channel:
+    type: string
+    required: false
+    default: "sat"
+    enum: ["sat", "val"]
+    description: |
+      Which channel the band modulates. "sat" fades saturation (BAND_SAT and
+      friends); "val" fades brightness (BAND_VAL and friends).
+
+  shape:
+    type: string
+    required: false
+    default: "linear"
+    enum: ["linear", "pinwheel", "spiral"]
+    description: |
+      The path the band travels: "linear" scrolls left to right, "pinwheel" spins
+      around the board centre, "spiral" winds outward.
