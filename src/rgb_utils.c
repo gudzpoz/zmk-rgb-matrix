@@ -89,14 +89,6 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
     }
   }
 
-  /* Neither spec given means the whole half; an explicit spec that resolves to
-   * nothing stays empty rather than silently lighting everything. */
-  if (keys_len == 0 && leds_len == 0) {
-    for (size_t i = 0; i < KP_LED_COUNT && n < out_max; i++) {
-      out[n++] = i;
-    }
-  }
-
   return n;
 }
 
@@ -110,4 +102,3 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
     }
   }
 }
-

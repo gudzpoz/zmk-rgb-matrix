@@ -13,8 +13,9 @@ properties:
     description: |
       Key positions in the zmk,physical-layout whose LEDs this indicator paints.
       Resolved through the same mapping the effects use, so one list works on
-      both halves. With neither `keys` nor `leds` given, every LED of the half is
-      targeted.
+      both halves. An indicator with neither `keys` nor `leds` targets no LEDs
+      and stays dark; a kind that wants a different empty-list meaning can read
+      the empty list itself (KP_LED_COUNT is available to kinds).
 
   leds:
     type: array

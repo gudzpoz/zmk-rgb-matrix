@@ -300,12 +300,13 @@ int zmk_rgb_matrix_get_state(bool *on_off) {
   return 0;
 }
 
-static int kp_rgb_matrix_init(void) {
-  if (!device_is_ready(strip)) {
-    LOG_ERR("LED strip \"%s\" is not ready", strip->name);
-    return -ENODEV;
-  }
-
+/* Resolve the key -> LED table before any indicator device initialises: an
+ * indicator's `keys` spec is resolved through kp_rgb_led_for_position() from its
+ * POST_KERNEL init, and this runs at the OBJECTS priority, ahead of the default
+ * device priority. Only static data is needed (the devicetree mapping and the
+ * physical layout list), so this does not have to wait for the strip or the
+ * keymap. */
+static int kp_rgb_matrix_layout_init(void) {
   const struct zmk_physical_layout *const *layouts;
   size_t layout_count = zmk_physical_layouts_get_list(&layouts);
 
@@ -314,6 +315,17 @@ static int kp_rgb_matrix_init(void) {
     return -ENODEV;
   }
   kp_resolve_layout(layouts[0]);
+
+  return 0;
+}
+
+SYS_INIT(kp_rgb_matrix_layout_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
+
+static int kp_rgb_matrix_init(void) {
+  if (!device_is_ready(strip)) {
+    LOG_ERR("LED strip \"%s\" is not ready", strip->name);
+    return -ENODEV;
+  }
 
   /* kp_rgb_state.on and the active effect are set up by the behavior module at
    * POST_KERNEL, which runs before APPLICATION. */

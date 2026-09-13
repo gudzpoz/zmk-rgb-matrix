@@ -286,13 +286,18 @@ struct kp_rgb_indicator_common_config {
 
 /* Kind-agnostic mutable part; must be the first member. */
 struct kp_rgb_indicator_common_data {
-  size_t led_count; /* targets resolved from keys/leds; KP_LED_COUNT if neither */
-  size_t leds[KP_LED_COUNT];
+  size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
+  size_t *leds;     /* the indicator's own storage */
 };
 
-/* Resolve an indicator's `keys`/`leds` devicetree spec into LED indices. With
- * neither given, every LED of this half is targeted. Returns the number written
- * (never more than out_max, and always <= KP_LED_COUNT). */
+/* The most targets an indicator can resolve. */
+#define KP_RGB_INDICATOR_TARGET_CAP(node_id)                                   \
+  MAX(1, MIN(KP_LED_COUNT, DT_PROP_LEN_OR(node_id, keys, 0) +                  \
+                               DT_PROP_LEN_OR(node_id, leds, 0)))
+
+/* Resolve an indicator's `keys`/`leds` devicetree spec into LED indices.
+ * Returns the number written (never more than out_max, and always <=
+ * KP_LED_COUNT); 0 when both lists are empty. */
 size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
                               const uint32_t *leds, size_t leds_len, size_t *out,
                               size_t out_max);
@@ -323,7 +328,9 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
    .brightness = DT_PROP_OR(node_id, brightness, 100)}
 
 /* Declare the device. Indicators are plain devices, never behaviors, so they
- * stay out of the behavior registry and cannot be keymap-bound. */
+ * stay out of the behavior registry and cannot be keymap-bound. The macro also
+ * allocates the instance's target storage, so a kind must declare its device
+ * here rather than with DEVICE_DT_DEFINE directly. */
 #define KP_RGB_INDICATOR_DEFINE(inst, render_fn, cfg_inst)                     \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_indicator_common_config) &&        \
@@ -338,20 +345,27 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
               (const void *)&cfg_inst##_data.common,                           \
       "indicator data must embed struct kp_rgb_indicator_common_data "         \
       "as the first field");                                                   \
+  static size_t                                                                \
+      cfg_inst##_targets[KP_RGB_INDICATOR_TARGET_CAP(DT_DRV_INST(inst))];      \
   static int cfg_inst##_init(const struct device *dev) {                       \
     const struct kp_rgb_indicator_common_config *cfg = dev->config;            \
     struct kp_rgb_indicator_common_data *data = dev->data;                     \
-    data->led_count =                                                          \
-        kp_rgb_resolve_targets(cfg->keys, cfg->keys_len, cfg->leds,            \
-                               cfg->leds_len, data->leds, KP_LED_COUNT);       \
+    data->leds = cfg_inst##_targets;                                           \
+    data->led_count = kp_rgb_resolve_targets(                                  \
+        cfg->keys, cfg->keys_len, cfg->leds, cfg->leds_len, data->leds,        \
+        ARRAY_SIZE(cfg_inst##_targets));                                       \
     return 0;                                                                  \
   }                                                                            \
   static const struct kp_rgb_indicator_api cfg_inst##_api = {                  \
       .render = render_fn,                                                     \
   };                                                                           \
+  /* Init resolves `keys` through the engine's key -> LED table, which the     \
+   * engine fills from its own POST_KERNEL init at the OBJECTS priority, ahead \
+   * of these devices' DEFAULT priority. */                                    \
   DEVICE_DT_DEFINE(DT_DRV_INST(inst), cfg_inst##_init, NULL, &cfg_inst##_data, \
                    &cfg_inst##_cfg, POST_KERNEL,                               \
                    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
+
 
 /* -------------------------------------------------------------------------
  * Triggers
