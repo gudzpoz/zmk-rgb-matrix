@@ -41,7 +41,7 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t decay = MAX(255u * f->elapsed / period, 1u);
   uint8_t pct = kp_rgb_brightness_pct(f);
-  struct kp_rgb_hsb base = kp_rgb_hex_to_hsb(data->common.color_hex);
+  struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
 
   for (size_t i = 0; i < f->count; i++) {
@@ -76,7 +76,8 @@ static void kp_eff_reactive_event(const struct device *dev, const zmk_event_t *e
   static struct kp_eff_reactive_data kp_eff_reactive_##inst##_data = {         \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF),     \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

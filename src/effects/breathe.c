@@ -30,7 +30,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
   uint32_t half = MAX(period / 2u, 1u);
   uint32_t phase = data->phase_ms % period;
 
-  struct kp_rgb_hsb hsb = kp_rgb_hex_to_hsb(data->common.color_hex);
+  struct kp_rgb_hsb hsb = data->common.color;
   /* Triangle: dimmest at the period edges, full at the half-way point. */
   uint32_t ramp = phase < half ? phase : period - phase;
   hsb.b = (uint8_t)((uint32_t)hsb.b * ramp / half);
@@ -50,7 +50,8 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
   static struct kp_eff_breathe_data kp_eff_breathe_##inst##_data = {           \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF),     \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

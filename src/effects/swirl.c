@@ -30,7 +30,7 @@ static void kp_eff_swirl_render(const struct device *dev, struct kp_rgb_frame *f
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = data->phase_ms % period;
   uint8_t pct = kp_rgb_brightness_pct(f);
-  struct kp_rgb_hsb base = kp_rgb_hex_to_hsb(data->common.color_hex);
+  struct kp_rgb_hsb base = data->common.color;
   /* f->coords is normalised to this half, and board_length is its longest edge,
    * so the sweep spans the actual board rather than a hardcoded width. */
   uint32_t sweep = phase * KP_RGB_HUE_MAX / period;
@@ -52,7 +52,8 @@ static void kp_eff_swirl_render(const struct device *dev, struct kp_rgb_frame *f
   static struct kp_eff_swirl_data kp_eff_swirl_##inst##_data = {               \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF),     \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

@@ -55,7 +55,7 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
   const struct kp_eff_ripple_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
   uint8_t pct = kp_rgb_brightness_pct(f);
-  struct kp_rgb_hsb base = kp_rgb_hex_to_hsb(data->common.color_hex);
+  struct kp_rgb_hsb base = data->common.color;
 
   data->now_ms += f->elapsed;
 
@@ -141,7 +141,8 @@ static void kp_eff_ripple_event(const struct device *dev, const zmk_event_t *eh)
   static struct kp_eff_ripple_data kp_eff_ripple_##inst##_data = {             \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF),     \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

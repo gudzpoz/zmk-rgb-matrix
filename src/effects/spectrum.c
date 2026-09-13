@@ -30,7 +30,7 @@ static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame
   struct kp_eff_spectrum_data *data = dev->data;
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = data->phase_ms % period;
-  struct kp_rgb_hsb base = kp_rgb_hex_to_hsb(data->common.color_hex);
+  struct kp_rgb_hsb base = data->common.color;
 
   struct kp_rgb_hsb hsb = {
       .h = (uint16_t)((base.h + phase * KP_RGB_HUE_MAX / period) % KP_RGB_HUE_MAX),
@@ -53,7 +53,8 @@ static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame
   static struct kp_eff_spectrum_data kp_eff_spectrum_##inst##_data = {         \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF),     \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

@@ -40,9 +40,47 @@ struct kp_rgb_hsb {
   uint8_t b;  /* 0..100 */
 };
 
+/* Compile-time 0xRRGGBB -> struct kp_rgb_hsb initializer, so an effect's preset
+ * colour can stay a devicetree constant while the effect state holds HSB (see
+ * kp_rgb_effect_common_data). This mirrors the runtime conversion this file used
+ * to expose, down to the truncating division, so a given `color` property yields
+ * the same preset either way. */
+#define KP_RGB_HEX_R(hex) ((int)(((uint32_t)(hex) >> 16) & 0xFFu))
+#define KP_RGB_HEX_G(hex) ((int)(((uint32_t)(hex) >> 8) & 0xFFu))
+#define KP_RGB_HEX_B(hex) ((int)((uint32_t)(hex) & 0xFFu))
+
+#define KP_RGB_HEX_MAX2(a, b) ((a) > (b) ? (a) : (b))
+#define KP_RGB_HEX_MIN2(a, b) ((a) < (b) ? (a) : (b))
+#define KP_RGB_HEX_MAX(hex) \
+  KP_RGB_HEX_MAX2(KP_RGB_HEX_MAX2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)), KP_RGB_HEX_B(hex))
+#define KP_RGB_HEX_MIN(hex) \
+  KP_RGB_HEX_MIN2(KP_RGB_HEX_MIN2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)), KP_RGB_HEX_B(hex))
+#define KP_RGB_HEX_DELTA(hex) (KP_RGB_HEX_MAX(hex) - KP_RGB_HEX_MIN(hex))
+
+/* Adding KP_RGB_HUE_MAX before the modulo keeps the red-dominant term (the only
+ * one that can go negative) in range; the green- and blue-dominant terms are
+ * already in [60, 180] and [180, 300]. */
+#define KP_RGB_HEX_HUE(hex)                                                                        \
+  (KP_RGB_HEX_DELTA(hex) == 0                                                                      \
+       ? 0                                                                                         \
+       : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_R(hex)                                                  \
+             ? ((60 * (KP_RGB_HEX_G(hex) - KP_RGB_HEX_B(hex)) / KP_RGB_HEX_DELTA(hex)) +           \
+                KP_RGB_HUE_MAX) %                                                                  \
+                   KP_RGB_HUE_MAX                                                                  \
+             : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_G(hex)                                            \
+                   ? (120 + 60 * (KP_RGB_HEX_B(hex) - KP_RGB_HEX_R(hex)) / KP_RGB_HEX_DELTA(hex))  \
+                   : (240 + 60 * (KP_RGB_HEX_R(hex) - KP_RGB_HEX_G(hex)) / KP_RGB_HEX_DELTA(hex)))
+
+#define KP_RGB_HEX_SAT(hex) \
+  (KP_RGB_HEX_MAX(hex) == 0 ? 0 : KP_RGB_HEX_DELTA(hex) * KP_RGB_SAT_MAX / KP_RGB_HEX_MAX(hex))
+#define KP_RGB_HEX_BRT(hex) (KP_RGB_HEX_MAX(hex) * KP_RGB_BRT_MAX / 255)
+
+#define KP_RGB_HSB_FROM_HEX(hex)                                                   \
+  {.h = (uint16_t)KP_RGB_HEX_HUE(hex),                                             \
+   .s = (uint8_t)KP_RGB_HEX_SAT(hex),                                              \
+   .b = (uint8_t)KP_RGB_HEX_BRT(hex)}
+
 struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
-struct kp_rgb_hsb kp_rgb_hex_to_hsb(uint32_t hex);
-uint32_t kp_rgb_hsb_to_hex(struct kp_rgb_hsb color);
 
 /* Brightness helpers. Effects render at full scale and then dim the result, so
  * that a single global brightness setting applies uniformly.
@@ -133,8 +171,8 @@ struct kp_rgb_effect_common_config {
   uint16_t index;       /* user-assigned, unique, stable across rebuilds */
 };
 struct kp_rgb_effect_common_data {
-  uint16_t duration_ms; /* single cycle animation duration */
-  uint32_t color_hex;   /* preset default colour (0xRRGGBB) */
+  uint16_t duration_ms;    /* single cycle animation duration */
+  struct kp_rgb_hsb color; /* current color */
 };
 
 /* Both common structs must be the first member of the effect's own config/data:

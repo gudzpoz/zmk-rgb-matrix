@@ -23,7 +23,7 @@ struct kp_eff_solid_data {
 static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f) {
   const struct kp_eff_solid_data *data = dev->data;
   struct led_rgb rgb =
-      kp_rgb_rgb_scale(kp_hex_to_rgb(data->common.color_hex), kp_rgb_brightness_pct(f));
+      kp_rgb_rgb_scale(kp_rgb_hsb_to_rgb(data->common.color), kp_rgb_brightness_pct(f));
 
   for (size_t i = 0; i < f->count; i++) {
     f->pixels[i] = rgb;
@@ -37,7 +37,8 @@ static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f
   static struct kp_eff_solid_data kp_eff_solid_##inst##_data = {               \
       .common =                                                                \
           {                                                                    \
-              .color_hex = DT_PROP_OR(DT_DRV_INST(inst), color, 0),            \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0)),                    \
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \

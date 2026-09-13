@@ -158,7 +158,7 @@ static struct kp_rgb_hsb kp_active_hsb(void) {
   if (kp_rgb_state.active_fx == NULL) {
     return (struct kp_rgb_hsb){.h = 0, .s = 0, .b = kp_rgb_tuning.max_brightness};
   }
-  return kp_rgb_hex_to_hsb(kp_rgb_effect_data(kp_rgb_state.active_fx)->color_hex);
+  return kp_rgb_effect_data(kp_rgb_state.active_fx)->color;
 }
 
 int zmk_rgb_matrix_set_hsb(struct kp_rgb_hsb color) {
@@ -170,7 +170,7 @@ int zmk_rgb_matrix_set_hsb(struct kp_rgb_hsb color) {
   }
 
   kp_rgb_matrix_lock();
-  kp_rgb_effect_data(kp_rgb_state.active_fx)->color_hex = kp_rgb_hsb_to_hex(color);
+  kp_rgb_effect_data(kp_rgb_state.active_fx)->color = color;
   kp_rgb_matrix_unlock();
   return 0;
 }
@@ -364,9 +364,7 @@ static int kp_effects_init(const struct device *dev) {
       continue;
     }
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_effects[i]);
-    struct kp_rgb_hsb color = kp_rgb_hex_to_hsb(data->color_hex);
-    color.b = brightness;
-    data->color_hex = kp_rgb_hsb_to_hex(color);
+    data->color.b = brightness;
     if (data->duration_ms == 0) {
       data->duration_ms = (uint16_t)default_duration;
     }
