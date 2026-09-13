@@ -3,19 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Keymap behavior for the keypaw RGB matrix. Modelled on
- * zmk/app/src/behaviors/behavior_rgb_underglow.c, including the
- * convert_central_state_dependent_params hook that resolves relative commands
- * (toggle, step, cycle) into absolute ones on the split central so every half
- * ends up applying the same value.
- *
- * Effects themselves are child nodes of &kprgb, each its own zero-param behavior
- * (e.g. &fx_solid). Selecting one from a keymap runs that effect node's
- * convert hook, which rewrites the binding to (kprgb, RGB_EFS_CMD, index) so
- * only the short &kprgb name + the effect's explicit `index` cross the split
- * link. This file owns the effect registry built from those children, the
- * apply/cycle/resolve helpers, the animation tunables, and the &kprgb control
- * behavior (RGB_TOG, RGB_HUI, ...).
+ * Per-device RGB matrix behavior state and effect registries. The physical
+ * matrix engine is shared, while every behavior node owns its own controller
+ * state, effects, tuning, indicators, and LED zone.
  */
 
 #include <stddef.h>
@@ -23,8 +13,8 @@
 
 #define DT_DRV_COMPAT keypaw_behavior_rgb_matrix
 
-#include <zephyr/device.h>
 #include <drivers/behavior.h>
+#include <zephyr/device.h>
 #include <zephyr/logging/log.h>
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
@@ -37,378 +27,396 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-#define KP_RGB_BEHAVIOR DT_DRV_INST(0)
-#define KP_RGB_NEFFECTS DT_CHILD_NUM(KP_RGB_BEHAVIOR)
+#define KP_RGB_MAX_EFFECTS(inst) MAX(1, DT_CHILD_NUM(DT_DRV_INST(inst)))
 
-/* The animation tunables live on the behavior node, so the behavior owns the
- * tuning object the engine hands to effects through the frame. */
-struct kp_rgb_tuning kp_rgb_tuning = {
-  .max_brightness = DT_PROP_OR(KP_RGB_BEHAVIOR, max_brightness, 40),
-  .idle_brightness = DT_PROP_OR(KP_RGB_BEHAVIOR, idle_brightness, 30),
-};
+#define KP_RGB_EFFECT_DEVICE(node_id)                                          \
+  COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay), (DEVICE_DT_GET(node_id), ),   \
+              (NULL, ))
 
-static const struct device *kp_effects[KP_RGB_NEFFECTS];
-static size_t effect_index;
-
-/* The persisted blob has a fixed layout, so the registry has to fit it. */
-BUILD_ASSERT(KP_RGB_NEFFECTS <= KP_RGB_PERSIST_MAX_EFFECTS,
-             "raise KP_RGB_PERSIST_MAX_EFFECTS for the larger effect registry");
-BUILD_ASSERT(KP_RGB_NEFFECTS <= UINT8_MAX, "effect count must fit the blob's count byte");
-BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS <= UINT16_MAX,
-             "the persisted duration is a uint16_t");
-
-size_t kp_rgb_effect_count(void) { return KP_RGB_NEFFECTS; }
-
-const struct device *kp_rgb_effect_at(size_t index) {
-  return index < KP_RGB_NEFFECTS ? kp_effects[index] : NULL;
-}
-
-size_t kp_rgb_selected_effect(void) { return effect_index; }
-
-/* Effects excluded from RGB_EFF/EFR cycling, indexed by effect index (which the
- * registry BUILD_ASSERT pins to the child position). Device presence is not
- * enough: a `no-cycle` effect is registered and selectable by index, it just
- * never shows up while cycling. */
 #define KP_RGB_NO_CYCLE_ONE(node_id) DT_PROP(node_id, no_cycle),
-static const uint8_t kp_effect_no_cycle[] = {
-  DT_FOREACH_CHILD(KP_RGB_BEHAVIOR, KP_RGB_NO_CYCLE_ONE)};
 
-static bool kp_effect_cyclable(size_t index) {
-  return kp_effects[index] != NULL && !kp_effect_no_cycle[index];
+#define KP_RGB_BEHAVIOR_INDICATORS(inst)                                       \
+  COND_CODE_1(                                                                 \
+      DT_NODE_HAS_PROP(DT_DRV_INST(inst), indicators),                         \
+      (static const struct device *const kp_rgb_indicators_##inst[] =          \
+           {LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), indicators),                \
+                    KP_RGB_INDICATORS_AT_IDX, (, ), DT_DRV_INST(inst))};),     \
+      ())
+
+#define KP_RGB_BEHAVIOR_LEDS(inst)                                             \
+  static const uint32_t kp_rgb_leds_##inst[] =                                 \
+      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
+                  (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
+
+#define KP_RGB_BEHAVIOR_DEFINE(inst)                                           \
+  BUILD_ASSERT(sizeof(DEVICE_DT_NAME(DT_DRV_INST(inst))) <= 9,                 \
+               "keypaw,behavior-rgb-matrix: node name must fit the 9-byte "    \
+               "split behavior_dev field");                                    \
+  BUILD_ASSERT(                                                                \
+      DT_CHILD_NUM(DT_DRV_INST(inst)) <= KP_RGB_PERSIST_MAX_EFFECTS,           \
+      "raise KP_RGB_PERSIST_MAX_EFFECTS for the larger effect registry");      \
+  BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT8_MAX,                   \
+               "effect count must fit the blob's count byte");                 \
+  KP_RGB_BEHAVIOR_INDICATORS(inst)                                             \
+  KP_RGB_BEHAVIOR_LEDS(inst);                                                  \
+  static const struct device *const kp_rgb_effects_##inst[KP_RGB_MAX_EFFECTS(  \
+      inst)] = {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_EFFECT_DEVICE)};    \
+  static const uint8_t kp_rgb_effect_no_cycle_##inst[KP_RGB_MAX_EFFECTS(       \
+      inst)] = {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_NO_CYCLE_ONE)};     \
+  static struct kp_rgb_behavior_context kp_rgb_context_##inst = {              \
+      .effects = kp_rgb_effects_##inst,                                        \
+      .no_cycle = kp_rgb_effect_no_cycle_##inst,                               \
+      .effect_count = DT_CHILD_NUM(DT_DRV_INST(inst)),                         \
+      .leds = kp_rgb_leds_##inst,                                              \
+      .leds_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0),                  \
+      .all_leds = !DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                  \
+      .indicators =                                                            \
+          COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), indicators),         \
+                      (kp_rgb_indicators_##inst), (kp_rgb_no_indicators)),     \
+      .indicators_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), indicators, 0),      \
+      .zone_valid = true,                                                      \
+      .tuning =                                                                \
+          {                                                                    \
+              .max_brightness =                                                \
+                  DT_PROP_OR(DT_DRV_INST(inst), max_brightness, 40),           \
+              .idle_brightness =                                               \
+                  DT_PROP_OR(DT_DRV_INST(inst), idle_brightness, 30),          \
+          },                                                                   \
+  };                                                                           \
+  static int kp_rgb_behavior_init_##inst(const struct device *dev) {           \
+    struct kp_rgb_behavior_context *ctx = &kp_rgb_context_##inst;              \
+    ctx->dev = dev;                                                            \
+    ctx->state.on = DT_PROP_OR(DT_DRV_INST(inst), initial_on, 1);              \
+    ctx->state.user_on = ctx->state.on;                                        \
+    uint8_t brightness =                                                       \
+        (uint8_t)CLAMP(DT_PROP_OR(DT_DRV_INST(inst), initial_brightness, 30),  \
+                       0, KP_RGB_BRT_MAX);                                     \
+    int32_t default_duration =                                                 \
+        CLAMP(DT_PROP_OR(DT_DRV_INST(inst), initial_duration_ms, 1000),        \
+              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,                        \
+              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);                       \
+    for (size_t i = 0; i < ctx->effect_count; i++) {                           \
+      const struct device *fx = ctx->effects[i];                               \
+      if (fx == NULL) {                                                        \
+        continue;                                                              \
+      }                                                                        \
+      struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);         \
+      data->color.b = brightness;                                              \
+      if (data->duration_ms == 0) {                                            \
+        data->duration_ms = (uint16_t)default_duration;                        \
+      }                                                                        \
+    }                                                                          \
+    ctx->effect_index = DT_PROP_OR(DT_DRV_INST(inst), initial_effect, 0);      \
+    if (kp_rgb_resolve_active(ctx) < 0) {                                      \
+      LOG_WRN("Initial RGB effect unavailable for %s", dev->name);             \
+    }                                                                          \
+    LOG_DBG("Registered %u RGB matrix effects for %s",                         \
+            (uint32_t)ctx->effect_count, dev->name);                           \
+    return 0;                                                                  \
+  }                                                                            \
+  BEHAVIOR_DT_INST_DEFINE(inst, kp_rgb_behavior_init_##inst, NULL,              \
+                          &kp_rgb_context_##inst, NULL, POST_KERNEL,          \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                  \
+                          &behavior_rgb_matrix_driver_api);
+
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+static const struct behavior_parameter_value_metadata no_arg_values[] = {
+    {.display_name = "Toggle On/Off",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_TOG_CMD},
+    {.display_name = "Turn On",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_ON_CMD},
+    {.display_name = "Turn Off",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_OFF_CMD},
+    {.display_name = "Hue Up",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_HUI_CMD},
+    {.display_name = "Hue Down",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_HUD_CMD},
+    {.display_name = "Saturation Up",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_SAI_CMD},
+    {.display_name = "Saturation Down",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_SAD_CMD},
+    {.display_name = "Brightness Up",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_BRI_CMD},
+    {.display_name = "Brightness Down",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_BRD_CMD},
+    {.display_name = "Duration Up",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_SPI_CMD},
+    {.display_name = "Duration Down",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_SPD_CMD},
+    {.display_name = "Next Effect",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_EFF_CMD},
+    {.display_name = "Previous Effect",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_EFR_CMD},
+};
+static const struct behavior_parameter_metadata_set no_args_set = {
+    .param1_values = no_arg_values,
+    .param1_values_len = ARRAY_SIZE(no_arg_values),
+};
+static const struct behavior_parameter_metadata sets[] = {no_args_set};
+static const struct behavior_parameter_metadata metadata = {
+    .sets_len = ARRAY_SIZE(sets),
+    .sets = sets,
+};
+#endif
+
+static const struct behavior_driver_api behavior_rgb_matrix_driver_api;
+
+static struct kp_rgb_behavior_context *
+kp_rgb_context_from_binding(const struct zmk_behavior_binding *binding) {
+  const struct device *dev = zmk_behavior_get_binding(binding->behavior_dev);
+  return kp_rgb_behavior_context_from_device(dev);
 }
 
-uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta) {
-  int16_t norm_delta = delta % (int16_t)KP_RGB_NEFFECTS;
-  uint16_t start = (current + norm_delta + KP_RGB_NEFFECTS) % KP_RGB_NEFFECTS;
+#define KP_RGB_CONTEXT_PTR(inst) &kp_rgb_context_##inst,
+DT_INST_FOREACH_STATUS_OKAY(KP_RGB_BEHAVIOR_DEFINE)
+static struct kp_rgb_behavior_context *const kp_rgb_contexts[] = {
+    DT_INST_FOREACH_STATUS_OKAY(KP_RGB_CONTEXT_PTR)};
 
-  if (kp_effect_cyclable(start)) {
+size_t kp_rgb_behavior_count(void) { return ARRAY_SIZE(kp_rgb_contexts); }
+
+struct kp_rgb_behavior_context *kp_rgb_behavior_at(size_t index) {
+  return index < ARRAY_SIZE(kp_rgb_contexts) ? kp_rgb_contexts[index] : NULL;
+}
+
+struct kp_rgb_behavior_context *
+kp_rgb_behavior_context_from_device(const struct device *dev) {
+  if (dev == NULL || dev->data == NULL) {
+    return NULL;
+  }
+  struct kp_rgb_behavior_context *ctx = dev->data;
+  return ctx->dev == dev ? ctx : NULL;
+}
+
+size_t kp_rgb_effect_count(const struct kp_rgb_behavior_context *ctx) {
+  return ctx == NULL ? 0 : ctx->effect_count;
+}
+
+const struct device *kp_rgb_effect_at(const struct kp_rgb_behavior_context *ctx,
+                                      size_t index) {
+  return ctx != NULL && index < ctx->effect_count ? ctx->effects[index] : NULL;
+}
+
+size_t kp_rgb_selected_effect(const struct kp_rgb_behavior_context *ctx) {
+  return ctx == NULL ? 0 : ctx->effect_index;
+}
+
+static bool kp_effect_cyclable(const struct kp_rgb_behavior_context *ctx,
+                               size_t index) {
+  return ctx != NULL && index < ctx->effect_count &&
+         ctx->effects[index] != NULL && !ctx->no_cycle[index];
+}
+
+uint16_t kp_rgb_calc_effect_index(const struct kp_rgb_behavior_context *ctx,
+                                  uint16_t current, int16_t delta) {
+  if (ctx == NULL || ctx->effect_count == 0) {
+    return current;
+  }
+  int16_t norm_delta = delta % (int16_t)ctx->effect_count;
+  uint16_t start =
+      (current + norm_delta + ctx->effect_count) % ctx->effect_count;
+  if (kp_effect_cyclable(ctx, start)) {
     return start;
   }
-
-  int direction = (delta < 0) ? -1 : 1;
-  for (int i = 1; i < KP_RGB_NEFFECTS; i++) {
-    size_t index = (start + (i * direction) + KP_RGB_NEFFECTS) % KP_RGB_NEFFECTS;
-    if (kp_effect_cyclable(index)) {
+  int direction = delta < 0 ? -1 : 1;
+  for (size_t i = 1; i < ctx->effect_count; i++) {
+    size_t index =
+        (start + (i * direction) + ctx->effect_count) % ctx->effect_count;
+    if (kp_effect_cyclable(ctx, index)) {
       return index;
     }
   }
-
   return current;
 }
 
-int kp_rgb_resolve_active(void) {
-  if (effect_index >= KP_RGB_NEFFECTS) {
-    effect_index = 0;
-  }
-
-  effect_index = kp_rgb_calc_effect_index(effect_index, 0);
-  const struct device *fx = kp_effects[effect_index];
-  if (fx == NULL) {
+int kp_rgb_resolve_active(struct kp_rgb_behavior_context *ctx) {
+  if (ctx == NULL || ctx->effect_count == 0) {
     return -ENOENT;
   }
-
-  kp_rgb_state.active_fx = fx;
+  if (ctx->effect_index >= ctx->effect_count) {
+    ctx->effect_index = 0;
+  }
+  ctx->effect_index = kp_rgb_calc_effect_index(ctx, ctx->effect_index, 0);
+  const struct device *fx = ctx->effects[ctx->effect_index];
+  if (fx == NULL) {
+    ctx->state.active_fx = NULL;
+    return -ENOENT;
+  }
+  ctx->state.active_fx = fx;
   return 0;
 }
 
-/* Shared convert hook used by every effect device (see KP_RGB_EFFECT_DEFINE).
- * The binding arrives here as (effect_name, 0, 0); we rewrite it to
- * (kprgb, RGB_EFS_CMD, index) so the short &kprgb name + the stable index cross
- * the split link rather than a potentially long effect node name. */
+int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index) {
+  if (ctx == NULL || index >= ctx->effect_count) {
+    return -EINVAL;
+  }
+  if (ctx->effects[index] == NULL) {
+    return -ENOENT;
+  }
+  kp_rgb_matrix_lock();
+  ctx->effect_index = index;
+  ctx->state.active_fx = ctx->effects[index];
+  kp_rgb_matrix_unlock();
+  return 0;
+}
+
+int zmk_rgb_matrix_select_effect(const struct device *behavior,
+                                 uint16_t index) {
+  return kp_rgb_select_effect(kp_rgb_behavior_context_from_device(behavior),
+                              index);
+}
+
+int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
+                                int16_t direction) {
+  struct kp_rgb_behavior_context *ctx =
+      kp_rgb_behavior_context_from_device(behavior);
+  if (ctx == NULL) {
+    return -ENODEV;
+  }
+  return kp_rgb_select_effect(
+      ctx, kp_rgb_calc_effect_index(ctx, ctx->effect_index, direction));
+}
+
+int kp_rgb_calc_effect(struct kp_rgb_behavior_context *ctx, int16_t direction) {
+  return (int)kp_rgb_calc_effect_index(ctx, ctx->effect_index, direction);
+}
+
+static struct kp_rgb_hsb
+kp_active_hsb(const struct kp_rgb_behavior_context *ctx) {
+  if (ctx == NULL || ctx->state.active_fx == NULL) {
+    return (struct kp_rgb_hsb){.h = 0,
+                               .s = 0,
+                               .b = ctx == NULL ? KP_RGB_BRT_MAX
+                                                : ctx->tuning.max_brightness};
+  }
+  return kp_rgb_effect_data(ctx->state.active_fx)->color;
+}
+
+int kp_rgb_set_hsb(struct kp_rgb_behavior_context *ctx,
+                   struct kp_rgb_hsb color) {
+  if (ctx == NULL || ctx->state.active_fx == NULL) {
+    return -ENODEV;
+  }
+  if (color.h > KP_RGB_HUE_MAX || color.s > KP_RGB_SAT_MAX ||
+      color.b > KP_RGB_BRT_MAX) {
+    return -EINVAL;
+  }
+  kp_rgb_matrix_lock();
+  kp_rgb_effect_data(ctx->state.active_fx)->color = color;
+  kp_rgb_matrix_unlock();
+  return 0;
+}
+
+struct kp_rgb_hsb kp_rgb_calc_hue(const struct kp_rgb_behavior_context *ctx,
+                                  int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb(ctx);
+  color.h = (color.h + KP_RGB_HUE_MAX +
+             (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) %
+            KP_RGB_HUE_MAX;
+  return color;
+}
+
+struct kp_rgb_hsb kp_rgb_calc_sat(const struct kp_rgb_behavior_context *ctx,
+                                  int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb(ctx);
+  color.s = (uint8_t)CLAMP((int)color.s + (int)direction *
+                                              CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP,
+                           0, KP_RGB_SAT_MAX);
+  return color;
+}
+
+struct kp_rgb_hsb kp_rgb_calc_brt(const struct kp_rgb_behavior_context *ctx,
+                                  int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb(ctx);
+  color.b = (uint8_t)CLAMP((int)color.b + (int)direction *
+                                              CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP,
+                           0, KP_RGB_BRT_MAX);
+  return color;
+}
+
+int kp_rgb_change_hue(struct kp_rgb_behavior_context *ctx, int8_t direction) {
+  return kp_rgb_set_hsb(ctx, kp_rgb_calc_hue(ctx, direction));
+}
+int kp_rgb_change_sat(struct kp_rgb_behavior_context *ctx, int8_t direction) {
+  return kp_rgb_set_hsb(ctx, kp_rgb_calc_sat(ctx, direction));
+}
+int kp_rgb_change_brt(struct kp_rgb_behavior_context *ctx, int8_t direction) {
+  return kp_rgb_set_hsb(ctx, kp_rgb_calc_brt(ctx, direction));
+}
+
+static uint32_t kp_active_duration(const struct kp_rgb_behavior_context *ctx) {
+  return ctx == NULL || ctx->state.active_fx == NULL
+             ? 0
+             : kp_rgb_effect_period(ctx->state.active_fx);
+}
+
+int kp_rgb_set_duration(struct kp_rgb_behavior_context *ctx,
+                        uint32_t duration_ms) {
+  if (ctx == NULL || ctx->state.active_fx == NULL) {
+    return -ENODEV;
+  }
+  int32_t duration = CLAMP((int32_t)duration_ms,
+                           (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+                           (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+  kp_rgb_matrix_lock();
+  kp_rgb_effect_data(ctx->state.active_fx)->duration_ms = (uint16_t)duration;
+  kp_rgb_matrix_unlock();
+  return 0;
+}
+
+int kp_rgb_change_duration(struct kp_rgb_behavior_context *ctx,
+                           int16_t direction) {
+  int32_t next = (int32_t)kp_active_duration(ctx) +
+                 (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
+  return kp_rgb_set_duration(ctx, (uint32_t)MAX(next, 0));
+}
+
 int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-
   const struct device *fx_dev = zmk_behavior_get_binding(binding->behavior_dev);
   if (fx_dev == NULL) {
     return -ENODEV;
   }
-
-  /* struct kp_rgb_effect_common_config should be the first member. */
+  const struct kp_rgb_effect_api *api =
+      (const struct kp_rgb_effect_api *)fx_dev->api;
   const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(fx_dev);
-  if (cfg == NULL) {
+  if (api->owner == NULL || cfg == NULL) {
     return -ENODEV;
   }
-
-  BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_RGB_BEHAVIOR)) <= 9,
-               "keypaw,behavior-rgb-matrix: node name must fit the 9-byte split "
-               "behavior_dev field");
-  binding->behavior_dev = DEVICE_DT_NAME(KP_RGB_BEHAVIOR);
+  binding->behavior_dev = api->owner->name;
   binding->param1 = RGB_EFS_CMD;
   binding->param2 = cfg->index;
-
   return 0;
 }
 
-int zmk_rgb_matrix_select_effect(uint16_t index) {
-  if (index >= KP_RGB_NEFFECTS) {
-    return -EINVAL;
-  }
-
-  const struct device *fx = kp_effects[index];
-  if (fx == NULL) {
-    return -ENOENT;
-  }
-
-  kp_rgb_matrix_lock();
-  effect_index = index;
-  kp_rgb_state.active_fx = fx;
-  kp_rgb_matrix_unlock();
-  return 0;
-}
-
-int zmk_rgb_matrix_cycle_effect(int16_t direction) {
-  return zmk_rgb_matrix_select_effect(
-      kp_rgb_calc_effect_index(effect_index, direction));
-}
-
-int zmk_rgb_matrix_calc_effect(int16_t direction) {
-  return (int)kp_rgb_calc_effect_index(effect_index, direction);
-}
-
-/* Colour commands operate on the active effect's stored colour, so each effect
- * keeps its own hue/saturation. */
-static struct kp_rgb_hsb kp_active_hsb(void) {
-  if (kp_rgb_state.active_fx == NULL) {
-    return (struct kp_rgb_hsb){.h = 0, .s = 0, .b = kp_rgb_tuning.max_brightness};
-  }
-  return kp_rgb_effect_data(kp_rgb_state.active_fx)->color;
-}
-
-int zmk_rgb_matrix_set_hsb(struct kp_rgb_hsb color) {
-  if (kp_rgb_state.active_fx == NULL) {
-    return -ENODEV;
-  }
-  if (color.h > KP_RGB_HUE_MAX || color.s > KP_RGB_SAT_MAX || color.b > KP_RGB_BRT_MAX) {
-    return -EINVAL;
-  }
-
-  kp_rgb_matrix_lock();
-  kp_rgb_effect_data(kp_rgb_state.active_fx)->color = color;
-  kp_rgb_matrix_unlock();
-  return 0;
-}
-
-struct kp_rgb_hsb zmk_rgb_matrix_calc_hue(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-
-  color.h = (color.h + KP_RGB_HUE_MAX +
-             (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) %
-            KP_RGB_HUE_MAX;
-
-  return color;
-}
-
-struct kp_rgb_hsb zmk_rgb_matrix_calc_sat(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-
-  color.s = (uint8_t)CLAMP((int)color.s + (int)direction * CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP, 0,
-                           KP_RGB_SAT_MAX);
-
-  return color;
-}
-
-struct kp_rgb_hsb zmk_rgb_matrix_calc_brt(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-
-  color.b = (uint8_t)CLAMP((int)color.b + (int)direction * CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP, 0,
-                           KP_RGB_BRT_MAX);
-
-  return color;
-}
-
-int zmk_rgb_matrix_change_hue(int8_t direction) {
-  return zmk_rgb_matrix_set_hsb(zmk_rgb_matrix_calc_hue(direction));
-}
-
-int zmk_rgb_matrix_change_sat(int8_t direction) {
-  return zmk_rgb_matrix_set_hsb(zmk_rgb_matrix_calc_sat(direction));
-}
-
-int zmk_rgb_matrix_change_brt(int8_t direction) {
-  return zmk_rgb_matrix_set_hsb(zmk_rgb_matrix_calc_brt(direction));
-}
-
-/* Animation duration replaces the old 1..5 "speed": a shorter period animates
- * faster. Stored per effect and seeded with a non-zero value at init. */
-static uint32_t kp_active_duration(void) {
-  if (kp_rgb_state.active_fx == NULL) {
-    /* Only reachable with an empty effect registry, where set_duration() below
-     * rejects the command anyway. */
-    return 0;
-  }
-
-  return kp_rgb_effect_period(kp_rgb_state.active_fx);
-}
-
-int zmk_rgb_matrix_set_duration(uint32_t duration_ms) {
-  if (kp_rgb_state.active_fx == NULL) {
-    return -ENODEV;
-  }
-
-  int32_t duration = CLAMP((int32_t)duration_ms, (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                           (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-  kp_rgb_matrix_lock();
-  kp_rgb_effect_data(kp_rgb_state.active_fx)->duration_ms = (uint16_t)duration;
-  kp_rgb_matrix_unlock();
-  return 0;
-}
-
-int zmk_rgb_matrix_change_duration(int16_t direction) {
-  int32_t next = (int32_t)kp_active_duration() +
-                 (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
-  return zmk_rgb_matrix_set_duration((uint32_t)MAX(next, 0));
-}
-
-/* Register one effect child node. The status check has to happen in the
- * preprocessor, not at runtime: Zephyr only predeclares devices for status
- * "okay" nodes (DT_FOREACH_STATUS_OKAY_NODE in <zephyr/device.h>), so a disabled
- * child would make DEVICE_DT_GET below reference an undeclared symbol. */
-#define KP_RGB_REGISTRY_ONE_OKAY(node_id)       \
-  do {                                          \
-    uint8_t idx = DT_PROP(node_id, index);      \
-    kp_effects[idx] = DEVICE_DT_GET(node_id);   \
-  } while (0);
-
-#define KP_RGB_REGISTRY_ONE(node_id)                                           \
-  COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay),                               \
-              (KP_RGB_REGISTRY_ONE_OKAY(node_id)), ())
-
-#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
-static const struct behavior_parameter_value_metadata no_arg_values[] = {
-  {
-    .display_name = "Toggle On/Off",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_TOG_CMD,
-  },
-  {
-    .display_name = "Turn On",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_ON_CMD,
-  },
-  {
-    .display_name = "Turn Off",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_OFF_CMD,
-  },
-  {
-    .display_name = "Hue Up",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_HUI_CMD,
-  },
-  {
-    .display_name = "Hue Down",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_HUD_CMD,
-  },
-  {
-    .display_name = "Saturation Up",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_SAI_CMD,
-  },
-  {
-    .display_name = "Saturation Down",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_SAD_CMD,
-  },
-  {
-    .display_name = "Brightness Up",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_BRI_CMD,
-  },
-  {
-    .display_name = "Brightness Down",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_BRD_CMD,
-  },
-  {
-    .display_name = "Duration Up",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_SPI_CMD,
-  },
-  {
-    .display_name = "Duration Down",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_SPD_CMD,
-  },
-  {
-    .display_name = "Next Effect",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_EFF_CMD,
-  },
-  {
-    .display_name = "Previous Effect",
-    .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-    .value = RGB_EFR_CMD,
-  },
-};
-static const struct behavior_parameter_metadata_set no_args_set = {
-  .param1_values = no_arg_values,
-  .param1_values_len = ARRAY_SIZE(no_arg_values),
-};
-static const struct behavior_parameter_metadata sets[] = {
-  no_args_set,
-};
-static const struct behavior_parameter_metadata metadata = {
-  .sets_len = ARRAY_SIZE(sets),
-  .sets = sets,
-};
-#endif // IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
-
-static int kp_effects_init(const struct device *dev) {
-  ARG_UNUSED(dev);
-
-  DT_FOREACH_CHILD(KP_RGB_BEHAVIOR, KP_RGB_REGISTRY_ONE);
-  LOG_DBG("Registered %u RGB matrix effects from devicetree", (uint32_t)KP_RGB_NEFFECTS);
-
-  kp_rgb_state.on = DT_PROP_OR(KP_RGB_BEHAVIOR, initial_on, 1);
-  /* The devicetree default is the intent until a stored one is loaded. */
-  kp_rgb_state.user_on = kp_rgb_state.on;
-
-  /* Seed the per-effect defaults across every registered effect, not just the
-   * one selected at boot: otherwise switching to an effect whose preset colour
-   * is at full value (or which has no `duration`) would jump in brightness or
-   * change period. A devicetree `duration` of 0 means "unset", so it takes
-   * initial-duration-ms; clamping that also guarantees the period is never 0. */
-  uint8_t brightness =
-      (uint8_t)CLAMP(DT_PROP_OR(KP_RGB_BEHAVIOR, initial_brightness, 30), 0, KP_RGB_BRT_MAX);
-  int32_t default_duration =
-      CLAMP(DT_PROP_OR(KP_RGB_BEHAVIOR, initial_duration_ms, 1000),
-            CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-  for (size_t i = 0; i < KP_RGB_NEFFECTS; i++) {
-    if (kp_effects[i] == NULL) {
-      continue;
-    }
-    struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_effects[i]);
-    data->color.b = brightness;
-    if (data->duration_ms == 0) {
-      data->duration_ms = (uint16_t)default_duration;
-    }
-  }
-
-  uint16_t initial = DT_PROP_OR(KP_RGB_BEHAVIOR, initial_effect, 0);
-  if (zmk_rgb_matrix_select_effect(initial) < 0) {
-    LOG_WRN("Initial RGB effect %u unavailable; falling back to the first one", initial);
-    kp_rgb_resolve_active();
-  }
-
-  return 0;
-}
-
-static int
-on_keymap_binding_convert_central_state_dependent_params(struct zmk_behavior_binding *binding,
-                                                         struct zmk_behavior_binding_event event) {
+static int on_keymap_binding_convert_central_state_dependent_params(
+    struct zmk_behavior_binding *binding,
+    struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-
+  struct kp_rgb_behavior_context *ctx = kp_rgb_context_from_binding(binding);
+  if (ctx == NULL) {
+    return -ENODEV;
+  }
   switch (binding->param1) {
   case RGB_TOG_CMD: {
     bool state;
-    int err = zmk_rgb_matrix_get_state(&state);
-    if (err) {
-      LOG_ERR("Failed to get RGB matrix state (err %d)", err);
+    int err = zmk_rgb_matrix_get_state(ctx->dev, &state);
+    if (err)
       return err;
-    }
     binding->param1 = state ? RGB_OFF_CMD : RGB_ON_CMD;
     break;
   }
@@ -419,145 +427,130 @@ on_keymap_binding_convert_central_state_dependent_params(struct zmk_behavior_bin
   case RGB_SAI_CMD:
   case RGB_SAD_CMD: {
     struct kp_rgb_hsb color;
-
     switch (binding->param1) {
     case RGB_BRI_CMD:
-      color = zmk_rgb_matrix_calc_brt(1);
+      color = kp_rgb_calc_brt(ctx, 1);
       break;
     case RGB_BRD_CMD:
-      color = zmk_rgb_matrix_calc_brt(-1);
+      color = kp_rgb_calc_brt(ctx, -1);
       break;
     case RGB_HUI_CMD:
-      color = zmk_rgb_matrix_calc_hue(1);
+      color = kp_rgb_calc_hue(ctx, 1);
       break;
     case RGB_HUD_CMD:
-      color = zmk_rgb_matrix_calc_hue(-1);
+      color = kp_rgb_calc_hue(ctx, -1);
       break;
     case RGB_SAI_CMD:
-      color = zmk_rgb_matrix_calc_sat(1);
+      color = kp_rgb_calc_sat(ctx, 1);
       break;
     default:
-      color = zmk_rgb_matrix_calc_sat(-1);
+      color = kp_rgb_calc_sat(ctx, -1);
       break;
     }
-
     binding->param1 = RGB_COLOR_HSB_CMD;
     binding->param2 = RGB_COLOR_HSB_VAL(color.h, color.s, color.b);
     break;
   }
-  case RGB_EFR_CMD: {
+  case RGB_EFR_CMD:
     binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)zmk_rgb_matrix_calc_effect(-1);
+    binding->param2 = (uint32_t)kp_rgb_calc_effect(ctx, -1);
     break;
-  }
-  case RGB_EFF_CMD: {
+  case RGB_EFF_CMD:
     binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)zmk_rgb_matrix_calc_effect(1);
+    binding->param2 = (uint32_t)kp_rgb_calc_effect(ctx, 1);
     break;
-  }
   case RGB_SPI_CMD:
   case RGB_SPD_CMD: {
-    /* Resolve the relative step to an absolute duration so both halves converge
-     * even if a relative packet is dropped on the split link. The absolute value
-     * rides in param2 (never 0 after clamping), which is why RGB_SPI_CMD doubles
-     * as "set duration" -- an internal encoding that deliberately stays out of
-     * the behavior metadata. */
-    int32_t step = (binding->param1 == RGB_SPI_CMD ? 1 : -1) *
-                   (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
-    int32_t duration = CLAMP((int32_t)kp_active_duration() + step,
-                             (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                             (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+    int32_t step = binding->param1 == RGB_SPI_CMD ? 1 : -1;
+    int32_t duration =
+        CLAMP((int32_t)kp_active_duration(ctx) +
+                  step * (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP,
+              (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+              (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
     binding->param1 = RGB_SPI_CMD;
     binding->param2 = (uint32_t)duration;
     break;
   }
   default:
-    /* Already absolute: RGB_EFS_CMD, RGB_COLOR_HSB_CMD, RGB_ON_CMD/OFF_CMD, the
-     * duration carried in RGB_SPI_CMD, and anything unknown. */
     return 0;
   }
-
-  LOG_DBG("RGB matrix relative converted to absolute (%d/%d)", binding->param1, binding->param2);
   return 0;
 }
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-
+  struct kp_rgb_behavior_context *ctx = kp_rgb_context_from_binding(binding);
+  if (ctx == NULL)
+    return -ENODEV;
   int ret;
-
   switch (binding->param1) {
   case RGB_TOG_CMD:
-    /* A keymap or trigger binding is converted to RGB_ON/OFF before it reaches
-     * here, so this only runs for one that bypassed the convert hook. Toggle on
-     * the momentary state, not the intent: after auto-off the matrix is dark but
-     * the intent is still on, and a toggle on a dark matrix means "turn on". */
-    kp_rgb_state.user_on = !kp_rgb_state.on;
-    ret = kp_rgb_state.on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on();
+    kp_rgb_matrix_lock();
+    ctx->state.user_on = !ctx->state.on;
+    bool toggle_on = !ctx->state.on;
+    kp_rgb_matrix_unlock();
+    ret =
+        toggle_on ? zmk_rgb_matrix_on(ctx->dev) : zmk_rgb_matrix_off(ctx->dev);
     break;
   case RGB_ON_CMD:
-    kp_rgb_state.user_on = true;
-    ret = zmk_rgb_matrix_on();
+    kp_rgb_matrix_lock();
+    ctx->state.user_on = true;
+    kp_rgb_matrix_unlock();
+    ret = zmk_rgb_matrix_on(ctx->dev);
     break;
   case RGB_OFF_CMD:
-    kp_rgb_state.user_on = false;
-    ret = zmk_rgb_matrix_off();
+    kp_rgb_matrix_lock();
+    ctx->state.user_on = false;
+    kp_rgb_matrix_unlock();
+    ret = zmk_rgb_matrix_off(ctx->dev);
     break;
   case RGB_HUI_CMD:
-    ret = zmk_rgb_matrix_change_hue(1);
+    ret = kp_rgb_change_hue(ctx, 1);
     break;
   case RGB_HUD_CMD:
-    ret = zmk_rgb_matrix_change_hue(-1);
+    ret = kp_rgb_change_hue(ctx, -1);
     break;
   case RGB_SAI_CMD:
-    ret = zmk_rgb_matrix_change_sat(1);
+    ret = kp_rgb_change_sat(ctx, 1);
     break;
   case RGB_SAD_CMD:
-    ret = zmk_rgb_matrix_change_sat(-1);
+    ret = kp_rgb_change_sat(ctx, -1);
     break;
   case RGB_BRI_CMD:
-    ret = zmk_rgb_matrix_change_brt(1);
+    ret = kp_rgb_change_brt(ctx, 1);
     break;
   case RGB_BRD_CMD:
-    ret = zmk_rgb_matrix_change_brt(-1);
+    ret = kp_rgb_change_brt(ctx, -1);
     break;
   case RGB_SPI_CMD:
-    /* A non-zero param2 is the absolute duration resolved by the convert hook; a
-     * bare &kprgb RGB_SPI (param2 == 0) is a local relative step. */
-    ret = binding->param2 != 0 ? zmk_rgb_matrix_set_duration(binding->param2)
-                               : zmk_rgb_matrix_change_duration(1);
+    ret = binding->param2 != 0 ? kp_rgb_set_duration(ctx, binding->param2)
+                               : kp_rgb_change_duration(ctx, 1);
     break;
   case RGB_SPD_CMD:
-    ret = zmk_rgb_matrix_change_duration(-1);
+    ret = kp_rgb_change_duration(ctx, -1);
     break;
   case RGB_EFS_CMD:
-    ret = zmk_rgb_matrix_select_effect((uint16_t)binding->param2);
+    ret = kp_rgb_select_effect(ctx, (uint16_t)binding->param2);
     break;
   case RGB_EFF_CMD:
-    ret = zmk_rgb_matrix_cycle_effect(1);
+    ret = zmk_rgb_matrix_cycle_effect(ctx->dev, 1);
     break;
   case RGB_EFR_CMD:
-    ret = zmk_rgb_matrix_cycle_effect(-1);
+    ret = zmk_rgb_matrix_cycle_effect(ctx->dev, -1);
     break;
   case RGB_COLOR_HSB_CMD:
-    ret = zmk_rgb_matrix_set_hsb((struct kp_rgb_hsb){.h = (binding->param2 >> 16) & 0xFFFF,
-                                                     .s = (binding->param2 >> 8) & 0xFF,
-                                                     .b = binding->param2 & 0xFF});
+    ret = kp_rgb_set_hsb(
+        ctx, (struct kp_rgb_hsb){.h = (binding->param2 >> 16) & 0xFFFF,
+                                 .s = (binding->param2 >> 8) & 0xFF,
+                                 .b = binding->param2 & 0xFF});
     break;
   default:
     return -ENOTSUP;
   }
-
-  if (ret < 0) {
+  if (ret < 0)
     return ret;
-  }
-
-  /* Every mutating command is persisted, trigger-driven ones included: by the
-   * time a binding reaches here its origin is unrecoverable, and the trigger
-   * table's runtime behaviour already re-asserts effects on layer changes, so
-   * persisting it loses nothing a reboot would not have lost anyway. */
-  kp_rgb_save_state();
+  kp_rgb_save_state(ctx);
   return ret;
 }
 
@@ -569,20 +562,14 @@ static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
 }
 
 static const struct behavior_driver_api behavior_rgb_matrix_driver_api = {
-  .binding_convert_central_state_dependent_params =
-  on_keymap_binding_convert_central_state_dependent_params,
-  .binding_pressed = on_keymap_binding_pressed,
-  .binding_released = on_keymap_binding_released,
-  /* Each half drives its own physical strip, so the command has to reach
-   * every half: CENTRAL would leave the peripheral's strip dead and
-   * EVENT_SOURCE would only light the half the key was pressed on. */
-  .locality = BEHAVIOR_LOCALITY_GLOBAL,
+    .binding_convert_central_state_dependent_params =
+        on_keymap_binding_convert_central_state_dependent_params,
+    .binding_pressed = on_keymap_binding_pressed,
+    .binding_released = on_keymap_binding_released,
+    .locality = BEHAVIOR_LOCALITY_GLOBAL,
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
-  .parameter_metadata = &metadata,
+    .parameter_metadata = &metadata,
 #endif
 };
-
-BEHAVIOR_DT_INST_DEFINE(0, kp_effects_init, NULL, NULL, NULL, POST_KERNEL,
-                        CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &behavior_rgb_matrix_driver_api);
 
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */

@@ -8,6 +8,22 @@ compatible: "keypaw,behavior-rgb-matrix"
 include: two_param.yaml
 
 properties:
+  leds:
+    type: array
+    required: false
+    description: |
+      Local LED chain indices owned by this behavior. Entries must be unique
+      and within the strip chain length. When omitted, this behavior owns the
+      complete physical matrix for backward compatibility; multiple behaviors
+      therefore must provide disjoint `leds` lists.
+
+  indicators:
+    type: phandles
+    required: false
+    description: |
+      Indicators composited over this behavior's active effect, in paint order.
+      An effect may replace this list with its own `indicators` property or opt
+      out with `no-indicators`.
   max-brightness:
     type: int
     default: 40

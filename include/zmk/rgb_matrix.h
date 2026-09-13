@@ -14,16 +14,16 @@
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/sys/util.h>
 
+#include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/event_manager.h>
 #include <zmk/keymap.h>
-#include <drivers/behavior.h>
 
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util_macro.h>
 
-/* The engine's devicetree node. Effects are separate device instances (their own
- * DT_DRV_COMPAT), so they cannot use DT_DRV_INST() to reach the strip: an
+/* The engine's devicetree node. Effects are separate device instances (their
+ * own DT_DRV_COMPAT), so they cannot use DT_DRV_INST() to reach the strip: an
  * effect's own DT_DRV_INST(0) would resolve to the effect node. Spell the
  * compatible out instead, so any effect TU (in any module) can size its state
  * from the real LED count.
@@ -45,42 +45,48 @@ struct kp_rgb_hsb {
 
 /* Compile-time 0xRRGGBB -> struct kp_rgb_hsb initializer, so an effect's preset
  * colour can stay a devicetree constant while the effect state holds HSB (see
- * kp_rgb_effect_common_data). This mirrors the runtime conversion this file used
- * to expose, down to the truncating division, so a given `color` property yields
- * the same preset either way. */
+ * kp_rgb_effect_common_data). This mirrors the runtime conversion this file
+ * used to expose, down to the truncating division, so a given `color` property
+ * yields the same preset either way. */
 #define KP_RGB_HEX_R(hex) ((int)(((uint32_t)(hex) >> 16) & 0xFFu))
 #define KP_RGB_HEX_G(hex) ((int)(((uint32_t)(hex) >> 8) & 0xFFu))
 #define KP_RGB_HEX_B(hex) ((int)((uint32_t)(hex) & 0xFFu))
 
 #define KP_RGB_HEX_MAX2(a, b) ((a) > (b) ? (a) : (b))
 #define KP_RGB_HEX_MIN2(a, b) ((a) < (b) ? (a) : (b))
-#define KP_RGB_HEX_MAX(hex) \
-  KP_RGB_HEX_MAX2(KP_RGB_HEX_MAX2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)), KP_RGB_HEX_B(hex))
-#define KP_RGB_HEX_MIN(hex) \
-  KP_RGB_HEX_MIN2(KP_RGB_HEX_MIN2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)), KP_RGB_HEX_B(hex))
+#define KP_RGB_HEX_MAX(hex)                                                    \
+  KP_RGB_HEX_MAX2(KP_RGB_HEX_MAX2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)),       \
+                  KP_RGB_HEX_B(hex))
+#define KP_RGB_HEX_MIN(hex)                                                    \
+  KP_RGB_HEX_MIN2(KP_RGB_HEX_MIN2(KP_RGB_HEX_R(hex), KP_RGB_HEX_G(hex)),       \
+                  KP_RGB_HEX_B(hex))
 #define KP_RGB_HEX_DELTA(hex) (KP_RGB_HEX_MAX(hex) - KP_RGB_HEX_MIN(hex))
 
 /* Adding KP_RGB_HUE_MAX before the modulo keeps the red-dominant term (the only
  * one that can go negative) in range; the green- and blue-dominant terms are
  * already in [60, 180] and [180, 300]. */
-#define KP_RGB_HEX_HUE(hex)                                                                        \
-  (KP_RGB_HEX_DELTA(hex) == 0                                                                      \
-       ? 0                                                                                         \
-       : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_R(hex)                                                  \
-             ? ((60 * (KP_RGB_HEX_G(hex) - KP_RGB_HEX_B(hex)) / KP_RGB_HEX_DELTA(hex)) +           \
-                KP_RGB_HUE_MAX) %                                                                  \
-                   KP_RGB_HUE_MAX                                                                  \
-             : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_G(hex)                                            \
-                   ? (120 + 60 * (KP_RGB_HEX_B(hex) - KP_RGB_HEX_R(hex)) / KP_RGB_HEX_DELTA(hex))  \
-                   : (240 + 60 * (KP_RGB_HEX_R(hex) - KP_RGB_HEX_G(hex)) / KP_RGB_HEX_DELTA(hex)))
+#define KP_RGB_HEX_HUE(hex)                                                    \
+  (KP_RGB_HEX_DELTA(hex) == 0 ? 0                                              \
+   : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_R(hex)                                  \
+       ? ((60 * (KP_RGB_HEX_G(hex) - KP_RGB_HEX_B(hex)) /                      \
+           KP_RGB_HEX_DELTA(hex)) +                                            \
+          KP_RGB_HUE_MAX) %                                                    \
+             KP_RGB_HUE_MAX                                                    \
+   : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_G(hex)                                  \
+       ? (120 + 60 * (KP_RGB_HEX_B(hex) - KP_RGB_HEX_R(hex)) /                 \
+                    KP_RGB_HEX_DELTA(hex))                                     \
+       : (240 + 60 * (KP_RGB_HEX_R(hex) - KP_RGB_HEX_G(hex)) /                 \
+                    KP_RGB_HEX_DELTA(hex)))
 
-#define KP_RGB_HEX_SAT(hex) \
-  (KP_RGB_HEX_MAX(hex) == 0 ? 0 : KP_RGB_HEX_DELTA(hex) * KP_RGB_SAT_MAX / KP_RGB_HEX_MAX(hex))
+#define KP_RGB_HEX_SAT(hex)                                                    \
+  (KP_RGB_HEX_MAX(hex) == 0                                                    \
+       ? 0                                                                     \
+       : KP_RGB_HEX_DELTA(hex) * KP_RGB_SAT_MAX / KP_RGB_HEX_MAX(hex))
 #define KP_RGB_HEX_BRT(hex) (KP_RGB_HEX_MAX(hex) * KP_RGB_BRT_MAX / 255)
 
-#define KP_RGB_HSB_FROM_HEX(hex)                                                   \
-  {.h = (uint16_t)KP_RGB_HEX_HUE(hex),                                             \
-   .s = (uint8_t)KP_RGB_HEX_SAT(hex),                                              \
+#define KP_RGB_HSB_FROM_HEX(hex)                                               \
+  {.h = (uint16_t)KP_RGB_HEX_HUE(hex),                                         \
+   .s = (uint8_t)KP_RGB_HEX_SAT(hex),                                          \
    .b = (uint8_t)KP_RGB_HEX_BRT(hex)}
 
 struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
@@ -112,12 +118,11 @@ struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
   } CONCAT(prop, _t)
 
 /* Resolve an instance's property to its named constant. */
-#define CONV_DT_ENUM(inst, prop)                                              \
+#define CONV_DT_ENUM(inst, prop)                                               \
   CONCAT(DT_DRV_COMPAT, _, prop, _, DT_STRING_TOKEN(DT_DRV_INST(inst), prop))
 
 /* Resolve a DT enum name to its named constant. */
 #define DT_ENUM_CONST(prop, val) CONCAT(DT_DRV_COMPAT, _, prop, _, val)
-
 
 /* Brightness helpers. Effects render at full scale and then dim the result, so
  * that a single global brightness setting applies uniformly.
@@ -128,7 +133,8 @@ struct led_rgb kp_rgb_rgb_scale(struct led_rgb rgb, uint8_t pct);
 
 /* Blend `over` into `base` by `pct` percent (0 keeps base, 100 replaces it).
  * Used by indicators to composite over whatever the effect rendered. */
-struct led_rgb kp_rgb_rgb_mix(struct led_rgb base, struct led_rgb over, uint8_t pct);
+struct led_rgb kp_rgb_rgb_mix(struct led_rgb base, struct led_rgb over,
+                              uint8_t pct);
 
 #define kp_hex_to_rgb(hex)                                                     \
   ((struct led_rgb){                                                           \
@@ -147,17 +153,17 @@ struct kp_rgb_coord {
   uint16_t y;
 };
 
-/* Resolve a key position to the LED under it: the LED index, or SIZE_MAX when the
- * position has no LED. Effects need this from their on_event callback, where no
- * frame is available.
+/* Resolve a key position to the LED under it: the LED index, or SIZE_MAX when
+ * the position has no LED. Effects need this from their on_event callback,
+ * where no frame is available.
  *
- * At most one LED is resolved per position (the last `mapping` entry naming that
- * key wins), which matches the shields today; a key with several LEDs underneath
- * would need this API generalised. */
+ * At most one LED is resolved per position (the last `mapping` entry naming
+ * that key wins), which matches the shields today; a key with several LEDs
+ * underneath would need this API generalised. */
 size_t kp_rgb_led_for_position(uint32_t position);
 
-/* An LED's centre in this half's normalised layout units -- the same geometry the
- * frame publishes as `coords` -- or NULL when `led` is out of range. */
+/* An LED's centre in this half's normalised layout units -- the same geometry
+ * the frame publishes as `coords` -- or NULL when `led` is out of range. */
 const struct kp_rgb_coord *kp_rgb_led_coord(size_t led);
 
 struct kp_rgb_frame {
@@ -169,8 +175,8 @@ struct kp_rgb_frame {
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
   /* Vertical extent of this half's LEDs (max y - min y), in layout units
-   * (never 0). Needed by vertical-basis effects (gradient up/down, cycle up/down,
-   * chevron, radial extent). */
+   * (never 0). Needed by vertical-basis effects (gradient up/down, cycle
+   * up/down, chevron, radial extent). */
   uint16_t board_height;
   /* The keyboard is not ZMK_ACTIVITY_ACTIVE. */
   bool is_idle;
@@ -189,11 +195,12 @@ struct kp_rgb_effect_api {
   const struct behavior_driver_api behavior; /* must be first */
   rgb_matrix_effect_render_callback_t render;
   rgb_matrix_effect_event_callback_t on_event;
+  const struct device *owner; /* parent keypaw,behavior-rgb-matrix */
   /* Per-effect indicator override, filled in by KP_RGB_EFFECT_DEFINE from the
    * effect node's devicetree:
    *   indicators = <&a &b>;  -> exactly those, in order
    *   no-indicators;         -> kp_rgb_no_indicators (non-NULL, length 0)
-   *   neither                -> NULL, inherit the matrix-wide list
+   *   neither                -> NULL, inherit the owning behavior's list
    */
   const struct device *const *indicators;
   size_t indicators_len;
@@ -201,7 +208,8 @@ struct kp_rgb_effect_api {
 
 /* The brightness a renderer should apply this frame. */
 static inline uint8_t kp_rgb_brightness_pct(const struct kp_rgb_frame *frame) {
-  return frame->is_idle ? frame->tune->idle_brightness : frame->tune->max_brightness;
+  return frame->is_idle ? frame->tune->idle_brightness
+                        : frame->tune->max_brightness;
 }
 
 int kp_rgb_effect_convert_central_state_dependent_params(
@@ -209,7 +217,7 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding_event event);
 
 struct kp_rgb_effect_common_config {
-  uint16_t index;       /* user-assigned, unique, stable across rebuilds */
+  uint16_t index; /* user-assigned, unique, stable across rebuilds */
 };
 struct kp_rgb_effect_common_data {
   uint16_t duration_ms;    /* single cycle animation duration */
@@ -234,10 +242,10 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   return MAX(kp_rgb_effect_data(dev)->duration_ms, 1u);
 }
 
-/* Expand one entry of an `indicators = <&a &b>;` list. The properties are of type
- * `phandles` (not `phandle-array`, which would demand #indicator-cells), so
- * DT_PROP_BY_IDX is the accessor that yields a node identifier. */
-#define KP_RGB_INDICATORS_AT_IDX(idx, node_id) \
+/* Expand one entry of an `indicators = <&a &b>;` list. The properties are of
+ * type `phandles` (not `phandle-array`, which would demand #indicator-cells),
+ * so DT_PROP_BY_IDX is the accessor that yields a node identifier. */
+#define KP_RGB_INDICATORS_AT_IDX(idx, node_id)                                 \
   DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, indicators, idx))
 
 /* Declare the override list, but only when the node actually has one, so an
@@ -250,12 +258,15 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
            node_id)};),                                                        \
       ())
 
-#define KP_RGB_EFFECT_INDICATOR_PTR(node_id, cfg_inst)                  \
-  COND_CODE_1(DT_PROP(node_id, no_indicators), (kp_rgb_no_indicators),  \
-              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, indicators),       \
+#define KP_RGB_EFFECT_INDICATOR_PTR(node_id, cfg_inst)                         \
+  COND_CODE_1(DT_PROP(node_id, no_indicators), (kp_rgb_no_indicators),         \
+              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, indicators),              \
                            (cfg_inst##_indicators), (NULL))))
 
 #define KP_RGB_EFFECT_DEFINE(node_id, render_fn, event_fn, cfg_inst)           \
+  BUILD_ASSERT(                                                                \
+      DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix),      \
+      "RGB effect must be a child of keypaw,behavior-rgb-matrix");             \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_effect_common_config) &&           \
                    (const void *)&cfg_inst##_cfg ==                            \
@@ -291,6 +302,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        (.parameter_metadata = &cfg_inst##_metadata, ))},       \
       .render = render_fn,                                                     \
       .on_event = event_fn,                                                    \
+      .owner = DEVICE_DT_GET(DT_PARENT(node_id)),                              \
       .indicators = KP_RGB_EFFECT_INDICATOR_PTR(node_id, cfg_inst),            \
       .indicators_len = DT_PROP_LEN_OR(node_id, indicators, 0),                \
   };                                                                           \
@@ -302,10 +314,8 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * Indicators
  *
  * An indicator is a non-behavior device that paints over whatever the active
- * effect rendered, so status (Caps Lock, a layer, battery, ...) can be shown
- * without the effects knowing anything about it. Indicators are listed in
- * paint order by `indicators = <&a &b>;` on the engine node, which individual
- * effects may override.
+ * effect rendered. Indicators are listed in paint order by `indicators` on the
+ * owning behavior node; individual effects may override that list.
  *
  * Kinds sample the state they need in `render` -- the engine repaints every
  * tick, so there is no need to subscribe to events.
@@ -321,8 +331,8 @@ struct kp_rgb_indicator_common_config {
   size_t keys_len;
   const uint32_t *leds; /* raw chain indices, or NULL */
   size_t leds_len;
-  uint32_t color;       /* 24-bit RGB */
-  uint8_t brightness;   /* paint strength: 100 replaces, lower values mix */
+  uint32_t color;     /* 24-bit RGB */
+  uint8_t brightness; /* paint strength: 100 replaces, lower values mix */
 };
 
 /* Kind-agnostic mutable part; must be the first member. */
@@ -340,13 +350,14 @@ struct kp_rgb_indicator_common_data {
  * Returns the number written (never more than out_max, and always <=
  * KP_LED_COUNT); 0 when both lists are empty. */
 size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
-                              const uint32_t *leds, size_t leds_len, size_t *out,
-                              size_t out_max);
+                              const uint32_t *leds, size_t leds_len,
+                              size_t *out, size_t out_max);
 
 /* Paint `color` onto `leds` at `strength` percent: the colour is scaled by the
  * frame's brightness, then mixed over the existing pixels. */
 void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
-                            size_t led_count, struct led_rgb color, uint8_t strength);
+                            size_t led_count, struct led_rgb color,
+                            uint8_t strength);
 
 /* Declare the devicetree-derived target arrays for one indicator instance. A
  * missing property yields a one-element array whose length is read as 0, so the
@@ -407,7 +418,6 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
                    &cfg_inst##_cfg, POST_KERNEL,                               \
                    CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
 
-
 /* -------------------------------------------------------------------------
  * Triggers
  *
@@ -450,7 +460,8 @@ struct kp_rgb_trigger_common_config {
 
 /* Member-wise initializer for the common part of a kind's config. */
 #define KP_RGB_TRIGGER_COMMON(node_id, cfg_inst)                               \
-  {.bindings = cfg_inst##_bindings, .bindings_len = DT_PROP_LEN(node_id, bindings)}
+  {.bindings = cfg_inst##_bindings,                                            \
+   .bindings_len = DT_PROP_LEN(node_id, bindings)}
 
 /* Declare the device. Triggers carry no mutable state, so they pass no data
  * pointer and need no init function. */
@@ -468,10 +479,12 @@ struct kp_rgb_trigger_common_config {
                    POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,           \
                    &cfg_inst##_api)
 
-int zmk_rgb_matrix_toggle(void);
-int zmk_rgb_matrix_on(void);
-int zmk_rgb_matrix_off(void);
-int zmk_rgb_matrix_get_state(bool *on_off);
+int zmk_rgb_matrix_toggle(const struct device *behavior);
+int zmk_rgb_matrix_on(const struct device *behavior);
+int zmk_rgb_matrix_off(const struct device *behavior);
+int zmk_rgb_matrix_get_state(const struct device *behavior, bool *on_off);
 
-int zmk_rgb_matrix_select_effect(uint16_t effect);
-int zmk_rgb_matrix_cycle_effect(int16_t direction);
+int zmk_rgb_matrix_select_effect(const struct device *behavior,
+                                 uint16_t effect);
+int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
+                                int16_t direction);

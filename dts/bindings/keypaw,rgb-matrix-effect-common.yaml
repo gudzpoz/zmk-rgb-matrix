@@ -19,21 +19,21 @@ properties:
     default: 0
     description: |
       Animation period in milliseconds; shorter means faster. Zero (the default)
-      takes the &kprgb node's `initial-duration-ms`.
+      takes the owning behavior node's `initial-duration-ms`.
 
   indicators:
     type: phandles
     required: false
     description: |
-      Indicator list to use while this effect is active, replacing the one on the
-      &rgb_matrix node. A devicetree array cannot be empty, so use
+      Indicator list to use while this effect is active, replacing the list on
+      its parent behavior node. A devicetree array cannot be empty, so use
       `no-indicators;` for an effect that wants none.
 
   no-indicators:
     type: boolean
     description: |
       Draw no indicators at all for this effect. Only meaningful for effects that
-      would otherwise inherit the matrix-wide list.
+      would otherwise inherit the owning behavior's list.
 
   no-cycle:
     type: boolean
