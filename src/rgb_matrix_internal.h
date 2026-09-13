@@ -20,7 +20,10 @@
 /* Engine state shared between rgb_matrix.c and behavior_rgb_matrix.c.
  */
 struct kp_rgb_state {
+  /* Momentary lit state. The idle auto-off writes this and nothing else. */
   bool on;
+  /* The user's intent, persisted across reboots. */
+  bool user_on;
   const struct device *active_fx;
 };
 
@@ -31,13 +34,31 @@ extern struct kp_rgb_state kp_rgb_state;
 extern struct kp_rgb_tuning kp_rgb_tuning;
 
 /* Guards against the behavior's command handlers racing the render on the
- * low priority work queue. */
+ * low priority work queue. The settings save work snapshots the effect table
+ * under this lock; it must never be held across settings_save_one(), which can
+ * block on a flash erase while holding the settings lock. */
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
 /* behavior_rgb_matrix.c: registry and command helpers. */
 int kp_rgb_resolve_active(void);
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
+
+/* Bounds the persisted blob, so a stored blob has a size known to both writer
+ * and reader. Must be >= KP_RGB_NEFFECTS, which behavior_rgb_matrix.c asserts.
+ * Changing it changes sizeof(blob) and therefore discards stored state. */
+#define KP_RGB_PERSIST_MAX_EFFECTS 16
+
+/* Registry introspection, for the settings blob. `index` is the effect's
+ * devicetree `index` (pinned to its child position), not a chain position. */
+size_t kp_rgb_effect_count(void);
+const struct device *kp_rgb_effect_at(size_t index);
+size_t kp_rgb_selected_effect(void);
+
+/* rgb_settings.c: debounced persist of the user intent, the selected effect and
+ * every effect's colour/duration. Safe to call from a behavior handler; it only
+ * reschedules a work item and is a no-op when CONFIG_SETTINGS is off. */
+int kp_rgb_save_state(void);
 
 int zmk_rgb_matrix_calc_effect(int16_t direction);
 struct kp_rgb_hsb zmk_rgb_matrix_calc_hue(int8_t direction);

@@ -50,6 +50,21 @@ struct kp_rgb_tuning kp_rgb_tuning = {
 static const struct device *kp_effects[KP_RGB_NEFFECTS];
 static size_t effect_index;
 
+/* The persisted blob has a fixed layout, so the registry has to fit it. */
+BUILD_ASSERT(KP_RGB_NEFFECTS <= KP_RGB_PERSIST_MAX_EFFECTS,
+             "raise KP_RGB_PERSIST_MAX_EFFECTS for the larger effect registry");
+BUILD_ASSERT(KP_RGB_NEFFECTS <= UINT8_MAX, "effect count must fit the blob's count byte");
+BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS <= UINT16_MAX,
+             "the persisted duration is a uint16_t");
+
+size_t kp_rgb_effect_count(void) { return KP_RGB_NEFFECTS; }
+
+const struct device *kp_rgb_effect_at(size_t index) {
+  return index < KP_RGB_NEFFECTS ? kp_effects[index] : NULL;
+}
+
+size_t kp_rgb_selected_effect(void) { return effect_index; }
+
 /* Effects excluded from RGB_EFF/EFR cycling, indexed by effect index (which the
  * registry BUILD_ASSERT pins to the child position). Device presence is not
  * enough: a `no-cycle` effect is registered and selectable by index, it just
@@ -348,6 +363,8 @@ static int kp_effects_init(const struct device *dev) {
   LOG_DBG("Registered %u RGB matrix effects from devicetree", (uint32_t)KP_RGB_NEFFECTS);
 
   kp_rgb_state.on = DT_PROP_OR(KP_RGB_BEHAVIOR, initial_on, 1);
+  /* The devicetree default is the intent until a stored one is loaded. */
+  kp_rgb_state.user_on = kp_rgb_state.on;
 
   /* Seed the per-effect defaults across every registered effect, not just the
    * one selected at boot: otherwise switching to an effect whose preset colour
@@ -468,45 +485,80 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
 
+  int ret;
+
   switch (binding->param1) {
   case RGB_TOG_CMD:
-    return zmk_rgb_matrix_toggle();
+    /* A keymap or trigger binding is converted to RGB_ON/OFF before it reaches
+     * here, so this only runs for one that bypassed the convert hook. Toggle on
+     * the momentary state, not the intent: after auto-off the matrix is dark but
+     * the intent is still on, and a toggle on a dark matrix means "turn on". */
+    kp_rgb_state.user_on = !kp_rgb_state.on;
+    ret = kp_rgb_state.on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on();
+    break;
   case RGB_ON_CMD:
-    return zmk_rgb_matrix_on();
+    kp_rgb_state.user_on = true;
+    ret = zmk_rgb_matrix_on();
+    break;
   case RGB_OFF_CMD:
-    return zmk_rgb_matrix_off();
+    kp_rgb_state.user_on = false;
+    ret = zmk_rgb_matrix_off();
+    break;
   case RGB_HUI_CMD:
-    return zmk_rgb_matrix_change_hue(1);
+    ret = zmk_rgb_matrix_change_hue(1);
+    break;
   case RGB_HUD_CMD:
-    return zmk_rgb_matrix_change_hue(-1);
+    ret = zmk_rgb_matrix_change_hue(-1);
+    break;
   case RGB_SAI_CMD:
-    return zmk_rgb_matrix_change_sat(1);
+    ret = zmk_rgb_matrix_change_sat(1);
+    break;
   case RGB_SAD_CMD:
-    return zmk_rgb_matrix_change_sat(-1);
+    ret = zmk_rgb_matrix_change_sat(-1);
+    break;
   case RGB_BRI_CMD:
-    return zmk_rgb_matrix_change_brt(1);
+    ret = zmk_rgb_matrix_change_brt(1);
+    break;
   case RGB_BRD_CMD:
-    return zmk_rgb_matrix_change_brt(-1);
+    ret = zmk_rgb_matrix_change_brt(-1);
+    break;
   case RGB_SPI_CMD:
     /* A non-zero param2 is the absolute duration resolved by the convert hook; a
      * bare &kprgb RGB_SPI (param2 == 0) is a local relative step. */
-    return binding->param2 != 0 ? zmk_rgb_matrix_set_duration(binding->param2)
-                                : zmk_rgb_matrix_change_duration(1);
+    ret = binding->param2 != 0 ? zmk_rgb_matrix_set_duration(binding->param2)
+                               : zmk_rgb_matrix_change_duration(1);
+    break;
   case RGB_SPD_CMD:
-    return zmk_rgb_matrix_change_duration(-1);
+    ret = zmk_rgb_matrix_change_duration(-1);
+    break;
   case RGB_EFS_CMD:
-    return zmk_rgb_matrix_select_effect((uint16_t)binding->param2);
+    ret = zmk_rgb_matrix_select_effect((uint16_t)binding->param2);
+    break;
   case RGB_EFF_CMD:
-    return zmk_rgb_matrix_cycle_effect(1);
+    ret = zmk_rgb_matrix_cycle_effect(1);
+    break;
   case RGB_EFR_CMD:
-    return zmk_rgb_matrix_cycle_effect(-1);
+    ret = zmk_rgb_matrix_cycle_effect(-1);
+    break;
   case RGB_COLOR_HSB_CMD:
-    return zmk_rgb_matrix_set_hsb((struct kp_rgb_hsb){.h = (binding->param2 >> 16) & 0xFFFF,
-                                                      .s = (binding->param2 >> 8) & 0xFF,
-                                                      .b = binding->param2 & 0xFF});
+    ret = zmk_rgb_matrix_set_hsb((struct kp_rgb_hsb){.h = (binding->param2 >> 16) & 0xFFFF,
+                                                     .s = (binding->param2 >> 8) & 0xFF,
+                                                     .b = binding->param2 & 0xFF});
+    break;
+  default:
+    return -ENOTSUP;
   }
 
-  return -ENOTSUP;
+  if (ret < 0) {
+    return ret;
+  }
+
+  /* Every mutating command is persisted, trigger-driven ones included: by the
+   * time a binding reaches here its origin is unrecoverable, and the trigger
+   * table's runtime behaviour already re-asserts effects on layer changes, so
+   * persisting it loses nothing a reboot would not have lost anyway. */
+  kp_rgb_save_state();
+  return ret;
 }
 
 static int on_keymap_binding_released(struct zmk_behavior_binding *binding,

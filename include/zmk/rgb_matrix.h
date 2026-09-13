@@ -305,44 +305,45 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
 /* Declare the devicetree-derived target arrays for one indicator instance. A
  * missing property yields a one-element array whose length is read as 0, so the
  * declaration is always valid C and the array is always referenced. */
-#define KP_RGB_INDICATOR_TARGET_ARRAYS(inst, cfg_inst)                          \
+#define KP_RGB_INDICATOR_TARGET_ARRAYS(inst, cfg_inst)                         \
   static const uint32_t cfg_inst##_keys[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                    \
-                  (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                   \
+      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                   \
+                  (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                  \
   static const uint32_t cfg_inst##_leds[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                    \
+      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
                   (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
 
 /* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_INDICATOR_COMMON(node_id, cfg_inst)                              \
-  {.keys = cfg_inst##_keys,                                                     \
-   .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                                \
-   .leds = cfg_inst##_leds,                                                     \
-   .leds_len = DT_PROP_LEN_OR(node_id, leds, 0),                                \
+#define KP_RGB_INDICATOR_COMMON(node_id, cfg_inst)                             \
+  {.keys = cfg_inst##_keys,                                                    \
+   .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                               \
+   .leds = cfg_inst##_leds,                                                    \
+   .leds_len = DT_PROP_LEN_OR(node_id, leds, 0),                               \
    .color = DT_PROP_OR(node_id, color, 0xFFFFFF),                              \
    .brightness = DT_PROP_OR(node_id, brightness, 100)}
 
 /* Declare the device. Indicators are plain devices, never behaviors, so they
  * stay out of the behavior registry and cannot be keymap-bound. */
-#define KP_RGB_INDICATOR_DEFINE(inst, render_fn, cfg_inst)                      \
+#define KP_RGB_INDICATOR_DEFINE(inst, render_fn, cfg_inst)                     \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
-                       sizeof(struct kp_rgb_indicator_common_config) &&         \
+                       sizeof(struct kp_rgb_indicator_common_config) &&        \
                    (const void *)&cfg_inst##_cfg ==                            \
                        (const void *)&cfg_inst##_cfg.common,                   \
                "indicator config must embed "                                  \
                "struct kp_rgb_indicator_common_config as the first field");    \
-  BUILD_ASSERT(sizeof(cfg_inst##_data.common) ==                               \
-                       sizeof(struct kp_rgb_indicator_common_data) &&           \
-                   (const void *)&cfg_inst##_data ==                           \
-                       (const void *)&cfg_inst##_data.common,                  \
-               "indicator data must embed struct kp_rgb_indicator_common_data " \
-               "as the first field");                                          \
+  BUILD_ASSERT(                                                                \
+      sizeof(cfg_inst##_data.common) ==                                        \
+              sizeof(struct kp_rgb_indicator_common_data) &&                   \
+          (const void *)&cfg_inst##_data ==                                    \
+              (const void *)&cfg_inst##_data.common,                           \
+      "indicator data must embed struct kp_rgb_indicator_common_data "         \
+      "as the first field");                                                   \
   static int cfg_inst##_init(const struct device *dev) {                       \
     const struct kp_rgb_indicator_common_config *cfg = dev->config;            \
     struct kp_rgb_indicator_common_data *data = dev->data;                     \
-    data->led_count = kp_rgb_resolve_targets(cfg->keys, cfg->keys_len,         \
-                                             cfg->leds, cfg->leds_len,         \
-                                             data->leds, KP_LED_COUNT);        \
+    data->led_count =                                                          \
+        kp_rgb_resolve_targets(cfg->keys, cfg->keys_len, cfg->leds,            \
+                               cfg->leds_len, data->leds, KP_LED_COUNT);       \
     return 0;                                                                  \
   }                                                                            \
   static const struct kp_rgb_indicator_api cfg_inst##_api = {                  \

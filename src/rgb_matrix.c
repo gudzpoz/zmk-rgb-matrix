@@ -230,21 +230,18 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
 
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
   if (as_zmk_activity_state_changed(eh) != NULL) {
-    static bool is_awake = true, was_on = false;
+    static bool is_awake = true;
     bool wakening = zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE;
     if (is_awake == wakening) {
       return ZMK_EV_EVENT_BUBBLE;
     }
     is_awake = wakening;
     if (is_awake) {
-      if (was_on) {
+      if (kp_rgb_state.user_on) {
         zmk_rgb_matrix_on();
       }
-    } else {
-      was_on = kp_rgb_state.on;
-      if (kp_rgb_state.on) {
-        zmk_rgb_matrix_off();
-      }
+    } else if (kp_rgb_state.on) {
+      zmk_rgb_matrix_off();
     }
     return ZMK_EV_EVENT_BUBBLE;
   }

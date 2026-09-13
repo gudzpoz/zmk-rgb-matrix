@@ -16,6 +16,8 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_INDICATOR_LAYER indicators/layer.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   # controller
   behavior_rgb_matrix.c
+  # effect persistence
+  rgb_settings.c
   # built-in effects
   effects/solid.c
   effects/breathe.c
