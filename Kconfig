@@ -97,3 +97,42 @@ config KEYPAW_RGB_TRIGGERS
       Built for the split central only: conditions read keymap layer state,
       which does not exist on a peripheral. The commands still reach both halves
       because the behavior is BEHAVIOR_LOCALITY_GLOBAL.
+
+config KEYPAW_RGB_SPLIT_SYNC
+    bool "Push the RGB state to a split peripheral when it connects"
+    default y
+    depends on KEYPAW_BEHAVIOR_RGB_MATRIX
+    depends on ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
+    help
+      A &kprgb command is BEHAVIOR_LOCALITY_GLOBAL, so it is forwarded to the
+      peripheral and persisted there. A peripheral that was powered off while
+      the settings changed therefore keeps stale flash defaults and reloads them
+      on the next power-up. This pushes the selected effect, its colour and
+      period, and the user on/off intent to a peripheral whenever it newly
+      connects; the peripheral's own command handler applies and persists them.
+
+      Built for the split central only. The trigger polls the transport's in-RAM
+      connected-source list, which transmits nothing until a peripheral appears.
+
+if KEYPAW_RGB_SPLIT_SYNC
+
+config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
+    int "Peripheral connection poll period (ms)"
+    default 1000
+    help
+      How often the connected-source set is sampled. The sample is an in-RAM
+      array read with no radio traffic, and a peripheral reboot cannot finish
+      inside one period, so a disconnect is always observed before the
+      reconnect that follows it. Raise this to save one wakeup per period.
+
+config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
+    int "Delay before pushing to a newly connected peripheral (ms)"
+    default 1000
+    help
+      A peripheral is marked connected before its GATT characteristics have been
+      discovered, and the split worker drops a command sent in that window with
+      "Run behavior handle not found" without reporting it back to the sender.
+      Waiting this long after the connection is seen gives discovery and the
+      security upgrade time to finish. Best effort, not a guarantee.
+
+endif # KEYPAW_RGB_SPLIT_SYNC

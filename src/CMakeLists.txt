@@ -41,3 +41,9 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_TRIGGERS
   triggers/layer.c
   triggers/always.c
 )
+
+# Split state sync: central-only, because it needs the transport's connected
+# source list, which only exists on the central.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_SPLIT_SYNC
+  rgb_split_sync.c
+)

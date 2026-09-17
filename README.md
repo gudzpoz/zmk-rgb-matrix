@@ -300,6 +300,36 @@ its own `leds` list.
 };
 ```
 
+### Split state sync
+
+A `&kprgb` command is `BEHAVIOR_LOCALITY_GLOBAL`, so ZMK forwards it to every
+peripheral, which applies and persists it. A peripheral that was powered off while
+the user changed settings therefore never saw the command, keeps its stale flash
+defaults, and reloads them on the next power-up. With
+`CONFIG_KEYPAW_RGB_SPLIT_SYNC=y` (the default) the central instead pushes the
+selected effect, that effect's colour and period, and the user on/off intent to a
+peripheral whenever it newly connects. Nothing is needed on the peripheral: its
+command handler ends in `kp_rgb_save_state()`, so a push is applied and persisted
+there. The option is built for the split central only.
+
+The trigger is a poll of the transport's in-RAM connected-source list
+(`CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS`), because ZMK has no central-side
+"peripheral connected" event and the transport's single status callback already
+belongs to `central_init()`. The first command of a sync waits
+`CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS` after the connection is seen: a peripheral
+is reported connected before its GATT characteristics have been discovered, and a
+command sent in that window is dropped without any error reaching the sender.
+Commands are emitted one per work item, since the split run queue is shallow and
+overflows by discarding its oldest entry.
+
+Only the *active* effect's colour and period are sent. Other effects keep whatever
+the peripheral already had, so selecting an effect that was edited while the
+peripheral was off still shows that effect's own colour until it is edited again.
+Syncing `user_on` also necessarily sets the peripheral's live on/off state, since no
+command changes one without the other — a sync performed while the central is idle
+sends `RGB_ON` anyway, so an idle peripheral can light up until its next activity
+transition clears it.
+
 ## Custom effects
 
 Third-party effect modules include the public API as
