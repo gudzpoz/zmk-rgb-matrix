@@ -545,6 +545,13 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                  .s = (binding->param2 >> 8) & 0xFF,
                                  .b = binding->param2 & 0xFF});
     break;
+  case RGB_IND_STATE_CMD:
+    /* Live indicator state pushed by the central, not a setting. Apply it and
+     * return before the kp_rgb_save_state() that closes the switch, so a layer
+     * change never schedules a flash write. */
+    kp_rgb_indicator_set_word(RGB_IND_STATE_WORD(binding->param2),
+                              RGB_IND_STATE_BITS(binding->param2));
+    return 0;
   default:
     return -ENOTSUP;
   }

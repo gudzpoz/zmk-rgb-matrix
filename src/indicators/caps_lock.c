@@ -62,13 +62,16 @@ static void kp_ind_caps_lock_render(const struct device *dev, struct kp_rgb_fram
                          kp_hex_to_rgb(cfg->common.color), cfg->common.brightness);
 }
 
-#define KP_IND_CAPS_LOCK_DEFINE(inst)                                                \
-  KP_RGB_INDICATOR_TARGET_ARRAYS(inst, kp_ind_caps_lock_##inst);                     \
-  static const struct kp_ind_caps_lock_config kp_ind_caps_lock_##inst##_cfg = {       \
-      .common = KP_RGB_INDICATOR_COMMON(DT_DRV_INST(inst), kp_ind_caps_lock_##inst),  \
-  };                                                                                 \
-  static struct kp_ind_caps_lock_data kp_ind_caps_lock_##inst##_data;                 \
-  KP_RGB_INDICATOR_DEFINE(inst, kp_ind_caps_lock_render, kp_ind_caps_lock_##inst)
+#define KP_IND_CAPS_LOCK_DEFINE(inst)                                          \
+  KP_RGB_INDICATOR_TARGET_ARRAYS(inst, kp_ind_caps_lock_##inst);               \
+  static const struct kp_ind_caps_lock_config kp_ind_caps_lock_##inst##_cfg =  \
+      {                                                                        \
+          .common = KP_RGB_INDICATOR_COMMON(DT_DRV_INST(inst),                 \
+                                            kp_ind_caps_lock_##inst),          \
+  };                                                                           \
+  static struct kp_ind_caps_lock_data kp_ind_caps_lock_##inst##_data;          \
+  KP_RGB_INDICATOR_DEFINE(inst, NULL, kp_ind_caps_lock_render,                 \
+                          kp_ind_caps_lock_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_IND_CAPS_LOCK_DEFINE)
 

@@ -22,9 +22,9 @@
 /* Layers only exist where the keymap does. ZMK gates src/keymap.c (and so the
  * layer-state accessors) on "(NOT CONFIG_ZMK_SPLIT) OR
  * CONFIG_ZMK_SPLIT_ROLE_CENTRAL" in zmk/app/CMakeLists.txt, so on a split
- * peripheral this indicator has no source of truth and stays dark. That is
- * harmless in practice: a layer key usually sits on one half only, and the other
- * half's `keys` list resolves to no LED anyway. */
+ * peripheral this predicate has no source of truth. That is fine because the
+ * node is `central-authoritative`: the engine never calls this on a peripheral,
+ * it gates the renderer on the state the central pushed. */
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 #define KP_IND_LAYER_HAS_KEYMAP 1
 #include <zmk/keymap.h>
@@ -43,29 +43,29 @@ struct kp_ind_layer_data {
   struct kp_rgb_indicator_common_data common;
 };
 
-static void kp_ind_layer_render(const struct device *dev, struct kp_rgb_frame *frame) {
+static bool kp_ind_layer_active(const struct device *dev) {
 #if KP_IND_LAYER_HAS_KEYMAP
   const struct kp_ind_layer_config *cfg = dev->config;
-  const struct kp_ind_layer_data *data = dev->data;
-  bool active;
 
   if (cfg->only_topmost) {
     /* The property is a layer id; the accessor reports an index, hence the map. */
-    active = zmk_keymap_layer_index_to_id(zmk_keymap_highest_layer_active()) == cfg->layer;
-  } else {
-    active = zmk_keymap_layer_active((zmk_keymap_layer_id_t)cfg->layer);
+    return zmk_keymap_layer_index_to_id(zmk_keymap_highest_layer_active()) ==
+           cfg->layer;
   }
+  return zmk_keymap_layer_active((zmk_keymap_layer_id_t)cfg->layer);
+#else
+  ARG_UNUSED(dev);
+  return false;
+#endif
+}
 
-  if (!active) {
-    return;
-  }
+static void kp_ind_layer_render(const struct device *dev, struct kp_rgb_frame *frame) {
+  /* The engine calls this only while kp_ind_layer_active() is true. */
+  const struct kp_ind_layer_config *cfg = dev->config;
+  const struct kp_ind_layer_data *data = dev->data;
 
   kp_rgb_indicator_paint(frame, data->common.leds, data->common.led_count,
                          kp_hex_to_rgb(cfg->common.color), cfg->common.brightness);
-#else
-  ARG_UNUSED(dev);
-  ARG_UNUSED(frame);
-#endif
 }
 
 #define KP_IND_LAYER_DEFINE(inst)                                                \
@@ -76,7 +76,8 @@ static void kp_ind_layer_render(const struct device *dev, struct kp_rgb_frame *f
       .only_topmost = DT_PROP(DT_DRV_INST(inst), only_topmost),                  \
   };                                                                             \
   static struct kp_ind_layer_data kp_ind_layer_##inst##_data;                    \
-  KP_RGB_INDICATOR_DEFINE(inst, kp_ind_layer_render, kp_ind_layer_##inst)
+  KP_RGB_INDICATOR_DEFINE(inst, kp_ind_layer_active, kp_ind_layer_render,        \
+                          kp_ind_layer_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_IND_LAYER_DEFINE)
 

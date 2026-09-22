@@ -170,6 +170,9 @@ static void kp_render_indicators(struct kp_rgb_behavior_context *ctx,
       continue;
     }
     const struct kp_rgb_indicator_api *ind = indicators[i]->api;
+    if (!kp_rgb_indicator_gate(indicators[i], ind)) {
+      continue;
+    }
     ind->render(indicators[i], frame);
   }
 }
@@ -182,6 +185,8 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
+  /* Resolve every central-authoritative indicator before rendering */
+  bool ind_changed = kp_rgb_indicator_refresh();
   bool any_on;
   int ret = KP_TRY_LOCK();
   if (ret < 0) {
@@ -224,6 +229,11 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     }
   }
   kp_rgb_matrix_unlock();
+  /* Push the new indicator state after releasing the lock; the split send can
+   * block on a full run queue. */
+  if (ind_changed) {
+    kp_rgb_indicator_dispatch();
+  }
   if (any_on) {
     int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
     if (err < 0) {

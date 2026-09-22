@@ -11,6 +11,22 @@
  */
 #include <dt-bindings/zmk/rgb.h>
 
+/* Module-local, internal command. It lives here, next to the upstream include,
+ * because that is where the claimed number is maintained against future
+ * upstream growth; no devicetree node uses it (a keymap cannot bind it, since
+ * its payload is an internal encoding).
+ *
+ * param2 carries one 16-bit word of indicator on/off state: the high half is
+ * the word index, the low half the word's bits (bit N = the indicator at
+ * ordinal word * 16 + N). Encode/decode with RGB_IND_STATE_VAL/WORD/BITS, which
+ * are C-only and live in the module's src/rgb_matrix_internal.h.
+ *
+ * Like every &kprgb command it is BEHAVIOR_LOCALITY_GLOBAL, so the central's
+ * state reaches every peripheral. Deliberately NOT persisted: the handler
+ * applies it and returns before the kp_rgb_save_state() that ends the other
+ * commands, so a layer change never schedules a flash write. */
+#define RGB_IND_STATE_CMD 0x101
+
 /* A "mapping" entry is one of two things:
  *
  *   - a plain integer N  -> the LED sits under key position N in the

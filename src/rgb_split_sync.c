@@ -51,8 +51,9 @@ enum kp_rgb_sync_phase {
 };
 
 struct kp_rgb_sync_source {
-  bool seen;    /* present at the last sample */
-  bool pending; /* a sync is in flight for this source */
+  bool seen;          /* present at the last sample */
+  bool pending;       /* a sync is in flight for this source */
+  uint16_t mask_word; /* next indicator word to push this time round */
   int64_t ready_at;
   size_t ctx_index;
   enum kp_rgb_sync_phase phase;
@@ -123,6 +124,7 @@ static void kp_rgb_sync_refresh(void) {
       st->pending = true;
       st->ctx_index = 0;
       st->phase = KP_RGB_SYNC_SELECT;
+      st->mask_word = 0;
       /* A peripheral is marked connected before its GATT characteristics have
        * been discovered, and the split worker silently drops commands sent in
        * that window, so give discovery and the security upgrade time to land. */
@@ -227,6 +229,27 @@ static bool kp_rgb_sync_emit_one(uint8_t source, struct kp_rgb_sync_source *st) 
       st->phase++;
     }
     return true;
+  }
+
+  /* The indicator state is not per-context, so it goes after them, one word per
+   * work item (this function already paces at KP_RGB_SYNC_STEP_DELAY_MS).
+   * Without it a peripheral that connects while a layer is already held would
+   * stay dark until the next change. */
+  if (st->mask_word < kp_rgb_indicator_word_count()) {
+    struct kp_rgb_behavior_context *first = kp_rgb_behavior_at(0);
+    if (first == NULL) {
+      st->mask_word = kp_rgb_indicator_word_count();
+      LOG_WRN("No RGB behavior to push the indicator state through");
+    } else {
+      uint16_t word = st->mask_word;
+      if (!kp_rgb_sync_send(
+              source, first->dev, RGB_IND_STATE_CMD,
+              RGB_IND_STATE_VAL(word, kp_rgb_indicator_get_word(word)))) {
+        return false; /* no half-applied retry; a reconnect re-syncs */
+      }
+      st->mask_word++;
+      return true;
+    }
   }
 
   LOG_INF("Complete for source %u", source);

@@ -322,6 +322,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_indicator_api {
+  bool (*active)(const struct device *dev);
   void (*render)(const struct device *dev, struct kp_rgb_frame *frame);
 };
 
@@ -339,7 +340,22 @@ struct kp_rgb_indicator_common_config {
 struct kp_rgb_indicator_common_data {
   size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
   size_t *leds;     /* the indicator's own storage */
+  uint16_t index;   /* registry ordinal; state word index / 16, bit index % 16 */
+  bool remote;      /* True when `central-authoritative` */
 };
+
+/* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
+ * devicetree, so there is no fixed cap on the indicator count. */
+#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_indicators)
+#define KP_RGB_INDICATOR_COUNT DT_CHILD_NUM(DT_INST(0, keypaw_rgb_indicators))
+#else
+#define KP_RGB_INDICATOR_COUNT 0
+#endif
+#define KP_RGB_INDICATOR_WORDS MAX(1, (KP_RGB_INDICATOR_COUNT + 15) / 16)
+
+/* Add a device to the engine's indicator registry, where `index` places it.
+ * Called by KP_RGB_INDICATOR_DEFINE; a kind never calls this itself. */
+void kp_rgb_indicator_register(const struct device *dev);
 
 /* The most targets an indicator can resolve. */
 #define KP_RGB_INDICATOR_TARGET_CAP(node_id)                                   \
@@ -383,7 +399,7 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
  * stay out of the behavior registry and cannot be keymap-bound. The macro also
  * allocates the instance's target storage, so a kind must declare its device
  * here rather than with DEVICE_DT_DEFINE directly. */
-#define KP_RGB_INDICATOR_DEFINE(inst, render_fn, cfg_inst)                     \
+#define KP_RGB_INDICATOR_DEFINE(inst, active_fn, render_fn, cfg_inst)          \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_indicator_common_config) &&        \
                    (const void *)&cfg_inst##_cfg ==                            \
@@ -397,6 +413,9 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
               (const void *)&cfg_inst##_data.common,                           \
       "indicator data must embed struct kp_rgb_indicator_common_data "         \
       "as the first field");                                                   \
+  BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                \
+                                  keypaw_rgb_indicators),                      \
+               "indicator must be a child of a keypaw,rgb-indicators node");   \
   static size_t                                                                \
       cfg_inst##_targets[KP_RGB_INDICATOR_TARGET_CAP(DT_DRV_INST(inst))];      \
   static int cfg_inst##_init(const struct device *dev) {                       \
@@ -406,9 +425,14 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
     data->led_count = kp_rgb_resolve_targets(                                  \
         cfg->keys, cfg->keys_len, cfg->leds, cfg->leds_len, data->leds,        \
         ARRAY_SIZE(cfg_inst##_targets));                                       \
+    data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
+    data->remote = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                             \
+                   DT_PROP(DT_DRV_INST(inst), central_authoritative);          \
+    kp_rgb_indicator_register(dev);                                            \
     return 0;                                                                  \
   }                                                                            \
   static const struct kp_rgb_indicator_api cfg_inst##_api = {                  \
+      .active = active_fn,                                                     \
       .render = render_fn,                                                     \
   };                                                                           \
   /* Init resolves `keys` through the engine's key -> LED table, which the     \

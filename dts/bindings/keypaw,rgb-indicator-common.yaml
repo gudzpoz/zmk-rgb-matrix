@@ -37,3 +37,17 @@ properties:
     description: |
       Paint strength in percent: 100 replaces the effect's pixels on the targeted
       LEDs, lower values mix the indicator colour over them.
+
+  central-authoritative:
+    type: boolean
+    description: |
+      The indicator's source of truth exists only on the split central (keymap
+      layer state, the dynamic-macro recorder, ...). The central evaluates the
+      kind's `active` predicate every tick and pushes the result over the split
+      link; on a peripheral the renderer is gated by that pushed state instead
+      of calling the predicate, because the predicate's source does not exist
+      there.
+
+      Leave this false for a locally determined kind (caps lock, a battery
+      indicator): every half then evaluates the predicate for itself, which is
+      what makes each half show its own state.

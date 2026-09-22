@@ -249,12 +249,21 @@ initial state is used at boot. The matrix turns off on idle by default;
 ## Indicators and triggers
 
 Indicators are regular devices that paint over the active effect. Add their
-nodes outside `&kprgb`, then list them in paint order on the owning behavior
-node. Effect-level `indicators` and `no-indicators` still override this list.
+nodes as children of a `keypaw,rgb-indicators` container outside `&kprgb`, then
+list them in paint order on the owning behavior node. Effect-level `indicators`
+and `no-indicators` still override this list.
+
+The container is the engine's indicator registry: its children are enumerated in
+declaration order, and that index is the indicator's on/off bit. The state is a
+`uint16_t[]` sized from the child count, so there is no cap on how many
+indicators a board may declare; one word (16 indicators) travels per split
+command. Both halves build the same devicetree, so the indices agree.
 
 ```dts
 / {
     rgb_indicators {
+        compatible = "keypaw,rgb-indicators";
+
         caps: caps {
             compatible = "keypaw,rgb-indicator-caps-lock";
             keys = <0>;
@@ -268,10 +277,44 @@ node. Effect-level `indicators` and `no-indicators` still override this list.
 };
 ```
 
-The built-in kinds are Caps Lock and layer indicators. Caps Lock needs
-`CONFIG_ZMK_HID_INDICATORS=y`; a split peripheral also needs
-`CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS=y`. A layer indicator evaluates
-only where ZMK has a keymap, normally the split central.
+### Where an indicator is evaluated
+
+A kind may supply an `active` predicate. When it does, the renderer runs only
+while the predicate is true; when it does not, the renderer runs every tick and
+samples whatever it needs itself.
+
+The predicate's source may not exist on both halves, so a kind declares which it
+is with the `central-authoritative` property:
+
+- **Locally determined** (the default; Caps Lock, and a future battery
+  indicator). Every half evaluates the predicate for itself, so each half shows
+  its own state. Caps Lock needs `CONFIG_ZMK_HID_INDICATORS=y`; a split
+  peripheral also needs `CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS=y`, because
+  the host's HID indicator state is what ZMK forwards.
+- **Central-authoritative** (`central-authoritative;` on the node; the layer and
+  dynamic-macro kinds). The source exists only on the split central, so the
+  central evaluates the predicate every tick and pushes only the words whose
+  bits changed, one 16-bit word per command (word index in the high half of the
+  command's parameter, the bits in the low half). A peripheral gates its
+  renderers on that pushed state and never calls the predicate, which is why a
+  layer indicator lights the peripheral's LEDs for the keys it lists that live
+  on that half.
+
+The pushed state is a level, not an edge: the central also re-pushes a full
+snapshot when a peripheral connects (`CONFIG_KEYPAW_RGB_SPLIT_SYNC`), so a half
+that was off while a layer was held still shows it. The snapshot uses the same
+`&kprgb` command path as everything else but is deliberately not persisted --
+unlike an effect selection, indicator state is volatile and must not schedule a
+flash write on every layer change.
+
+### Writing a kind
+
+A kind provides a renderer, and optionally a predicate, through
+`KP_RGB_INDICATOR_DEFINE(inst, active_fn, render_fn, cfg_inst)` (pass `NULL` for
+`active_fn`). Its config and data structs embed
+`struct kp_rgb_indicator_common_config` / `..._data` as the first member, as
+before. Targeting (`keys` / `leds`) is resolved per half, so an indicator only
+lights LEDs physically present on the half that renders it.
 
 A trigger table selects commands when its first matching child changes. It runs
 on the split central; behavior locality sends the selected state to peripherals.
