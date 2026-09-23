@@ -7,8 +7,9 @@
  * is active, so a layer can be shown on a single dedicated LED instead of the
  * whole matrix. Declare one node per layer.
  *
- * The state is sampled in render(): the engine repaints every tick, so no event
- * subscription (and therefore no per-device listener plumbing) is needed.
+ * The state is sampled in render(). The engine is also nudged from a
+ * zmk_layer_state_changed listener so the frame does not wait for the next
+ * tick; the periodic tick still samples as a fallback.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_indicator_layer
@@ -17,6 +18,7 @@
 
 #include <zephyr/device.h>
 
+#include <zmk/events/layer_state_changed.h>
 #include <zmk/rgb_matrix.h>
 
 /* Layers only exist where the keymap does. ZMK gates src/keymap.c (and so the
@@ -80,5 +82,16 @@ static void kp_ind_layer_render(const struct device *dev, struct kp_rgb_frame *f
                           kp_ind_layer_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_IND_LAYER_DEFINE)
+
+#if KP_IND_LAYER_HAS_KEYMAP
+static int kp_ind_layer_state_listener(const zmk_event_t *eh) {
+  if (as_zmk_layer_state_changed(eh) != NULL) {
+    zmk_rgb_matrix_flush();
+  }
+  return ZMK_EV_EVENT_BUBBLE;
+}
+ZMK_LISTENER(kp_ind_layer_state, kp_ind_layer_state_listener);
+ZMK_SUBSCRIPTION(kp_ind_layer_state, zmk_layer_state_changed);
+#endif /* KP_IND_LAYER_HAS_KEYMAP */
 
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */

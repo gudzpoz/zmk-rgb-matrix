@@ -293,12 +293,11 @@ is with the `central-authoritative` property:
   the host's HID indicator state is what ZMK forwards.
 - **Central-authoritative** (`central-authoritative;` on the node; the layer and
   dynamic-macro kinds). The source exists only on the split central, so the
-  central evaluates the predicate every tick and pushes only the words whose
-  bits changed, one 16-bit word per command (word index in the high half of the
-  command's parameter, the bits in the low half). A peripheral gates its
-  renderers on that pushed state and never calls the predicate, which is why a
-  layer indicator lights the peripheral's LEDs for the keys it lists that live
-  on that half.
+  central evaluates the predicate and pushes only the words whose bits changed,
+  one 16-bit word per command (word index in the high half of the command's
+  parameter, the bits in the low half). A peripheral gates its renderers on that
+  pushed state and never calls the predicate, which is why a layer indicator
+  lights the peripheral's LEDs for the keys it lists that live on that half.
 
 The pushed state is a level, not an edge: the central also re-pushes a full
 snapshot when a peripheral connects (`CONFIG_KEYPAW_RGB_SPLIT_SYNC`), so a half
@@ -306,6 +305,17 @@ that was off while a layer was held still shows it. The snapshot uses the same
 `&kprgb` command path as everything else but is deliberately not persisted --
 unlike an effect selection, indicator state is volatile and must not schedule a
 flash write on every layer change.
+
+A predicate is otherwise sampled once per engine tick, so a change would wait up
+to `CONFIG_KEYPAW_RGB_MATRIX_TICK_MS`, and on a peripheral a second tick for the
+push to arrive. `zmk_rgb_matrix_flush()` removes that wait: it asks the engine to
+repaint now by submitting its tick work to the low-priority queue, without
+blocking and without resetting the animation clock, so the extra frame does not
+restart an effect. Any kind may call it from a listener -- including one for a
+custom event declared in a third-party module. The engine already calls it for
+the central-authoritative path itself: a layer-state event on the central, and a
+changed word arriving over the split link. Concurrent calls coalesce, because a
+work item can be queued only once, so a burst costs at most one extra frame.
 
 ### Writing a kind
 
@@ -315,6 +325,12 @@ A kind provides a renderer, and optionally a predicate, through
 `struct kp_rgb_indicator_common_config` / `..._data` as the first member, as
 before. Targeting (`keys` / `leds`) is resolved per half, so an indicator only
 lights LEDs physically present on the half that renders it.
+
+State that has an event source should be repainted from that event rather than
+left to the tick: subscribe in the kind (as the caps-lock kind does for
+`zmk_hid_indicators_changed`) and call `zmk_rgb_matrix_flush()` when the value
+changes. A predicate-driven kind does not need to -- the engine already flushes
+it on the events that drive it.
 
 A trigger table selects commands when its first matching child changes. It runs
 on the split central; behavior locality sends the selected state to peripherals.

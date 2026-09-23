@@ -71,7 +71,7 @@ bool kp_rgb_indicator_gate(const struct device *dev,
 bool kp_rgb_indicator_refresh(void);
 void kp_rgb_indicator_dispatch(void);
 uint16_t kp_rgb_indicator_word_count(void);
-void kp_rgb_indicator_set_word(uint16_t word, uint16_t value);
+bool kp_rgb_indicator_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_indicator_get_word(uint16_t word);
 
 /* param2 encoding for RGB_IND_STATE_CMD: one 16-bit state word as

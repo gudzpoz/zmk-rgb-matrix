@@ -146,10 +146,12 @@ void kp_rgb_indicator_register(const struct device *dev) {
 
 uint16_t kp_rgb_indicator_word_count(void) { return KP_RGB_INDICATOR_WORDS; }
 
-void kp_rgb_indicator_set_word(uint16_t word, uint16_t value) {
-  if (word < KP_RGB_INDICATOR_WORDS) {
-    kp_indicator_state[word] = value;
+bool kp_rgb_indicator_set_word(uint16_t word, uint16_t value) {
+  if (word >= KP_RGB_INDICATOR_WORDS || kp_indicator_state[word] == value) {
+    return false;
   }
+  kp_indicator_state[word] = value;
+  return true;
 }
 
 uint16_t kp_rgb_indicator_get_word(uint16_t word) {

@@ -35,7 +35,12 @@ static bool kp_ind_caps_lock_on;
 static int kp_ind_caps_lock_listener(const zmk_event_t *eh) {
   const struct zmk_hid_indicators_changed *ev = as_zmk_hid_indicators_changed(eh);
   if (ev != NULL) {
-    kp_ind_caps_lock_on = (ev->indicators & HID_INDICATOR_CAPS_LOCK) != 0;
+    /* Repaint on the edge instead of waiting for the engine tick. */
+    bool on = (ev->indicators & HID_INDICATOR_CAPS_LOCK) != 0;
+    if (on != kp_ind_caps_lock_on) {
+      kp_ind_caps_lock_on = on;
+      zmk_rgb_matrix_flush();
+    }
   }
   return ZMK_EV_EVENT_BUBBLE;
 }

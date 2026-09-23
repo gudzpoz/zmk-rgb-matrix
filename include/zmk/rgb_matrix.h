@@ -317,8 +317,12 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * effect rendered. Indicators are listed in paint order by `indicators` on the
  * owning behavior node; individual effects may override that list.
  *
- * Kinds sample the state they need in `render` -- the engine repaints every
- * tick, so there is no need to subscribe to events.
+ * Kinds sample the state they need in `render`, and the engine repaints on its
+ * own timer as a fallback. A kind whose source changes on an event (layer
+ * state, HID indicators) may also call zmk_rgb_matrix_flush() from that
+ * event's listener to repaint immediately; the engine already flushes the
+ * central-authoritative path itself (the layer event, and a changed word
+ * arriving over the split link).
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_indicator_api {
@@ -512,3 +516,6 @@ int zmk_rgb_matrix_select_effect(const struct device *behavior,
                                  uint16_t effect);
 int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
                                 int16_t direction);
+
+/* Schedule an immediate repaint. Safe from any context. */
+void zmk_rgb_matrix_flush(void);

@@ -138,6 +138,25 @@ bool kp_rgb_behavior_any_on(void) { return kp_any_on_locked(); }
 void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
 void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
 
+/* The lock is never held across flash I/O (rgb_settings.c encodes under it and
+ * saves outside it) and every holder runs at a higher priority than this
+ * low-priority queue, so a busy mutex is a hiccup rather than a deadlock. Wait
+ * it out instead of dropping the frame: a dropped frame also skips the
+ * indicator dispatch that shares the tick, costing a full period on both
+ * halves. Bounded, so a genuinely stuck holder still surfaces a warning
+ * instead of hanging this queue forever. */
+#define KP_RGB_LOCK_RETRY_MS 1
+#define KP_RGB_LOCK_RETRIES 8
+
+static bool kp_rgb_matrix_lock_patiently(void) {
+  for (int attempt = 0; attempt < KP_RGB_LOCK_RETRIES; attempt++) {
+    if (k_mutex_lock(&kp_rgb_lock, K_MSEC(KP_RGB_LOCK_RETRY_MS)) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
@@ -188,9 +207,11 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   /* Resolve every central-authoritative indicator before rendering */
   bool ind_changed = kp_rgb_indicator_refresh();
   bool any_on;
-  int ret = KP_TRY_LOCK();
-  if (ret < 0) {
+  if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
+    /* Retry on the queue rather than waiting for the next timer tick; the
+     * bounded wait above is what keeps this from becoming a tight loop. */
+    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
     return;
   }
   any_on = kp_any_on_locked();
@@ -229,16 +250,17 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     }
   }
   kp_rgb_matrix_unlock();
-  /* Push the new indicator state after releasing the lock; the split send can
-   * block on a full run queue. */
-  if (ind_changed) {
-    kp_rgb_indicator_dispatch();
-  }
+  /* Paint locally before pushing; the split send can block on a full run queue,
+   * and the local LEDs must not wait behind it. */
   if (any_on) {
     int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
     if (err < 0) {
       LOG_WRN("Failed to update the RGB strip (%d)", err);
     }
+  }
+  /* Push the new indicator state after the local paint. */
+  if (ind_changed) {
+    kp_rgb_indicator_dispatch();
   }
 }
 
@@ -249,6 +271,23 @@ static void kp_rgb_matrix_off_handler(struct k_work *work) {
 }
 K_WORK_DEFINE(kp_off_work, kp_rgb_matrix_off_handler);
 K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
+
+void zmk_rgb_matrix_flush(void) {
+  if (!kp_rgb_matrix_valid) {
+    return;
+  }
+  /* No lock on purpose: `on` only decides whether a frame is worth scheduling,
+   * a racy read costs at most one redundant frame, and this runs from the split
+   * RX and event contexts where blocking would be worse. Concurrent callers
+   * need no dedup of their own -- k_work_submit_to_queue() does nothing when
+   * the work is already queued (returns 0) and re-queues it, one extra frame,
+   * only while it is running (returns 2). The return value is ignored, as in
+   * the timer handler below. */
+  if (!kp_any_on_locked()) {
+    return;
+  }
+  k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
+}
 
 static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
   const struct zmk_position_state_changed *pos_ev =
