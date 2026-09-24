@@ -1,0 +1,928 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="347"
+   height="260"
+   viewBox="0 0 347 260"
+   class="keymap"
+   version="1.1"
+   id="svg98"
+   sodipodi:docname="key-in-led-order.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs98">
+    <marker
+       style="overflow:visible"
+       id="Tail"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Arrow tail"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;fill-rule:evenodd;stroke:context-stroke;stroke-width:1;stroke-linecap:round"
+         d="m -3.0000001,-3 -3.1102256,3 3.1102256,3 M -4.0952644e-8,-3 -3.0000001,0 -4.0952644e-8,3 M 3,3 -4.0952644e-8,0 3,-3"
+         sodipodi:nodetypes="ccccccccc"
+         id="path10" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="ArrowWide"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Wide arrow"
+       markerWidth="1"
+       markerHeight="1"
+       viewBox="0 0 1 1"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         style="fill:none;stroke:context-stroke;stroke-width:1;stroke-linecap:butt"
+         d="M 3,-3 0,0 3,3"
+         transform="rotate(180,0.125,0)"
+         sodipodi:nodetypes="ccc"
+         id="path1" />
+    </marker>
+  </defs>
+  <sodipodi:namedview
+     id="namedview98"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.8528466"
+     inkscape:cx="161.91302"
+     inkscape:cy="140.32462"
+     inkscape:window-width="2327"
+     inkscape:window-height="1248"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg98" />
+  <style
+     id="style1">/* inherit to force styles through use tags */
+svg path {
+    fill: inherit;
+}
+
+/* font and background color specifications */
+svg.keymap {
+    font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace;
+    font-size: 14px;
+    font-kerning: normal;
+    text-rendering: optimizeLegibility;
+    fill: #24292e;
+}
+
+/* default key styling */
+rect.key {
+    fill: #f6f8fa;
+}
+
+rect.key, rect.combo {
+    stroke: #c9cccf;
+    stroke-width: 1;
+}
+
+/* default key side styling, only used is draw_key_sides is set */
+rect.side {
+    filter: brightness(90%);
+}
+
+/* color accent for combo boxes */
+rect.combo, rect.combo-separate {
+    fill: #cdf;
+}
+
+/* color accent for held keys */
+rect.held, rect.combo.held {
+    fill: #fdd;
+}
+
+/* color accent for ghost (optional) keys */
+rect.ghost, rect.combo.ghost {
+    stroke-dasharray: 4, 4;
+    stroke-width: 2;
+}
+
+text {
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+/* styling for layer labels */
+text.label {
+    font-weight: bold;
+    text-anchor: start;
+    stroke: white;
+    stroke-width: 4;
+    paint-order: stroke;
+}
+
+/* styling for optional footer */
+text.footer {
+    text-anchor: end;
+    dominant-baseline: auto;
+    stroke: white;
+    stroke-width: 4;
+    paint-order: stroke;
+}
+
+/* styling for combo tap, and key hold/shifted label text */
+text.combo, text.hold, text.shifted {
+    font-size: 11px;
+}
+
+text.hold {
+    text-anchor: middle;
+    dominant-baseline: auto;
+}
+
+text.shifted {
+    text-anchor: middle;
+    dominant-baseline: hanging;
+}
+
+text.layer-activator {
+    text-decoration: underline;
+}
+
+/* styling for hold/shifted label text in combo box */
+text.combo.hold, text.combo.shifted {
+    font-size: 8px;
+}
+
+/* lighter symbol for transparent keys */
+text.trans {
+    fill: #7b7e81;
+}
+
+/* styling for combo dendrons */
+path.combo {
+    stroke-width: 1;
+    stroke: gray;
+    fill: none;
+}
+
+/* Start Tabler Icons Cleanup */
+/* cannot use height/width with glyphs */
+.icon-tabler &gt; path {
+    fill: inherit;
+    stroke: inherit;
+    stroke-width: 2;
+}
+/* hide tabler's default box */
+.icon-tabler &gt; path[stroke=&quot;none&quot;][fill=&quot;none&quot;] {
+    visibility: hidden;
+}
+/* End Tabler Icons Cleanup */
+
+@media (prefers-color-scheme: dark) {
+svg.keymap { fill: #d1d6db; }
+rect.key { fill: #3f4750; }
+rect.key, rect.combo { stroke: #60666c; }
+rect.combo, rect.combo-separate { fill: #1f3d7a; }
+rect.held, rect.combo.held { fill: #854747; }
+text.label, text.footer { stroke: black; }
+text.trans { fill: #7e8184; }
+path.combo { stroke: #7f7f7f; }
+
+}</style>
+  <text
+     x="-401.5"
+     y="-29.5"
+     class="label"
+     id="o_o" />
+  <g
+     transform="translate(73.5,36.5)"
+     class="key keypos-6"
+     id="g14">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect12" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text12">6</text>
+    <a
+       href="#o_o"
+       id="a13" />
+    <a
+       href="#o_o"
+       id="a14" />
+  </g>
+  <g
+     transform="translate(123.5,30.5)"
+     class="key keypos-7"
+     id="g16">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect14" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text14">7</text>
+    <a
+       href="#o_o"
+       id="a15" />
+    <a
+       href="#o_o"
+       id="a16" />
+  </g>
+  <g
+     transform="translate(173.5,23.5)"
+     class="key keypos-8"
+     id="g18">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect16" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text16">8</text>
+    <a
+       href="#o_o"
+       id="a17" />
+    <a
+       href="#o_o"
+       id="a18" />
+  </g>
+  <g
+     transform="translate(223.5,30.5)"
+     class="key keypos-9"
+     id="g20">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect18" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text18">9</text>
+    <a
+       href="#o_o"
+       id="a19" />
+    <a
+       href="#o_o"
+       id="a20" />
+  </g>
+  <g
+     transform="translate(273.5,48.5)"
+     class="key keypos-10"
+     id="g22">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect20" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text20">10</text>
+    <a
+       href="#o_o"
+       id="a21" />
+    <a
+       href="#o_o"
+       id="a22" />
+  </g>
+  <g
+     transform="translate(323.5,48.5)"
+     class="key keypos-11"
+     id="g24">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect22" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text22">11</text>
+    <a
+       href="#o_o"
+       id="a23" />
+    <a
+       href="#o_o"
+       id="a24" />
+  </g>
+  <g
+     transform="translate(73.5,86.5)"
+     class="key keypos-18"
+     id="g38">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect36" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text36">18</text>
+    <a
+       href="#o_o"
+       id="a37" />
+    <a
+       href="#o_o"
+       id="a38" />
+  </g>
+  <g
+     transform="translate(123.5,80.5)"
+     class="key keypos-19"
+     id="g40">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect38" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text38">19</text>
+    <a
+       href="#o_o"
+       id="a39" />
+    <a
+       href="#o_o"
+       id="a40" />
+  </g>
+  <g
+     transform="translate(173.5,73.5)"
+     class="key keypos-20"
+     id="g42">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect40" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text40">20</text>
+    <a
+       href="#o_o"
+       id="a41" />
+    <a
+       href="#o_o"
+       id="a42" />
+  </g>
+  <g
+     transform="translate(223.5,80.5)"
+     class="key keypos-21"
+     id="g44">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect42" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text42">21</text>
+    <a
+       href="#o_o"
+       id="a43" />
+    <a
+       href="#o_o"
+       id="a44" />
+  </g>
+  <g
+     transform="translate(273.5,98.5)"
+     class="key keypos-22"
+     id="g46">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect44" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text44">22</text>
+    <a
+       href="#o_o"
+       id="a45" />
+    <a
+       href="#o_o"
+       id="a46" />
+  </g>
+  <g
+     transform="translate(323.5,98.5)"
+     class="key keypos-23"
+     id="g48">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect46" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text46">23</text>
+    <a
+       href="#o_o"
+       id="a47" />
+    <a
+       href="#o_o"
+       id="a48" />
+  </g>
+  <g
+     transform="translate(73.5,136.5)"
+     class="key keypos-30"
+     id="g62">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect60" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text60">30</text>
+    <a
+       href="#o_o"
+       id="a61" />
+    <a
+       href="#o_o"
+       id="a62" />
+  </g>
+  <g
+     transform="translate(123.5,130.5)"
+     class="key keypos-31"
+     id="g64">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect62" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text62">31</text>
+    <a
+       href="#o_o"
+       id="a63" />
+    <a
+       href="#o_o"
+       id="a64" />
+  </g>
+  <g
+     transform="translate(173.5,123.5)"
+     class="key keypos-32"
+     id="g66">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect64" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text64">32</text>
+    <a
+       href="#o_o"
+       id="a65" />
+    <a
+       href="#o_o"
+       id="a66" />
+  </g>
+  <g
+     transform="translate(223.5,130.5)"
+     class="key keypos-33"
+     id="g68">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect66" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text66">33</text>
+    <a
+       href="#o_o"
+       id="a67" />
+    <a
+       href="#o_o"
+       id="a68" />
+  </g>
+  <g
+     transform="translate(273.5,148.5)"
+     class="key keypos-34"
+     id="g70">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect68" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text68">34</text>
+    <a
+       href="#o_o"
+       id="a69" />
+    <a
+       href="#o_o"
+       id="a70" />
+  </g>
+  <g
+     transform="translate(323.5,148.5)"
+     class="key keypos-35"
+     id="g72">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect70" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text70">35</text>
+    <a
+       href="#o_o"
+       id="a71" />
+    <a
+       href="#o_o"
+       id="a72" />
+  </g>
+  <g
+     transform="translate(48.5,236.5)"
+     class="key keypos-42"
+     id="g86">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect84" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text84">42</text>
+    <a
+       href="#o_o"
+       id="a85" />
+    <a
+       href="#o_o"
+       id="a86" />
+  </g>
+  <g
+     transform="translate(23.5,186.5)"
+     class="key keypos-43"
+     id="g88">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect86" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text86">43</text>
+    <a
+       href="#o_o"
+       id="a87" />
+    <a
+       href="#o_o"
+       id="a88" />
+  </g>
+  <g
+     transform="translate(73.5,186.5)"
+     class="key keypos-44"
+     id="g90">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect88" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text88">44</text>
+    <a
+       href="#o_o"
+       id="a89" />
+    <a
+       href="#o_o"
+       id="a90" />
+  </g>
+  <g
+     transform="translate(123.5,180.5)"
+     class="key keypos-45"
+     id="g92">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect90" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text90">45</text>
+    <a
+       href="#o_o"
+       id="a91" />
+    <a
+       href="#o_o"
+       id="a92" />
+  </g>
+  <g
+     transform="translate(273.5,236.5)"
+     class="key keypos-46"
+     id="g94">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect92" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text92">46</text>
+    <a
+       href="#o_o"
+       id="a93" />
+    <a
+       href="#o_o"
+       id="a94" />
+  </g>
+  <g
+     transform="translate(323.5,236.5)"
+     class="key keypos-47"
+     id="g96">
+    <rect
+       rx="6"
+       ry="6"
+       x="-23"
+       y="-23"
+       width="46"
+       height="46"
+       class="key"
+       id="rect94" />
+    <text
+       x="0"
+       y="0"
+       class="key tap"
+       id="text94">47</text>
+    <a
+       href="#o_o"
+       id="a95" />
+    <a
+       href="#o_o"
+       id="a96" />
+  </g>
+  <path
+     fill="none"
+     stroke-width="0.618211"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     stroke="#c83434"
+     stroke-opacity="1"
+     stroke-miterlimit="10"
+     d="M 71.616888,39.976026 H 52.636912"
+     id="path2640"
+     style="fill:none;fill-opacity:1;stroke:#b30a00;stroke-opacity:1" />
+  <path
+     fill="none"
+     stroke-width="0.618211"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     stroke="#c83434"
+     stroke-opacity="1"
+     stroke-miterlimit="10"
+     d="m 52.636912,39.976026 -6.604123,-6.60069"
+     id="path2641"
+     style="fill:none;fill-opacity:1;stroke:#b30a00;stroke-opacity:1" />
+  <path
+     fill="none"
+     stroke-width="0.618211"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     stroke="#c83434"
+     stroke-opacity="1"
+     stroke-miterlimit="10"
+     d="M 16.005999,33.375336 6.6376051,24.006942"
+     id="path2661"
+     style="fill:none;fill-opacity:1;stroke:#b30a00;stroke-opacity:1" />
+  <path
+     fill="none"
+     stroke-width="0.618211"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     stroke="#c83434"
+     stroke-opacity="1"
+     stroke-miterlimit="10"
+     d="M 46.032789,33.375336 H 16.005999"
+     id="path2760"
+     style="fill:none;fill-opacity:1;stroke:#b30a00;stroke-opacity:1" />
+  <path
+     fill-rule="nonzero"
+     fill="#c83434"
+     fill-opacity="1"
+     d="m 8.8812201,24.006947 c 0,1.239982 -1.003633,2.243614 -2.243615,2.243614 -1.236562,0 -2.240194,-1.003632 -2.240194,-2.243614 0,-1.236562 1.003632,-2.240195 2.240194,-2.240195 1.239982,0 2.243615,1.003633 2.243615,2.240195 z m 0,0"
+     id="path3230"
+     style="fill:#b30a00;fill-opacity:1;stroke:#b30a00;stroke-width:0.876895;stroke-opacity:1" />
+  <text
+     xml:space="preserve"
+     style="font-size:7.01516px;line-height:0;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';writing-mode:lr-tb;direction:ltr;fill:#800080;fill-opacity:1;stroke:#b30a00;stroke-width:0.438447;stroke-dasharray:none;stroke-opacity:1"
+     x="24.559814"
+     y="23.129101"
+     id="text3857"><tspan
+       sodipodi:role="line"
+       id="tspan3857"
+       x="24.559814"
+       y="23.129101"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.01516px;line-height:0;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';fill:#800080;stroke:#b30a00;stroke-width:0.438447;stroke-dasharray:none;stroke-opacity:1;fill-opacity:1">LED Pin</tspan></text>
+  <path
+     style="fill:none;fill-opacity:1;stroke:#b30a00;stroke-width:4.38447;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#Tail);marker-end:url(#ArrowWide)"
+     d="m 76.333714,43.682791 h 47.408006 l 10.91982,-10.919822 h 36.48818 32.49312 l 10.25398,10.253979 h 30.76194 l 13.64977,13.649776 h 54.53253 V 91.090795 H 264.90038 L 247.58846,73.778883 h -29.03074 l -9.45497,-9.454969 h -76.30558 l -8.32303,8.323039 H 76.866383 L 65.51377,83.999566 v 38.519004 l 5.409967,5.40997 h 38.968453 l 10.69509,-10.6951 h 98.50311 l 17.82378,17.82378 h 71.13281 l 10.77625,10.77625 v 36.87728 l -4.85544,4.85545 h -33.61986 l -8.28715,-8.28714 h -36.45749 l -11.30398,11.30398 h -16.39507 l -16.98666,-16.98666 h -4.32031 l -2.40343,4.16284 v 21.46443 l 8.12649,8.12648 h 111.46526 l 7.92193,7.92193 v 6.32391 l -5.82533,5.82532 h -29.79565 l -8.80618,8.80618 H 115.21893 l -9.72983,9.72982 H 91.24859 L 77.203567,231.91227 H 19.870246 l -5.690828,-5.69082 v -45.6414 l 6.307794,-6.30779 h 96.862418"
+     id="path3857" />
+  <text
+     xml:space="preserve"
+     style="font-size:7.01516px;line-height:0;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';writing-mode:lr-tb;direction:ltr;fill:#b30a00;fill-opacity:1;stroke:#b30a00;stroke-width:0.438447;stroke-dasharray:none;stroke-opacity:1"
+     x="24.559814"
+     y="23.129101"
+     id="text98"><tspan
+       sodipodi:role="line"
+       id="tspan98"
+       x="24.559814"
+       y="23.129101"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:7.01516px;line-height:0;font-family:'Noto Sans';-inkscape-font-specification:'Noto Sans';fill:#b30a00;stroke:#b30a00;stroke-width:0.438447;stroke-dasharray:none;stroke-opacity:1;fill-opacity:1">LED Pin</tspan></text>
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-94"
+     width="6.6782832"
+     height="6.1217599"
+     x="315.16006"
+     y="188.75436" />
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-84"
+     width="6.6782832"
+     height="6.1217599"
+     x="263.85535"
+     y="183.25743" />
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-03"
+     width="6.6782832"
+     height="6.1217599"
+     x="212.55058"
+     y="194.2513" />
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-10"
+     width="6.6782832"
+     height="6.1217599"
+     x="179.56895"
+     y="165.85046" />
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-4"
+     width="6.6782832"
+     height="6.1217599"
+     x="89.785683"
+     y="236.39447" />
+  <rect
+     style="fill:#5dffdb;fill-opacity:1;stroke:none;stroke-width:6.41309;stroke-opacity:1"
+     id="rect3856-937"
+     width="6.6782832"
+     height="6.1217599"
+     x="14.660884"
+     y="227.23291" />
+</svg>
