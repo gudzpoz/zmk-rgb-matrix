@@ -1,7 +1,7 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-# Shared properties for every RGB matrix indicator. Indicator kinds (cores in this
+# Shared properties for every RGB matrix overlay. Overlay kinds (cores in this
 # module or in a third-party one) include this fragment and add only the
 # properties specific to the state they show, the same way effects include
 # keypaw,rgb-matrix-effect-common.yaml.
@@ -11,9 +11,9 @@ properties:
     type: array
     required: false
     description: |
-      Key positions in the zmk,physical-layout whose LEDs this indicator paints.
+      Key positions in the zmk,physical-layout whose LEDs this overlay paints.
       Resolved through the same mapping the effects use, so one list works on
-      both halves. An indicator with neither `keys` nor `leds` targets no LEDs
+      both halves. An overlay with neither `keys` nor `leds` targets no LEDs
       and stays dark; a kind that wants a different empty-list meaning can read
       the empty list itself (KP_LED_COUNT is available to kinds).
 
@@ -36,12 +36,12 @@ properties:
     default: 100
     description: |
       Paint strength in percent: 100 replaces the effect's pixels on the targeted
-      LEDs, lower values mix the indicator colour over them.
+      LEDs, lower values mix the overlay colour over them.
 
   central-authoritative:
     type: boolean
     description: |
-      The indicator's source of truth exists only on the split central (keymap
+      The overlay's source of truth exists only on the split central (keymap
       layer state, the dynamic-macro recorder, ...). The central evaluates the
       kind's `active` predicate every tick and pushes the result over the split
       link; on a peripheral the renderer is gated by that pushed state instead
@@ -49,5 +49,5 @@ properties:
       there.
 
       Leave this false for a locally determined kind (caps lock, a battery
-      indicator): every half then evaluates the predicate for itself, which is
+      overlay): every half then evaluates the predicate for itself, which is
       what makes each half show its own state.

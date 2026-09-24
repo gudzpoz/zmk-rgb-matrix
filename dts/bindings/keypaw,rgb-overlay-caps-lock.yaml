@@ -1,0 +1,11 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Caps Lock overlay: paints the targeted LEDs while the host reports the HID
+  Caps Lock LED as set (see CONFIG_ZMK_HID_INDICATORS). Has no properties of its
+  own beyond the shared overlay fragment.
+
+compatible: "keypaw,rgb-overlay-caps-lock"
+
+include: ["keypaw,rgb-overlay-common.yaml"]

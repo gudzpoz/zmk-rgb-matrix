@@ -5,7 +5,7 @@
  *
  * Per-device RGB matrix behavior state and effect registries. The physical
  * matrix engine is shared, while every behavior node owns its own controller
- * state, effects, tuning, indicators, and LED zone.
+ * state, effects, tuning, overlays, and LED zone.
  */
 
 #include <stddef.h>
@@ -35,12 +35,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_NO_CYCLE_ONE(node_id) DT_PROP(node_id, no_cycle),
 
-#define KP_RGB_BEHAVIOR_INDICATORS(inst)                                       \
+#define KP_RGB_BEHAVIOR_OVERLAYS(inst)                                         \
   COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(DT_DRV_INST(inst), indicators),                         \
-      (static const struct device *const kp_rgb_indicators_##inst[] =          \
-           {LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), indicators),                \
-                    KP_RGB_INDICATORS_AT_IDX, (, ), DT_DRV_INST(inst))};),     \
+      DT_NODE_HAS_PROP(DT_DRV_INST(inst), overlays),                           \
+      (static const struct device *const kp_rgb_overlays_##inst[] =            \
+           {LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), overlays),                  \
+                    KP_RGB_OVERLAYS_AT_IDX, (, ), DT_DRV_INST(inst))};),       \
       ())
 
 #define KP_RGB_BEHAVIOR_LEDS(inst)                                             \
@@ -57,7 +57,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       "raise KP_RGB_PERSIST_MAX_EFFECTS for the larger effect registry");      \
   BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT8_MAX,                   \
                "effect count must fit the blob's count byte");                 \
-  KP_RGB_BEHAVIOR_INDICATORS(inst)                                             \
+  KP_RGB_BEHAVIOR_OVERLAYS(inst)                                               \
   KP_RGB_BEHAVIOR_LEDS(inst);                                                  \
   static const struct device *const kp_rgb_effects_##inst[KP_RGB_MAX_EFFECTS(  \
       inst)] = {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_EFFECT_DEVICE)};    \
@@ -70,10 +70,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       .leds = kp_rgb_leds_##inst,                                              \
       .leds_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0),                  \
       .all_leds = !DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                  \
-      .indicators =                                                            \
-          COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), indicators),         \
-                      (kp_rgb_indicators_##inst), (kp_rgb_no_indicators)),     \
-      .indicators_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), indicators, 0),      \
+      .overlays = COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), overlays),   \
+                              (kp_rgb_overlays_##inst), (kp_rgb_no_overlays)), \
+      .overlays_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), overlays, 0),          \
       .zone_valid = true,                                                      \
       .tuning =                                                                \
           {                                                                    \
@@ -114,9 +113,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
             (uint32_t)ctx->effect_count, dev->name);                           \
     return 0;                                                                  \
   }                                                                            \
-  BEHAVIOR_DT_INST_DEFINE(inst, kp_rgb_behavior_init_##inst, NULL,              \
-                          &kp_rgb_context_##inst, NULL, POST_KERNEL,          \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                  \
+  BEHAVIOR_DT_INST_DEFINE(inst, kp_rgb_behavior_init_##inst, NULL,             \
+                          &kp_rgb_context_##inst, NULL, POST_KERNEL,           \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                 \
                           &behavior_rgb_matrix_driver_api);
 
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -545,12 +544,12 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                  .s = (binding->param2 >> 8) & 0xFF,
                                  .b = binding->param2 & 0xFF});
     break;
-  case RGB_IND_STATE_CMD:
-    /* Live indicator state pushed by the central, not a setting to be saved.
+  case RGB_OVL_STATE_CMD:
+    /* Live overlay state pushed by the central, not a setting to be saved.
      * No-op on the central, as the words always equal, stopping dispatch() from
      * re-queueing itself. */
-    if (kp_rgb_indicator_set_word(RGB_IND_STATE_WORD(binding->param2),
-                                  RGB_IND_STATE_BITS(binding->param2))) {
+    if (kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(binding->param2),
+                                RGB_OVL_STATE_BITS(binding->param2))) {
       zmk_rgb_matrix_flush();
     }
     return 0;

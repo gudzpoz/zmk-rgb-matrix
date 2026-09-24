@@ -2,21 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Keymap layer indicator: paints the targeted LEDs while a given layer is active.
+  Keymap layer overlay: paints the targeted LEDs while a given layer is active.
   Declare one node per layer that should have its own LED.
 
-compatible: "keypaw,rgb-indicator-layer"
+compatible: "keypaw,rgb-overlay-layer"
 
-include: ["keypaw,rgb-indicator-common.yaml"]
+include: ["keypaw,rgb-overlay-common.yaml"]
 
 properties:
   layer:
     type: int
     required: true
-    description: Layer id this indicator watches.
+    description: Layer id this overlay watches.
 
   only-topmost:
     type: boolean
     description: |
-      Paint only while this is the highest active layer. By default the indicator
+      Paint only while this is the highest active layer. By default the overlay
       follows "this layer is active", which is what a momentary layer key wants.

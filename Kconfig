@@ -56,25 +56,25 @@ config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
       Without this the strip might latch at its last color through deep sleep
       and keeps drawing current.
 
-config KEYPAW_RGB_INDICATOR_CAPS_LOCK
+config KEYPAW_RGB_OVERLAY_CAPS_LOCK
     bool
     default y
-    depends on DT_HAS_KEYPAW_RGB_INDICATOR_CAPS_LOCK_ENABLED
+    depends on DT_HAS_KEYPAW_RGB_OVERLAY_CAPS_LOCK_ENABLED
     select ZMK_HID_INDICATORS
     help
-      Caps Lock indicator. Enabled by the presence of a
-      keypaw,rgb-indicator-caps-lock node, so a listed indicator always has a
+      Caps Lock overlay. Enabled by the presence of a
+      keypaw,rgb-overlay-caps-lock node, so a listed overlay always has a
       driver to link against. Selects ZMK_HID_INDICATORS, which is what the host
       sets when Caps Lock is on; note that a split peripheral also needs
       CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS to receive the state.
 
-config KEYPAW_RGB_INDICATOR_LAYER
+config KEYPAW_RGB_OVERLAY_LAYER
     bool
     default y
-    depends on DT_HAS_KEYPAW_RGB_INDICATOR_LAYER_ENABLED
+    depends on DT_HAS_KEYPAW_RGB_OVERLAY_LAYER_ENABLED
     help
-      Keymap layer indicator. Enabled by the presence of a
-      keypaw,rgb-indicator-layer node.
+      Keymap layer overlay. Enabled by the presence of a
+      keypaw,rgb-overlay-layer node.
 
 endif # KEYPAW_RGB_MATRIX
 

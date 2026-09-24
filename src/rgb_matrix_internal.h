@@ -37,8 +37,8 @@ struct kp_rgb_behavior_context {
   const uint32_t *leds;
   size_t leds_len;
   bool all_leds;
-  const struct device *const *indicators;
-  size_t indicators_len;
+  const struct device *const *overlays;
+  size_t overlays_len;
   bool zone_valid;
 #if IS_ENABLED(CONFIG_SETTINGS)
   struct k_work_delayable save_work;
@@ -64,24 +64,24 @@ uint16_t kp_rgb_calc_effect_index(const struct kp_rgb_behavior_context *ctx,
 int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index);
 bool kp_rgb_behavior_any_on(void);
 
-/* Indicator registry and the split-pushed on/off state (see rgb_utils.c).
+/* Overlay registry and the split-pushed on/off state (see rgb_utils.c).
  * refresh()/dispatch() are central-only; on a peripheral they are no-ops. */
-bool kp_rgb_indicator_gate(const struct device *dev,
-                           const struct kp_rgb_indicator_api *api);
-bool kp_rgb_indicator_refresh(void);
-void kp_rgb_indicator_dispatch(void);
-uint16_t kp_rgb_indicator_word_count(void);
-bool kp_rgb_indicator_set_word(uint16_t word, uint16_t value);
-uint16_t kp_rgb_indicator_get_word(uint16_t word);
+bool kp_rgb_overlay_gate(const struct device *dev,
+                         const struct kp_rgb_overlay_api *api);
+bool kp_rgb_overlay_refresh(void);
+void kp_rgb_overlay_dispatch(void);
+uint16_t kp_rgb_overlay_word_count(void);
+bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
+uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
-/* param2 encoding for RGB_IND_STATE_CMD: one 16-bit state word as
+/* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word as
  * (word << 16) | bits. C-only, so unlike the command constant in
  * dt-bindings/keypaw/rgb_matrix.h this may use casts -- nothing parses this
  * header with the devicetree compiler. */
-#define RGB_IND_STATE_VAL(word, value)                                        \
+#define RGB_OVL_STATE_VAL(word, value)                                         \
   (((uint32_t)(word) << 16) | ((uint32_t)(value) & 0xFFFFu))
-#define RGB_IND_STATE_WORD(param) ((uint16_t)((param) >> 16))
-#define RGB_IND_STATE_BITS(param) ((uint16_t)(param))
+#define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
+#define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
 
 #define KP_RGB_PERSIST_MAX_EFFECTS 16
 

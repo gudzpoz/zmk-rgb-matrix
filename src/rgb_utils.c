@@ -98,8 +98,8 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
   return n;
 }
 
-void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
-                            size_t led_count, struct led_rgb color, uint8_t strength) {
+void kp_rgb_overlay_paint(struct kp_rgb_frame *frame, const size_t *leds,
+                          size_t led_count, struct led_rgb color, uint8_t strength) {
   struct led_rgb painted = kp_rgb_rgb_scale(color, kp_rgb_brightness_pct(frame));
 
   for (size_t i = 0; i < led_count; i++) {
@@ -110,10 +110,10 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
 }
 
 /* -------------------------------------------------------------------------
- * Indicator state
+ * Overlay state
  *
- * One on/off bit per indicator ordinal (its position under the
- * keypaw,rgb-indicators container), held in uint16_t words. The central fills it
+ * One on/off bit per overlay ordinal (its position under the
+ * keypaw,rgb-overlays container), held in uint16_t words. The central fills it
  * by evaluating each remote kind's `active` once a tick and pushes the words
  * whose bits changed over the split link; a peripheral fills it from that
  * command. A locally determined kind is never in it -- its gate calls `active`
@@ -123,9 +123,9 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
  * matrix's low-priority workqueue (the render tick); each aligned uint16_t
  * access cannot tear, so the worst case is one stale ~32 ms frame.
  * ------------------------------------------------------------------------- */
-#define KP_INDICATOR_SLOTS MAX(1, KP_RGB_INDICATOR_COUNT)
-static const struct device *kp_indicator_registry[KP_INDICATOR_SLOTS];
-static volatile uint16_t kp_indicator_state[KP_RGB_INDICATOR_WORDS];
+#define KP_OVERLAY_SLOTS MAX(1, KP_RGB_OVERLAY_COUNT)
+static const struct device *kp_overlay_registry[KP_OVERLAY_SLOTS];
+static volatile uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 /* What every peripheral was last told. dispatch() sends only the words that
@@ -133,55 +133,55 @@ static volatile uint16_t kp_indicator_state[KP_RGB_INDICATOR_WORDS];
  * change also survives a tick that could not take the matrix lock and had to
  * skip its dispatch: `state != sent` stays true, so the next tick still has
  * something to push. Central only: a peripheral never dispatches. */
-static uint16_t kp_indicator_sent[KP_RGB_INDICATOR_WORDS];
+static uint16_t kp_overlay_sent[KP_RGB_OVERLAY_WORDS];
 #endif
 
-void kp_rgb_indicator_register(const struct device *dev) {
-  const struct kp_rgb_indicator_common_data *data = dev->data;
-  if (data == NULL || data->index >= KP_INDICATOR_SLOTS) {
+void kp_rgb_overlay_register(const struct device *dev) {
+  const struct kp_rgb_overlay_common_data *data = dev->data;
+  if (data == NULL || data->index >= KP_OVERLAY_SLOTS) {
     return;
   }
-  kp_indicator_registry[data->index] = dev;
+  kp_overlay_registry[data->index] = dev;
 }
 
-uint16_t kp_rgb_indicator_word_count(void) { return KP_RGB_INDICATOR_WORDS; }
+uint16_t kp_rgb_overlay_word_count(void) { return KP_RGB_OVERLAY_WORDS; }
 
-bool kp_rgb_indicator_set_word(uint16_t word, uint16_t value) {
-  if (word >= KP_RGB_INDICATOR_WORDS || kp_indicator_state[word] == value) {
+bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value) {
+  if (word >= KP_RGB_OVERLAY_WORDS || kp_overlay_state[word] == value) {
     return false;
   }
-  kp_indicator_state[word] = value;
+  kp_overlay_state[word] = value;
   return true;
 }
 
-uint16_t kp_rgb_indicator_get_word(uint16_t word) {
-  return word < KP_RGB_INDICATOR_WORDS ? kp_indicator_state[word] : 0;
+uint16_t kp_rgb_overlay_get_word(uint16_t word) {
+  return word < KP_RGB_OVERLAY_WORDS ? kp_overlay_state[word] : 0;
 }
 
-bool kp_rgb_indicator_gate(const struct device *dev,
-                           const struct kp_rgb_indicator_api *api) {
+bool kp_rgb_overlay_gate(const struct device *dev,
+                         const struct kp_rgb_overlay_api *api) {
   if (api->active == NULL) {
     return true; /* predicate-less kind renders every tick, as before */
   }
-  const struct kp_rgb_indicator_common_data *data = dev->data;
+  const struct kp_rgb_overlay_common_data *data = dev->data;
   if (data->remote) {
-    return (kp_indicator_state[data->index / 16] >> (data->index % 16)) & 1u;
+    return (kp_overlay_state[data->index / 16] >> (data->index % 16)) & 1u;
   }
   return api->active(dev);
 }
 
-bool kp_rgb_indicator_refresh(void) {
+bool kp_rgb_overlay_refresh(void) {
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-  uint16_t next[KP_RGB_INDICATOR_WORDS] = {0};
-  for (size_t i = 0; i < ARRAY_SIZE(kp_indicator_registry); i++) {
-    const struct device *dev = kp_indicator_registry[i];
+  uint16_t next[KP_RGB_OVERLAY_WORDS] = {0};
+  for (size_t i = 0; i < ARRAY_SIZE(kp_overlay_registry); i++) {
+    const struct device *dev = kp_overlay_registry[i];
     if (dev == NULL) {
       continue;
     }
     /* A remote kind's predicate reads a central-only symbol, so it is
      * deliberately never called on a peripheral (see the #else branch). */
-    const struct kp_rgb_indicator_api *api = dev->api;
-    const struct kp_rgb_indicator_common_data *data = dev->data;
+    const struct kp_rgb_overlay_api *api = dev->api;
+    const struct kp_rgb_overlay_common_data *data = dev->data;
     if (!data->remote) {
       continue;
     }
@@ -190,11 +190,11 @@ bool kp_rgb_indicator_refresh(void) {
     }
   }
   bool pending = false;
-  for (uint16_t w = 0; w < KP_RGB_INDICATOR_WORDS; w++) {
-    if (next[w] != kp_indicator_state[w]) {
-      kp_indicator_state[w] = next[w];
+  for (uint16_t w = 0; w < KP_RGB_OVERLAY_WORDS; w++) {
+    if (next[w] != kp_overlay_state[w]) {
+      kp_overlay_state[w] = next[w];
     }
-    if (kp_indicator_state[w] != kp_indicator_sent[w]) {
+    if (kp_overlay_state[w] != kp_overlay_sent[w]) {
       pending = true; /* not on the wire yet, or a previous send was skipped */
     }
   }
@@ -204,7 +204,7 @@ bool kp_rgb_indicator_refresh(void) {
 #endif
 }
 
-void kp_rgb_indicator_dispatch(void) {
+void kp_rgb_overlay_dispatch(void) {
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   /* Any behavior node works: the command reads no context state and is
    * BEHAVIOR_LOCALITY_GLOBAL, so zmk_behavior_invoke_binding() reaches every
@@ -216,20 +216,20 @@ void kp_rgb_indicator_dispatch(void) {
     return;
   }
   struct zmk_behavior_binding_event event = {.timestamp = k_uptime_get()};
-  for (uint16_t w = 0; w < KP_RGB_INDICATOR_WORDS; w++) {
-    uint16_t bits = kp_rgb_indicator_get_word(w);
-    if (bits == kp_indicator_sent[w]) {
+  for (uint16_t w = 0; w < KP_RGB_OVERLAY_WORDS; w++) {
+    uint16_t bits = kp_rgb_overlay_get_word(w);
+    if (bits == kp_overlay_sent[w]) {
       continue;
     }
     struct zmk_behavior_binding binding = {
         .behavior_dev = ctx->dev->name,
-        .param1 = RGB_IND_STATE_CMD,
-        .param2 = RGB_IND_STATE_VAL(w, bits),
+        .param1 = RGB_OVL_STATE_CMD,
+        .param2 = RGB_OVL_STATE_VAL(w, bits),
     };
     zmk_behavior_invoke_binding(&binding, event, true);
     /* Best effort: a split drop is silent, so this records the attempt. A
      * reconnect re-sends every word (rgb_split_sync.c). */
-    kp_indicator_sent[w] = bits;
+    kp_overlay_sent[w] = bits;
   }
 #endif
 }

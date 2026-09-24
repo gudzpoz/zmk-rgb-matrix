@@ -3,8 +3,8 @@
 
 # Shared properties for every RGB matrix trigger. Trigger kinds (cores in this
 # module or in a third-party one) include this fragment and add only the
-# properties describing the condition, the same way indicators include
-# keypaw,rgb-indicator-common.yaml.
+# properties describing the condition, the same way overlays include
+# keypaw,rgb-overlay-common.yaml.
 
 properties:
   bindings:

@@ -17,13 +17,13 @@ properties:
       complete physical matrix for backward compatibility; multiple behaviors
       therefore must provide disjoint `leds` lists.
 
-  indicators:
+  overlays:
     type: phandles
     required: false
     description: |
-      Indicators composited over this behavior's active effect, in paint order.
-      An effect may replace this list with its own `indicators` property or opt
-      out with `no-indicators`.
+      Overlays composited over this behavior's active effect, in paint order.
+      An effect may replace this list with its own `overlays` property or opt
+      out with `no-overlays`.
   max-brightness:
     type: int
     default: 40

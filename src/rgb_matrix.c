@@ -103,7 +103,7 @@ static uint32_t last_tick;
 static struct k_mutex kp_rgb_lock;
 static bool kp_rgb_matrix_valid;
 
-const struct device *const kp_rgb_no_indicators[1] = {NULL};
+const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
 bool kp_rgb_behavior_owns_led(const struct kp_rgb_behavior_context *ctx,
                               size_t led) {
@@ -142,7 +142,7 @@ void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
  * saves outside it) and every holder runs at a higher priority than this
  * low-priority queue, so a busy mutex is a hiccup rather than a deadlock. Wait
  * it out instead of dropping the frame: a dropped frame also skips the
- * indicator dispatch that shares the tick, costing a full period on both
+ * overlay dispatch that shares the tick, costing a full period on both
  * halves. Bounded, so a genuinely stuck holder still surfaces a warning
  * instead of hanging this queue forever. */
 #define KP_RGB_LOCK_RETRY_MS 1
@@ -177,22 +177,22 @@ static void kp_start_timer(void) {
                 K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
 }
 
-static void kp_render_indicators(struct kp_rgb_behavior_context *ctx,
-                                 struct kp_rgb_frame *frame,
-                                 const struct kp_rgb_effect_api *api) {
-  const struct device *const *indicators =
-      api->indicators != NULL ? api->indicators : ctx->indicators;
+static void kp_render_overlays(struct kp_rgb_behavior_context *ctx,
+                               struct kp_rgb_frame *frame,
+                               const struct kp_rgb_effect_api *api) {
+  const struct device *const *overlays =
+      api->overlays != NULL ? api->overlays : ctx->overlays;
   size_t count =
-      api->indicators != NULL ? api->indicators_len : ctx->indicators_len;
+      api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
   for (size_t i = 0; i < count; i++) {
-    if (indicators[i] == NULL) {
+    if (overlays[i] == NULL) {
       continue;
     }
-    const struct kp_rgb_indicator_api *ind = indicators[i]->api;
-    if (!kp_rgb_indicator_gate(indicators[i], ind)) {
+    const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
+    if (!kp_rgb_overlay_gate(overlays[i], ovl)) {
       continue;
     }
-    ind->render(indicators[i], frame);
+    ovl->render(overlays[i], frame);
   }
 }
 
@@ -204,8 +204,8 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
-  /* Resolve every central-authoritative indicator before rendering */
-  bool ind_changed = kp_rgb_indicator_refresh();
+  /* Resolve every central-authoritative overlay before rendering */
+  bool ovl_changed = kp_rgb_overlay_refresh();
   bool any_on;
   if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
@@ -237,7 +237,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       const struct kp_rgb_effect_api *api =
           (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
       api->render(ctx->state.active_fx, &frame);
-      kp_render_indicators(ctx, &frame, api);
+      kp_render_overlays(ctx, &frame, api);
       if (ctx->all_leds) {
         memcpy(pixels, scratch, sizeof(pixels));
       } else {
@@ -258,9 +258,9 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       LOG_WRN("Failed to update the RGB strip (%d)", err);
     }
   }
-  /* Push the new indicator state after the local paint. */
-  if (ind_changed) {
-    kp_rgb_indicator_dispatch();
+  /* Push the new overlay state after the local paint. */
+  if (ovl_changed) {
+    kp_rgb_overlay_dispatch();
   }
 }
 

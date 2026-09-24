@@ -1,7 +1,7 @@
 # ZMK RGB Matrix
 
 A position-aware RGB matrix module for ZMK. It renders customizable effects and
-optional indicators on a Zephyr `led_strip` device, using the positions from a
+optional overlays on a Zephyr `led_strip` device, using the positions from a
 `zmk,physical-layout`. Multiple matrix behavior nodes can independently own
 disjoint LED zones while sharing one physical output engine. The module also
 supports keymap behaviors, layer/layout triggers, and a public API for separately
@@ -81,7 +81,7 @@ Multiple behaviors must therefore provide unique, disjoint local chain indices.
             #binding-cells = <2>;
             display-name = "Main RGB";
             leds = <0 1 2 3 4 5 6 7>;
-            indicators = <&caps>;
+            overlays = <&caps>;
             initial-effect = <0>;
 
             fx_main: fx_main {
@@ -111,7 +111,7 @@ Multiple behaviors must therefore provide unique, disjoint local chain indices.
 
 Commands target the behavior they are bound to, so `&rgb_main RGB_TOG` does
 not change `rgb_numpad`. The same rule applies to effect selection, colour,
-duration, persistence, indicators, and split forwarding. Zone overlap is an
+duration, persistence, overlays, and split forwarding. Zone overlap is an
 initialization error; the engine leaves the strip disabled rather than applying
 implicit blending or precedence.
 
@@ -222,7 +222,7 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
 </tbody>
 </table>
 
-Every effect accepts `color`, `duration`, `indicators`, `no-indicators`, and
+Every effect accepts `color`, `duration`, `overlays`, `no-overlays`, and
 `no-cycle` attributes (though some attributes might be meaningless to some
 effects).
 
@@ -246,26 +246,26 @@ initial state is used at boot. The matrix turns off on idle by default;
 `CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n` keeps it lit and applies
 `idle-brightness` while idle.
 
-## Indicators and triggers
+## Overlays and triggers
 
-Indicators are regular devices that paint over the active effect. Add their
-nodes as children of a `keypaw,rgb-indicators` container outside `&kprgb`, then
-list them in paint order on the owning behavior node. Effect-level `indicators`
-and `no-indicators` still override this list.
+Overlays are regular devices that paint over the active effect. Add their
+nodes as children of a `keypaw,rgb-overlays` container outside `&kprgb`, then
+list them in paint order on the owning behavior node. Effect-level `overlays`
+and `no-overlays` still override this list.
 
-The container is the engine's indicator registry: its children are enumerated in
-declaration order, and that index is the indicator's on/off bit. The state is a
+The container is the engine's overlay registry: its children are enumerated in
+declaration order, and that index is the overlay's on/off bit. The state is a
 `uint16_t[]` sized from the child count, so there is no cap on how many
-indicators a board may declare; one word (16 indicators) travels per split
+overlays a board may declare; one word (16 overlays) travels per split
 command. Both halves build the same devicetree, so the indices agree.
 
 ```dts
 / {
-    rgb_indicators {
-        compatible = "keypaw,rgb-indicators";
+    rgb_overlays {
+        compatible = "keypaw,rgb-overlays";
 
         caps: caps {
-            compatible = "keypaw,rgb-indicator-caps-lock";
+            compatible = "keypaw,rgb-overlay-caps-lock";
             keys = <0>;
             color = <0x00FF00>;
         };
@@ -273,11 +273,11 @@ command. Both halves build the same devicetree, so the indices agree.
 };
 
 &kprgb {
-    indicators = <&caps>;
+    overlays = <&caps>;
 };
 ```
 
-### Where an indicator is evaluated
+### Where an overlay is evaluated
 
 A kind may supply an `active` predicate. When it does, the renderer runs only
 while the predicate is true; when it does not, the renderer runs every tick and
@@ -287,7 +287,7 @@ The predicate's source may not exist on both halves, so a kind declares which it
 is with the `central-authoritative` property:
 
 - **Locally determined** (the default; Caps Lock, and a future battery
-  indicator). Every half evaluates the predicate for itself, so each half shows
+  overlay). Every half evaluates the predicate for itself, so each half shows
   its own state. Caps Lock needs `CONFIG_ZMK_HID_INDICATORS=y`; a split
   peripheral also needs `CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS=y`, because
   the host's HID indicator state is what ZMK forwards.
@@ -296,14 +296,14 @@ is with the `central-authoritative` property:
   central evaluates the predicate and pushes only the words whose bits changed,
   one 16-bit word per command (word index in the high half of the command's
   parameter, the bits in the low half). A peripheral gates its renderers on that
-  pushed state and never calls the predicate, which is why a layer indicator
+  pushed state and never calls the predicate, which is why a layer overlay
   lights the peripheral's LEDs for the keys it lists that live on that half.
 
 The pushed state is a level, not an edge: the central also re-pushes a full
 snapshot when a peripheral connects (`CONFIG_KEYPAW_RGB_SPLIT_SYNC`), so a half
 that was off while a layer was held still shows it. The snapshot uses the same
 `&kprgb` command path as everything else but is deliberately not persisted --
-unlike an effect selection, indicator state is volatile and must not schedule a
+unlike an effect selection, overlay state is volatile and must not schedule a
 flash write on every layer change.
 
 A predicate is otherwise sampled once per engine tick, so a change would wait up
@@ -320,10 +320,10 @@ work item can be queued only once, so a burst costs at most one extra frame.
 ### Writing a kind
 
 A kind provides a renderer, and optionally a predicate, through
-`KP_RGB_INDICATOR_DEFINE(inst, active_fn, render_fn, cfg_inst)` (pass `NULL` for
+`KP_RGB_OVERLAY_DEFINE(inst, active_fn, render_fn, cfg_inst)` (pass `NULL` for
 `active_fn`). Its config and data structs embed
-`struct kp_rgb_indicator_common_config` / `..._data` as the first member, as
-before. Targeting (`keys` / `leds`) is resolved per half, so an indicator only
+`struct kp_rgb_overlay_common_config` / `..._data` as the first member, as
+before. Targeting (`keys` / `leds`) is resolved per half, so an overlay only
 lights LEDs physically present on the half that renders it.
 
 State that has an event source should be repainted from that event rather than

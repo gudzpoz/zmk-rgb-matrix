@@ -132,7 +132,7 @@ struct kp_rgb_hsb kp_rgb_hsb_scale(struct kp_rgb_hsb color, uint8_t pct);
 struct led_rgb kp_rgb_rgb_scale(struct led_rgb rgb, uint8_t pct);
 
 /* Blend `over` into `base` by `pct` percent (0 keeps base, 100 replaces it).
- * Used by indicators to composite over whatever the effect rendered. */
+ * Used by overlays to composite over whatever the effect rendered. */
 struct led_rgb kp_rgb_rgb_mix(struct led_rgb base, struct led_rgb over,
                               uint8_t pct);
 
@@ -187,23 +187,23 @@ typedef void (*rgb_matrix_effect_render_callback_t)(const struct device *dev,
 typedef void (*rgb_matrix_effect_event_callback_t)(const struct device *dev,
                                                    const zmk_event_t *eh);
 
-/* Sentinel list meaning "this effect wants no indicators at all"; it is never
+/* Sentinel list meaning "this effect wants no overlays at all"; it is never
  * dereferenced, since the accompanying length is 0. */
-extern const struct device *const kp_rgb_no_indicators[];
+extern const struct device *const kp_rgb_no_overlays[];
 
 struct kp_rgb_effect_api {
   const struct behavior_driver_api behavior; /* must be first */
   rgb_matrix_effect_render_callback_t render;
   rgb_matrix_effect_event_callback_t on_event;
   const struct device *owner; /* parent keypaw,behavior-rgb-matrix */
-  /* Per-effect indicator override, filled in by KP_RGB_EFFECT_DEFINE from the
+  /* Per-effect overlay override, filled in by KP_RGB_EFFECT_DEFINE from the
    * effect node's devicetree:
-   *   indicators = <&a &b>;  -> exactly those, in order
-   *   no-indicators;         -> kp_rgb_no_indicators (non-NULL, length 0)
+   *   overlays = <&a &b>;  -> exactly those, in order
+   *   no-overlays;         -> kp_rgb_no_overlays (non-NULL, length 0)
    *   neither                -> NULL, inherit the owning behavior's list
    */
-  const struct device *const *indicators;
-  size_t indicators_len;
+  const struct device *const *overlays;
+  size_t overlays_len;
 };
 
 /* The brightness a renderer should apply this frame. */
@@ -242,26 +242,26 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   return MAX(kp_rgb_effect_data(dev)->duration_ms, 1u);
 }
 
-/* Expand one entry of an `indicators = <&a &b>;` list. The properties are of
- * type `phandles` (not `phandle-array`, which would demand #indicator-cells),
+/* Expand one entry of an `overlays = <&a &b>;` list. The properties are of
+ * type `phandles` (not `phandle-array`, which would demand #overlay-cells),
  * so DT_PROP_BY_IDX is the accessor that yields a node identifier. */
-#define KP_RGB_INDICATORS_AT_IDX(idx, node_id)                                 \
-  DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, indicators, idx))
+#define KP_RGB_OVERLAYS_AT_IDX(idx, node_id)                                   \
+  DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, overlays, idx))
 
 /* Declare the override list, but only when the node actually has one, so an
  * unused static array is never left behind. */
-#define KP_RGB_EFFECT_INDICATOR_LIST(node_id, cfg_inst)                        \
+#define KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                          \
   COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(node_id, indicators),                                   \
-      (static const struct device *const cfg_inst##_indicators[] = {LISTIFY(   \
-           DT_PROP_LEN(node_id, indicators), KP_RGB_INDICATORS_AT_IDX, (, ),   \
+      DT_NODE_HAS_PROP(node_id, overlays),                                     \
+      (static const struct device *const cfg_inst##_overlays[] = {LISTIFY(     \
+           DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAYS_AT_IDX, (, ),       \
            node_id)};),                                                        \
       ())
 
-#define KP_RGB_EFFECT_INDICATOR_PTR(node_id, cfg_inst)                         \
-  COND_CODE_1(DT_PROP(node_id, no_indicators), (kp_rgb_no_indicators),         \
-              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, indicators),              \
-                           (cfg_inst##_indicators), (NULL))))
+#define KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst)                           \
+  COND_CODE_1(DT_PROP(node_id, no_overlays), (kp_rgb_no_overlays),             \
+              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, overlays),                \
+                           (cfg_inst##_overlays), (NULL))))
 
 #define KP_RGB_EFFECT_DEFINE(node_id, render_fn, event_fn, cfg_inst)           \
   BUILD_ASSERT(                                                                \
@@ -281,10 +281,10 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                "as the first field");                                          \
   BUILD_ASSERT(DT_PROP(node_id, index) == DT_NODE_CHILD_IDX(node_id),          \
                "effect index must match the ordering of effects");             \
-  BUILD_ASSERT(DT_PROP_LEN_OR(node_id, indicators, 1) > 0,                     \
-               "an empty `indicators` list is not expressible; use "           \
-               "`no-indicators;` for an effect that wants none");              \
-  KP_RGB_EFFECT_INDICATOR_LIST(node_id, cfg_inst)                              \
+  BUILD_ASSERT(DT_PROP_LEN_OR(node_id, overlays, 1) > 0,                       \
+               "an empty `overlays` list is not expressible; use "             \
+               "`no-overlays;` for an effect that wants none");                \
+  KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                                \
   static int cfg_inst##_init(const struct device *dev) { return 0; }           \
   IF_ENABLED(                                                                  \
       CONFIG_ZMK_BEHAVIOR_METADATA,                                            \
@@ -303,18 +303,18 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
       .render = render_fn,                                                     \
       .on_event = event_fn,                                                    \
       .owner = DEVICE_DT_GET(DT_PARENT(node_id)),                              \
-      .indicators = KP_RGB_EFFECT_INDICATOR_PTR(node_id, cfg_inst),            \
-      .indicators_len = DT_PROP_LEN_OR(node_id, indicators, 0),                \
+      .overlays = KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst),                \
+      .overlays_len = DT_PROP_LEN_OR(node_id, overlays, 0),                    \
   };                                                                           \
   BEHAVIOR_DT_DEFINE(node_id, cfg_inst##_init, NULL, &cfg_inst##_data,         \
                      &cfg_inst##_cfg, POST_KERNEL,                             \
                      CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
 
 /* -------------------------------------------------------------------------
- * Indicators
+ * Overlays
  *
- * An indicator is a non-behavior device that paints over whatever the active
- * effect rendered. Indicators are listed in paint order by `indicators` on the
+ * An overlay is a non-behavior device that paints over whatever the active
+ * effect rendered. Overlays are listed in paint order by `overlays` on the
  * owning behavior node; individual effects may override that list.
  *
  * Kinds sample the state they need in `render`, and the engine repaints on its
@@ -325,13 +325,13 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * arriving over the split link).
  * ------------------------------------------------------------------------- */
 
-struct kp_rgb_indicator_api {
+struct kp_rgb_overlay_api {
   bool (*active)(const struct device *dev);
   void (*render)(const struct device *dev, struct kp_rgb_frame *frame);
 };
 
-/* Kind-agnostic part of an indicator's config; must be its first member. */
-struct kp_rgb_indicator_common_config {
+/* Kind-agnostic part of an overlay's config; must be its first member. */
+struct kp_rgb_overlay_common_config {
   const uint32_t *keys; /* key positions, or NULL */
   size_t keys_len;
   const uint32_t *leds; /* raw chain indices, or NULL */
@@ -341,32 +341,32 @@ struct kp_rgb_indicator_common_config {
 };
 
 /* Kind-agnostic mutable part; must be the first member. */
-struct kp_rgb_indicator_common_data {
+struct kp_rgb_overlay_common_data {
   size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
-  size_t *leds;     /* the indicator's own storage */
+  size_t *leds;     /* the overlay's own storage */
   uint16_t index;   /* registry ordinal; state word index / 16, bit index % 16 */
   bool remote;      /* True when `central-authoritative` */
 };
 
 /* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
- * devicetree, so there is no fixed cap on the indicator count. */
-#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_indicators)
-#define KP_RGB_INDICATOR_COUNT DT_CHILD_NUM(DT_INST(0, keypaw_rgb_indicators))
+ * devicetree, so there is no fixed cap on the overlay count. */
+#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_overlays)
+#define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM(DT_INST(0, keypaw_rgb_overlays))
 #else
-#define KP_RGB_INDICATOR_COUNT 0
+#define KP_RGB_OVERLAY_COUNT 0
 #endif
-#define KP_RGB_INDICATOR_WORDS MAX(1, (KP_RGB_INDICATOR_COUNT + 15) / 16)
+#define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
 
-/* Add a device to the engine's indicator registry, where `index` places it.
- * Called by KP_RGB_INDICATOR_DEFINE; a kind never calls this itself. */
-void kp_rgb_indicator_register(const struct device *dev);
+/* Add a device to the engine's overlay registry, where `index` places it.
+ * Called by KP_RGB_OVERLAY_DEFINE; a kind never calls this itself. */
+void kp_rgb_overlay_register(const struct device *dev);
 
-/* The most targets an indicator can resolve. */
-#define KP_RGB_INDICATOR_TARGET_CAP(node_id)                                   \
+/* The most targets an overlay can resolve. */
+#define KP_RGB_OVERLAY_TARGET_CAP(node_id)                                     \
   MAX(1, MIN(KP_LED_COUNT, DT_PROP_LEN_OR(node_id, keys, 0) +                  \
                                DT_PROP_LEN_OR(node_id, leds, 0)))
 
-/* Resolve an indicator's `keys`/`leds` devicetree spec into LED indices.
+/* Resolve an overlay's `keys`/`leds` devicetree spec into LED indices.
  * Returns the number written (never more than out_max, and always <=
  * KP_LED_COUNT); 0 when both lists are empty. */
 size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
@@ -375,14 +375,14 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
 
 /* Paint `color` onto `leds` at `strength` percent: the colour is scaled by the
  * frame's brightness, then mixed over the existing pixels. */
-void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
-                            size_t led_count, struct led_rgb color,
-                            uint8_t strength);
+void kp_rgb_overlay_paint(struct kp_rgb_frame *frame, const size_t *leds,
+                          size_t led_count, struct led_rgb color,
+                          uint8_t strength);
 
-/* Declare the devicetree-derived target arrays for one indicator instance. A
+/* Declare the devicetree-derived target arrays for one overlay instance. A
  * missing property yields a one-element array whose length is read as 0, so the
  * declaration is always valid C and the array is always referenced. */
-#define KP_RGB_INDICATOR_TARGET_ARRAYS(inst, cfg_inst)                         \
+#define KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg_inst)                           \
   static const uint32_t cfg_inst##_keys[] =                                    \
       COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                   \
                   (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                  \
@@ -391,7 +391,7 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
                   (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
 
 /* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_INDICATOR_COMMON(node_id, cfg_inst)                             \
+#define KP_RGB_OVERLAY_COMMON(node_id, cfg_inst)                               \
   {.keys = cfg_inst##_keys,                                                    \
    .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                               \
    .leds = cfg_inst##_leds,                                                    \
@@ -399,32 +399,32 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
    .color = DT_PROP_OR(node_id, color, 0xFFFFFF),                              \
    .brightness = DT_PROP_OR(node_id, brightness, 100)}
 
-/* Declare the device. Indicators are plain devices, never behaviors, so they
+/* Declare the device. Overlays are plain devices, never behaviors, so they
  * stay out of the behavior registry and cannot be keymap-bound. The macro also
  * allocates the instance's target storage, so a kind must declare its device
  * here rather than with DEVICE_DT_DEFINE directly. */
-#define KP_RGB_INDICATOR_DEFINE(inst, active_fn, render_fn, cfg_inst)          \
+#define KP_RGB_OVERLAY_DEFINE(inst, active_fn, render_fn, cfg_inst)            \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
-                       sizeof(struct kp_rgb_indicator_common_config) &&        \
+                       sizeof(struct kp_rgb_overlay_common_config) &&          \
                    (const void *)&cfg_inst##_cfg ==                            \
                        (const void *)&cfg_inst##_cfg.common,                   \
-               "indicator config must embed "                                  \
-               "struct kp_rgb_indicator_common_config as the first field");    \
+               "overlay config must embed "                                    \
+               "struct kp_rgb_overlay_common_config as the first field");      \
   BUILD_ASSERT(                                                                \
       sizeof(cfg_inst##_data.common) ==                                        \
-              sizeof(struct kp_rgb_indicator_common_data) &&                   \
+              sizeof(struct kp_rgb_overlay_common_data) &&                     \
           (const void *)&cfg_inst##_data ==                                    \
               (const void *)&cfg_inst##_data.common,                           \
-      "indicator data must embed struct kp_rgb_indicator_common_data "         \
+      "overlay data must embed struct kp_rgb_overlay_common_data "             \
       "as the first field");                                                   \
   BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                \
-                                  keypaw_rgb_indicators),                      \
-               "indicator must be a child of a keypaw,rgb-indicators node");   \
+                                  keypaw_rgb_overlays),                        \
+               "overlay must be a child of a keypaw,rgb-overlays node");       \
   static size_t                                                                \
-      cfg_inst##_targets[KP_RGB_INDICATOR_TARGET_CAP(DT_DRV_INST(inst))];      \
+      cfg_inst##_targets[KP_RGB_OVERLAY_TARGET_CAP(DT_DRV_INST(inst))];        \
   static int cfg_inst##_init(const struct device *dev) {                       \
-    const struct kp_rgb_indicator_common_config *cfg = dev->config;            \
-    struct kp_rgb_indicator_common_data *data = dev->data;                     \
+    const struct kp_rgb_overlay_common_config *cfg = dev->config;              \
+    struct kp_rgb_overlay_common_data *data = dev->data;                       \
     data->leds = cfg_inst##_targets;                                           \
     data->led_count = kp_rgb_resolve_targets(                                  \
         cfg->keys, cfg->keys_len, cfg->leds, cfg->leds_len, data->leds,        \
@@ -432,10 +432,10 @@ void kp_rgb_indicator_paint(struct kp_rgb_frame *frame, const size_t *leds,
     data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
     data->remote = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                             \
                    DT_PROP(DT_DRV_INST(inst), central_authoritative);          \
-    kp_rgb_indicator_register(dev);                                            \
+    kp_rgb_overlay_register(dev);                                              \
     return 0;                                                                  \
   }                                                                            \
-  static const struct kp_rgb_indicator_api cfg_inst##_api = {                  \
+  static const struct kp_rgb_overlay_api cfg_inst##_api = {                    \
       .active = active_fn,                                                     \
       .render = render_fn,                                                     \
   };                                                                           \

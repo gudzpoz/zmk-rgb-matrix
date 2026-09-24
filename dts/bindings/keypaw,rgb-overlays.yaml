@@ -1,0 +1,14 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Container for RGB matrix overlay nodes. Its children are enumerated in
+  declaration order and each child's index among them (DT_NODE_CHILD_IDX) is the
+  ordinal used to address that overlay's on/off bit on the split link. Both
+  halves build the same DTS, so the ordinals agree.
+
+  The node itself is not a device and has no driver; it exists so the engine can
+  enumerate every overlay once, across all kinds, in a stable order. Declare
+  it once, outside &kprgb, and add the overlay nodes as its children.
+
+compatible: "keypaw,rgb-overlays"

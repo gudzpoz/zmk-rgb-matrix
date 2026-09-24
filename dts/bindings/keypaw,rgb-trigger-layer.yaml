@@ -17,4 +17,4 @@ properties:
     required: true
     description: |
       Layer id this trigger watches. This is a layer id, not an index, matching
-      the `layer` property of keypaw,rgb-indicator-layer.
+      the `layer` property of keypaw,rgb-overlay-layer.
