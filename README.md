@@ -1,9 +1,24 @@
 # ZMK RGB Matrix
 
-A position-aware / per-key LED RGB matrix framework for ZMK, with split support
-and indicator overlays. This module is developed against ZMK `main` and Zephyr
-4.1.
+![GitHub Actions Workflow
+Status](https://img.shields.io/github/actions/workflow/status/gudzpoz/zmk-rgb-matrix/previews.yml?label=previews)
 
+<table><tbody>
+<tr>
+<th><center>reactive-gradient</center></th>
+<th><center>rainbow-pinwheel</center></th>
+<th><center>starlight-smooth</center></th></tr>
+<tr>
+<td><img alt="reactive-gradient" src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-gradient.gif"></td>
+<td><img alt="rainbow-pinwheel" src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-pinwheel.gif"></td>
+<td><img alt="starlight-smooth" src="https://gudzpoz.github.io/zmk-rgb-matrix/starlight-smooth.gif"></td>
+</tr>
+</tbody></table>
+
+An extensible, position-aware / per-key LED RGB matrix framework for ZMK, with
+split support and indicator overlays. This module is developed against ZMK
+`main` and Zephyr 4.1. See [Built-in effects](#built-in-effects) for more
+previews of everything it ships with.
 
 ## Installation
 
@@ -279,24 +294,47 @@ These effects are grouped by rendering/state family: static fields (`solid`,
 effects (`rain`, `starlight`, `heatmap`, `digital_rain`). The attributes below
 select behavior within a compatible; they do not imply unimplemented QMK modes.
 
+Every animation below is rendered from ZMK's `native_sim//zmk_test_mock` "board"
+by the [preview harness](tests/sim). The label in front of each animation, and
+the effect name in its row, link to the [gallery
+site](https://gudzpoz.github.io/zmk-rgb-matrix/), where each variant sits next
+to the devicetree node that produces it.
+
+<!-- No GIFs inside links: GitHub hides them for people with Accessibility.Motion = Disabled -->
+
 <table>
 <thead><tr><th>Effect</th><th>Description</th><th>Attributes</th></tr></thead>
 <tbody>
-<tr><td><code>solid</code></td>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#solid">solid</a></code></td>
     <td>One flat colour across every LED, or a static hue gradient swept across the board.</td>
     <td><code>axis</code> = <code>none</code> (flat colour) |
         <code>vertical</code> (hue sweep across y) |
         <code>horizontal</code> (hue sweep across x)</td></tr>
-<tr><td><code>breathe</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#solid">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/solid.gif" width="200" alt="Solid" title="Solid"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#solid-vertical">vertical</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/solid-vertical.gif" width="200" alt="Solid (vertical)" title="Solid (vertical)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#solid-horizontal">horizontal</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/solid-horizontal.gif" width="200" alt="Solid (horizontal)" title="Solid (horizontal)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe">breathe</a></code></td>
     <td>Board-wide fade or a position-aware oscillator over one period.</td>
     <td><code>mode</code> = <code>brightness</code> (BREATHING) |
         <code>river</code> (RIVERFLOW) | <code>hue</code> (HUE_BREATHING) |
         <code>pendulum</code> (HUE_PENDULUM) | <code>wave</code> (HUE_WAVE)<br>
         <code>hue-amplitude</code> (hue swing in degrees for the hue modes, default 45)</td></tr>
-<tr><td><code>spectrum</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe-brightness">brightness</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/breathe-brightness.gif" width="200" alt="Breathe (brightness)" title="Breathe (brightness)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe-river">river</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/breathe-river.gif" width="200" alt="Breathe (river)" title="Breathe (river)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe-hue">hue</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/breathe-hue.gif" width="200" alt="Breathe (hue)" title="Breathe (hue)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe-pendulum">pendulum</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/breathe-pendulum.gif" width="200" alt="Breathe (pendulum)" title="Breathe (pendulum)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#breathe-wave">wave</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/breathe-wave.gif" width="200" alt="Breathe (wave)" title="Breathe (wave)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#spectrum">spectrum</a></code></td>
     <td>Whole board cycles the hue wheel globally (QMK <code>CYCLE_ALL</code>).</td>
     <td>&mdash;</td></tr>
-<tr><td><code>reactive</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#spectrum">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/spectrum.gif" width="200" alt="Spectrum" title="Spectrum">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive">reactive</a></code></td>
     <td>Lights a pressed key and fades it back; the lit shape is configurable.</td>
     <td><code>spread</code> = <code>point</code> (key only) |
         <code>disc</code> (filled circle) | <code>cross</code> (row + column) |
@@ -307,10 +345,22 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
         <code>palette</code> = <code>solid</code> (user hue) |
         <code>gradient</code> (position-based hue) |
         <code>complement</code> (unlit floor keeps the hue, a pressed key flashes the opposite hue)</td></tr>
-<tr><td><code>ripple</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-point">point</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-point.gif" width="200" alt="Reactive (point)" title="Reactive (point)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-disc">disc</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-disc.gif" width="200" alt="Reactive (disc)" title="Reactive (disc)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-cross">cross</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-cross.gif" width="200" alt="Reactive (cross)" title="Reactive (cross)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-nexus">nexus</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-nexus.gif" width="200" alt="Reactive (nexus)" title="Reactive (nexus)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-gradient">gradient</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-gradient.gif" width="200" alt="Reactive (gradient)" title="Reactive (gradient)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-complement">complement</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-complement.gif" width="200" alt="Reactive (complement)" title="Reactive (complement)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#reactive-multi">multi</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/reactive-multi.gif" width="200" alt="Reactive (multi)" title="Reactive (multi)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#ripple">ripple</a></code></td>
     <td>Radial ripples expand from each pressed key over an unlit background.</td>
     <td><code>background-brightness</code> (unlit background brightness, percent)</td></tr>
-<tr><td><code>rainbow</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#ripple">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/ripple.gif" width="200" alt="Ripple" title="Ripple">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow">rainbow</a></code></td>
     <td>Position-aware rainbow gradient with selectable spatial basis and direction.</td>
     <td><code>basis</code> = <code>x</code> | <code>y</code> | <code>radial</code> |
         <code>pinwheel</code> | <code>spiral</code> | <code>chevron</code> |
@@ -321,17 +371,39 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
         <code>dual</code> (two centres) | <code>bloom</code> (mirror each half, with basis x)<br>
         <code>palette</code> = <code>rainbow</code> (full hue wheel) |
         <code>solid</code> (single hue, travelling brightness band)</td></tr>
-<tr><td><code>band</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-x">x</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-x.gif" width="200" alt="Rainbow (x)" title="Rainbow (x)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-y">y</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-y.gif" width="200" alt="Rainbow (y)" title="Rainbow (y)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-radial">radial</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-radial.gif" width="200" alt="Rainbow (radial)" title="Rainbow (radial)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-pinwheel">pinwheel</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-pinwheel.gif" width="200" alt="Rainbow (pinwheel)" title="Rainbow (pinwheel)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-spiral">spiral</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-spiral.gif" width="200" alt="Rainbow (spiral)" title="Rainbow (spiral)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-chevron">chevron</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-chevron.gif" width="200" alt="Rainbow (chevron)" title="Rainbow (chevron)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-flag">flag</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-flag.gif" width="200" alt="Rainbow (flag)" title="Rainbow (flag)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-in">in</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-in.gif" width="200" alt="Rainbow (in)" title="Rainbow (in)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-dual">dual</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-dual.gif" width="200" alt="Rainbow (dual)" title="Rainbow (dual)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-bloom">bloom</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-bloom.gif" width="200" alt="Rainbow (bloom)" title="Rainbow (bloom)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rainbow-solid">solid</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rainbow-solid.gif" width="200" alt="Rainbow (solid)" title="Rainbow (solid)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#band">band</a></code></td>
     <td>A single-hue board with a moving saturation or brightness band.</td>
     <td><code>channel</code> = <code>sat</code> (fades saturation) |
         <code>val</code> (fades brightness)<br>
         <code>shape</code> = <code>linear</code> (scroll) |
         <code>pinwheel</code> (rotate) | <code>spiral</code> (wind outward)</td></tr>
-<tr><td><code>static</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#band-saturation-linear">saturation, linear</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/band-saturation-linear.gif" width="200" alt="Band (saturation, linear)" title="Band (saturation, linear)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#band-saturation-pinwheel">saturation, pinwheel</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/band-saturation-pinwheel.gif" width="200" alt="Band (saturation, pinwheel)" title="Band (saturation, pinwheel)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#band-saturation-spiral">saturation, spiral</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/band-saturation-spiral.gif" width="200" alt="Band (saturation, spiral)" title="Band (saturation, spiral)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#band-value-linear">value, linear</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/band-value-linear.gif" width="200" alt="Band (value, linear)" title="Band (value, linear)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#static">static</a></code></td>
     <td>Fixed per-LED colour map (QMK <code>ALPHAS_MODS</code> and similar art); each LED
         takes a colour from the <code>led-colors</code> array.</td>
     <td><code>led-colors</code> (RGB values, one per LED by chain index; LEDs past the end stay off)</td></tr>
-<tr><td><code>rain</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#static">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/static.gif" width="200" alt="Static" title="Static">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain">rain</a></code></td>
     <td>Randomly lit keys with random colours (QMK <code>PIXEL_RAIN</code>, <code>PIXEL_FLOW</code>,
         <code>RAINDROPS</code>, <code>JELLYBEAN_RAINDROPS</code>, <code>PIXEL_FRACTAL</code>).</td>
     <td><code>mode</code> = <code>pixel</code> (random keys, random hues) |
@@ -339,22 +411,42 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
         <code>jellybean</code> (also randomises saturation) |
         <code>flow</code> (cursor along chain) |
         <code>fractal</code> (single hue pulses from centre)</td></tr>
-<tr><td><code>starlight</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain-pixel">pixel</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rain-pixel.gif" width="200" alt="Rain (pixel)" title="Rain (pixel)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain-flow">flow</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rain-flow.gif" width="200" alt="Rain (flow)" title="Rain (flow)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain-drops">drops</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rain-drops.gif" width="200" alt="Rain (drops)" title="Rain (drops)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain-jellybean">jellybean</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rain-jellybean.gif" width="200" alt="Rain (jellybean)" title="Rain (jellybean)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#rain-fractal">fractal</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/rain-fractal.gif" width="200" alt="Rain (fractal)" title="Rain (fractal)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#starlight">starlight</a></code></td>
     <td>LEDs turn on and off at random at varying brightness, keeping the user colour.</td>
     <td><code>smooth</code> (ramp brightness instead of switching) |
         <code>dual-hue</code> (jitter hue &plusmn;30) |
         <code>dual-sat</code> (jitter saturation &plusmn;30)</td></tr>
-<tr><td><code>heatmap</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#starlight">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/starlight.gif" width="200" alt="Starlight" title="Starlight"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#starlight-smooth">smooth</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/starlight-smooth.gif" width="200" alt="Starlight (smooth)" title="Starlight (smooth)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#starlight-dual-hue">dual hue</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/starlight-dual-hue.gif" width="200" alt="Starlight (dual hue)" title="Starlight (dual hue)"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#starlight-dual-sat">dual sat</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/starlight-dual-sat.gif" width="200" alt="Starlight (dual sat)" title="Starlight (dual sat)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap">heatmap</a></code></td>
     <td>Per-key heat map of recent keypresses, decaying over time (QMK <code>TYPING_HEATMAP</code>).</td>
     <td><code>decrease-delay-ms</code> (ms idle before one shade of heat is lost)<br>
         <code>spread</code> (radius heating neighbours, layout units)<br>
         <code>area-limit</code> (per-press cap on heat a neighbour receives)<br>
         <code>increase-step</code> (shades added per keypress)<br>
         <code>slim</code> (heat only the pressed key, not neighbours)</td></tr>
-<tr><td><code>digital_rain</code></td>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/heatmap.gif" width="200" alt="Heatmap" title="Heatmap"><br>
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap-slim">slim</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/heatmap-slim.gif" width="200" alt="Heatmap (slim)" title="Heatmap (slim)">
+</td></tr>
+<tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#digital-rain">digital_rain</a></code></td>
     <td>Matrix-style falling columns: a head falls per column leaving a fading green tail.</td>
     <td><code>color</code> (tail hue; green default) |
         <code>duration</code> (fall speed; shorter is faster)</td></tr>
+<tr><td colspan="3">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#digital-rain">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/digital-rain.gif" width="200" alt="Digital Rain" title="Digital Rain">
+</td></tr>
 </tbody>
 </table>
 
