@@ -159,12 +159,13 @@ static bool kp_rgb_matrix_lock_patiently(void) {
 
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
+/* Runs in the system timer ISR, so it must not take kp_rgb_lock: a mutex is
+ * illegal in ISR context. Read `on` without the lock, exactly as
+ * zmk_rgb_matrix_flush() does -- a racy read only decides whether a frame is
+ * worth scheduling, and the work handler re-checks everything under the lock. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
-  kp_rgb_matrix_lock();
-  bool on = kp_any_on_locked();
-  kp_rgb_matrix_unlock();
-  if (on) {
+  if (kp_any_on_locked()) {
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
   }
 }

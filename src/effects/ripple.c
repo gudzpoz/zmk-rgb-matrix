@@ -17,6 +17,7 @@
 
 #include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_matrix_math.h>
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -83,12 +84,16 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
       continue;
     }
     int32_t half_band = MAX(radius * KP_RIPPLE_WIDTH / 100, 1);
-    int32_t radius_sq = radius * radius;
 
     for (size_t i = 0; i < f->count; i++) {
       int32_t dx = (int32_t)f->coords[i].x - trigger->x;
       int32_t dy = (int32_t)f->coords[i].y - trigger->y;
-      int32_t delta = dx * dx + dy * dy - radius_sq;
+      /* Linear distance from the ring's centre, as every other spatial effect
+       * does. Comparing a squared distance against the linear `half_band`
+       * collapses the ring to a band a fraction of a layout unit wide, far
+       * narrower than the LED pitch, so it only ever catches an LED by
+       * accident. */
+      int32_t delta = (int32_t)kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy)) - radius;
       if (delta < 0) {
         delta = -delta;
       }

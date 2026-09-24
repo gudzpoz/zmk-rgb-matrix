@@ -124,13 +124,15 @@ static void kp_eff_digital_rain_render(const struct device *dev,
       f->pixels[i] = (struct led_rgb){0, 0, 0};
       continue;
     }
-    /* b: 255 right at the head, fading to 0 at the tail end. */
+    /* b: 255 right at the head, fading to 0 at the tail end. A 0..255 factor,
+     * scaled onto the preset brightness -- hsb.b is 0..100, so assigning it
+     * directly overflows. */
     uint32_t b = 255u * (uint32_t)(trail - d) / trail;
     struct kp_rgb_hsb hsb;
     hsb.h = base.h;
     /* Whiter at the head, full preset hue toward the tail. */
     hsb.s = (uint8_t)((255u - b) * KP_RGB_SAT_MAX / 255u);
-    hsb.b = (uint8_t)b;
+    hsb.b = (uint8_t)((uint32_t)base.b * b / 255u);
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
 }
