@@ -1,0 +1,155 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+#
+# Render every effect preview on Zephyr's native_sim and publish the GIFs to
+# GitHub Pages. The harness under tests/sim/ does the work: one native_sim
+# build, then one run per devicetree effect node, each GIF named after that
+# node's `display-name`.
+#
+# The module is not a ZMK user config, so this job fetches ZMK itself and points
+# the harness at it with ZMK_WS; the module is passed to the build through
+# ZMK_EXTRA_MODULES by run-preview.sh.
+
+name: Previews
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/previews.yml"
+      - "dts/**"
+      - "include/**"
+      - "src/**"
+      - "tests/sim/**"
+  pull_request:
+    paths:
+      - ".github/workflows/previews.yml"
+      - "dts/**"
+      - "include/**"
+      - "src/**"
+      - "tests/sim/**"
+  workflow_dispatch:
+    inputs:
+      zmk_ref:
+        description: ZMK branch or tag to build against
+        required: false
+        default: main
+
+# Pages needs a deployment token, hence id-token. Nothing here writes to the
+# repository, so contents stays read-only.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Render previews
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/zmkfirmware/zmk-build-arm:4.1
+    steps:
+      - uses: actions/checkout@v7
+
+      # The renderer shells out to ffmpeg; the ZMK image is not guaranteed to
+      # carry it. Fail with an annotation rather than letting every one of the
+      # 45 renders report "ffmpeg not found" on its own.
+      - name: Provide ffmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            apt-get update && apt-get install -y --no-install-recommends ffmpeg || true
+          fi
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            echo "::error::ffmpeg is unavailable in this image and could not be installed" >&2
+            exit 1
+          fi
+          ffmpeg -version | head -n 1
+
+      # No config/west.yml dependency: the harness only needs a ZMK checkout to
+      # build against.
+      - name: Fetch ZMK
+        env:
+          ZMK_REF: ${{ github.event.inputs.zmk_ref || 'main' }}
+        run: |
+          git clone --quiet --depth 1 --branch "$ZMK_REF" \
+            https://github.com/zmkfirmware/zmk.git "$GITHUB_WORKSPACE/zmk-ws"
+
+      # Keyed on the manifest, so it is only refetched when ZMK's project list
+      # actually changes. Best effort: a cache miss just costs time.
+      - name: Cache west modules
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: |
+            zmk-ws/bootloader
+            zmk-ws/modules
+            zmk-ws/tools
+            zmk-ws/zephyr
+          key: zmk-${{ github.event.inputs.zmk_ref || 'main' }}-${{ hashFiles('zmk-ws/app/west.yml') }}
+          restore-keys: |
+            zmk-${{ github.event.inputs.zmk_ref || 'main' }}-
+
+      - name: Initialise the west workspace
+        working-directory: zmk-ws
+        run: |
+          west init -l app
+          west update --fetch-opt=--filter=tree:0
+
+      - name: Render the previews
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        # Invoked through bash so the executable bit is not load-bearing.
+        run: bash tests/sim/run-preview.sh
+
+      # index.html and the GIFs side by side in their own directory: the working
+      # files under tests/sim/out/.work/ (captures, logs) stay out of the site.
+      # Kept inside tests/sim/ so the harness .gitignore already covers it.
+      - name: Stage the gallery
+        run: |
+          mkdir -p tests/sim/site
+          cp tests/sim/out/*.gif tests/sim/site/
+          python3 tests/sim/make_index.py \
+            --manifest tests/sim/out/.work/previews.tsv \
+            --gif-dir tests/sim/site \
+            -o tests/sim/site/index.html
+          echo "staged $(ls tests/sim/site | wc -l) files"
+
+      - name: Upload the GIFs as a build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-gifs
+          path: tests/sim/site
+          retention-days: 14
+
+      # Pull requests build and render but never publish, so a fork cannot
+      # deploy to the Pages site.
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        with:
+          # Creates the Pages site (source: GitHub Actions) if the repository
+          # has not enabled one yet.
+          enablement: true
+
+      - name: Upload the Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: tests/sim/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: render
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

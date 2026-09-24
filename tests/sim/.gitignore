@@ -5,6 +5,7 @@
 # into docs/ rather than committed from here.
 build/
 out/
+site/
 *.bin
 *.gif
 palette.png

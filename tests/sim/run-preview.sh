@@ -77,6 +77,10 @@ mkdir -p "$OUT_DIR/.work"
 warn_log=$OUT_DIR/.work/warnings.log
 : >"$warn_log"
 effect_list=$OUT_DIR/.work/effects.tsv
+# slug<TAB>display-name for every preview produced by this run, so consumers
+# (the gallery page, for one) do not have to re-derive the slug rule.
+manifest=$OUT_DIR/.work/previews.tsv
+: >"$manifest"
 "$EXE" "--list-effects=$effect_list" >/dev/null 2>&1 || true
 
 if [ ! -s "$effect_list" ]; then
@@ -163,6 +167,7 @@ for i in "${!indices[@]}"; do
     python3 "$SIM_DIR/render_gif.py" "$work_dir/capture.bin" \
         -o "$OUT_DIR/$slug.gif" --tile "$TILE" \
         --min-distinct "$MIN_DISTINCT" 2>>"$warn_log"
+    printf '%s\t%s\n' "$slug" "$name" >>"$manifest"
     rendered=$((rendered + 1))
 done
 
