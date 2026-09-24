@@ -1,8 +1,9 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Reactive keypress-fade RGB matrix effect, extended with spread shapes
-  and a gradient palette (SOLID_REACTIVE_* / *_CROSS / *_NEXUS / SPLASH families).
+description: Reactive keypress-fade RGB matrix effect, extended with spread shapes,
+  a gradient palette and a complement palette (SOLID_REACTIVE_* / *_CROSS /
+  *_NEXUS / SPLASH / COMPLEMENT families).
 compatible: "keypaw,rgb-matrix-reactive"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
 
@@ -47,7 +48,9 @@ properties:
     type: string
     required: false
     default: "solid"
-    enum: ["solid", "gradient"]
+    enum: ["solid", "gradient", "complement"]
     description: |
       "solid" (default) pulses with the effect's single hue. "gradient" paints
       each lit LED with a position-based hue (SPLASH / MULTISPLASH families).
+      "complement" keeps the effect's hue on the unlit background and flashes
+      the opposite hue (hue + 180) on a pressed key (COMPLEMENT).

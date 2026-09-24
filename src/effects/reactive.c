@@ -27,9 +27,10 @@
 
 /* spread: point = key only, disc = filled circle, cross = row+column,
  * nexus = everything but the cross lines. */
-/* palette: solid = user hue, gradient = position-based hue. */
+/* palette: solid = user hue, gradient = position-based hue, complement =
+ * pressed keys flash the opposite hue. */
 DEFINE_DT_ENUM(spread, point, disc, cross, nexus);
-DEFINE_DT_ENUM(palette, solid, gradient);
+DEFINE_DT_ENUM(palette, solid, gradient, complement);
 
 struct kp_eff_reactive_config {
   /* Must embed the common config as its first member. */
@@ -101,6 +102,10 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
     if (cfg->palette == DT_ENUM_CONST(palette, gradient)) {
       hue = (uint16_t)((base.h + (uint32_t)f->coords[i].x * KP_RGB_HUE_MAX / span) %
                        KP_RGB_HUE_MAX);
+    } else if (cfg->palette == DT_ENUM_CONST(palette, complement) && level > 0) {
+      /* COMPLEMENT: a lit key flashes the opposite hue; the unlit floor below
+       * keeps the effect's own hue, so the flash reads against the preset. */
+      hue = (uint16_t)((base.h + KP_RGB_HUE_MAX / 2) % KP_RGB_HUE_MAX);
     }
     struct kp_rgb_hsb hsb = {.h = hue, .s = base.s};
     hsb.b = MAX((uint8_t)((uint32_t)base.b * level / 255u), floor_b);

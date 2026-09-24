@@ -173,15 +173,18 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
         <code>background-brightness</code> (unlit-LED brightness, percent)<br>
         <code>multi</code> (accumulate several presses instead of the latest)<br>
         <code>palette</code> = <code>solid</code> (user hue) |
-        <code>gradient</code> (position-based hue)</td></tr>
+        <code>gradient</code> (position-based hue) |
+        <code>complement</code> (unlit floor keeps the hue, a pressed key flashes the opposite hue)</td></tr>
 <tr><td><code>ripple</code></td>
     <td>Radial ripples expand from each pressed key over an unlit background.</td>
     <td><code>background-brightness</code> (unlit background brightness, percent)</td></tr>
 <tr><td><code>rainbow</code></td>
     <td>Position-aware rainbow gradient with selectable spatial basis and direction.</td>
     <td><code>basis</code> = <code>x</code> | <code>y</code> | <code>radial</code> |
-        <code>pinwheel</code> | <code>spiral</code> | <code>chevron</code>
-        (spatial coordinate the colour maps onto)<br>
+        <code>pinwheel</code> | <code>spiral</code> | <code>chevron</code> |
+        <code>flag</code>
+        (spatial coordinate the colour maps onto; <code>flag</code> is a
+        left-right sweep skewed per row so it undulates)<br>
         <code>direction</code> = <code>out</code> | <code>in</code> (reverse) |
         <code>dual</code> (two centres) | <code>bloom</code> (mirror each half, with basis x)<br>
         <code>palette</code> = <code>rainbow</code> (full hue wheel) |
@@ -225,6 +228,10 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
 Every effect accepts `color`, `duration`, `overlays`, `no-overlays`, and
 `no-cycle` attributes (though some attributes might be meaningless to some
 effects).
+
+QMK's beacon pair needs no dedicated variant: `RAINBOW_BEACON` is `rainbow`
+with `basis=pinwheel` and `palette=rainbow`, and `DUAL_BEACON` is the same
+with `palette=solid` and `direction=dual`.
 
 ### Built-in commands and behaviors
 

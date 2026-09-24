@@ -13,6 +13,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_matrix_math.h>
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -29,11 +30,13 @@ struct kp_eff_breathe_data {
   uint32_t phase_ms;
 };
 
-/* Triangle wave in [0, 255] for a phase in [0, period). */
-static uint32_t kp_breathe_tri(uint32_t phase, uint32_t period) {
-  uint32_t half = MAX(period / 2u, 1u);
-  uint32_t ramp = phase < half ? phase : period - phase;
-  return ramp * 255u / half;
+/* Sine-eased oscillation in [0, 255] for a phase in [0, period): 0 at the
+ * start, 255 halfway through, back to 0. The +192 offset puts the sine's
+ * minimum at phase 0, so the envelope matches the triangle ramp this replaced,
+ * but the fade eases into and out of the peaks instead of reversing sharply. */
+static uint32_t kp_breathe_wave(uint32_t phase, uint32_t period) {
+  period = MAX(period, 1u);
+  return kp_rgb_sin8((uint8_t)(phase * 256u / period + 192u));
 }
 
 #define KP_BREATHE_HUE_DELTA 12u
@@ -42,14 +45,13 @@ static uint8_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
                                      uint16_t x, uint16_t span, mode_t mode) {
   uint32_t position;
   if (mode == DT_ENUM_CONST(mode, hue)) {
-    return (uint8_t)(kp_breathe_tri(phase, period) * KP_BREATHE_HUE_DELTA / 255u);
+    return (uint8_t)(kp_breathe_wave(phase, period) * KP_BREATHE_HUE_DELTA / 255u);
   }
 
   span = MAX(span, 1u);
   if (mode == DT_ENUM_CONST(mode, pendulum)) {
-    uint32_t half = MAX(period / 2u, 1u);
-    uint32_t travel = phase < half ? phase : period - phase;
-    uint32_t target = travel * span / half;
+    uint32_t travel = kp_breathe_wave(phase, period); /* 0..255, eased */
+    uint32_t target = travel * span / 255u;
     position = x > target ? x - target : target - x;
     position = MIN(position, span);
   } else {
@@ -85,7 +87,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
     uint16_t span = MAX(f->board_length, 1u);
     for (size_t i = 0; i < f->count; i++) {
       uint32_t local = (phase + (uint32_t)f->coords[i].x * period / span) % period;
-      uint8_t b = (uint8_t)((uint32_t)base.b * kp_breathe_tri(local, period) / 255u);
+      uint8_t b = (uint8_t)((uint32_t)base.b * kp_breathe_wave(local, period) / 255u);
       struct kp_rgb_hsb hsb = base;
       hsb.b = b;
       f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
@@ -95,9 +97,9 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
   }
 
   /* BREATHING: whole board fades up and down. */
-  uint8_t tri = (uint8_t)kp_breathe_tri(phase, period);
+  uint8_t wave = (uint8_t)kp_breathe_wave(phase, period);
   struct kp_rgb_hsb hsb = base;
-  hsb.b = (uint8_t)((uint32_t)base.b * tri / 255u);
+  hsb.b = (uint8_t)((uint32_t)base.b * wave / 255u);
   struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   for (size_t i = 0; i < f->count; i++) {
     f->pixels[i] = rgb;

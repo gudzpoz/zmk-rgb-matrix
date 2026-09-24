@@ -4,10 +4,10 @@
 description: |
   Generalized gradient-animator effect. One compatible covers QMK's
   CYCLE_LEFT_RIGHT, CYCLE_UP_DOWN, CYCLE_OUT_IN(_DUAL), RAINBOW_MOVING_CHEVRON,
-  CYCLE_PINWHEEL, CYCLE_SPIRAL, DUAL_BEACON, RAINBOW_BEACON, RAINBOW_PINWHEELS
-  and FLOWER_BLOOMING, selected by the basis / direction / palette attributes.
-  Instantiate several nodes with different attributes to get several distinct
-  cycle entries (e.g. one node per desired animation).
+  CYCLE_PINWHEEL, CYCLE_SPIRAL, DUAL_BEACON, RAINBOW_BEACON, RAINBOW_PINWHEELS,
+  FLAG and FLOWER_BLOOMING, selected by the basis / direction / palette
+  attributes. Instantiate several nodes with different attributes to get several
+  distinct cycle entries (e.g. one node per desired animation).
 
 compatible: "keypaw,rgb-matrix-rainbow"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
@@ -17,13 +17,14 @@ properties:
     type: string
     required: false
     default: "x"
-    enum: ["x", "y", "radial", "pinwheel", "spiral", "chevron"]
+    enum: ["x", "y", "radial", "pinwheel", "spiral", "chevron", "flag"]
     description: |
       The spatial coordinate the colour is mapped onto. "x" is the canonical
       left-right rainbow sweep (CYCLE_LEFT_RIGHT), "y" top-bottom (CYCLE_UP_DOWN),
       radiates from the board centre (CYCLE_OUT_IN / DUAL_BEACON), "pinwheel"
       rotates around it (CYCLE_PINWHEEL / RAINBOW_PINWHEELS), "spiral" windings
-      outward (CYCLE_SPIRAL), "chevron" forms a V (RAINBOW_MOVING_CHEVRON).
+      outward (CYCLE_SPIRAL), "chevron" forms a V (RAINBOW_MOVING_CHEVRON), and
+      "flag" is a left-right sweep skewed per row so the bands undulate (FLAG).
 
   direction:
     type: string

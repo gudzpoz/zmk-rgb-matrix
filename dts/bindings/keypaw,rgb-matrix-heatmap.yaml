@@ -19,7 +19,7 @@ properties:
   spread:
     type: int
     required: false
-    default: 40
+    default: 150
     description: |
       Nonnegative layout-unit radius over which a press heats neighbouring keys.
 

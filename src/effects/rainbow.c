@@ -21,10 +21,10 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-/* basis: x, y, radial, pinwheel, spiral, chevron. */
+/* basis: x, y, radial, pinwheel, spiral, chevron, flag. */
 /* direction: out, in, dual, bloom. */
 /* palette: rainbow, solid. */
-DEFINE_DT_ENUM(basis, x, y, radial, pinwheel, spiral, chevron);
+DEFINE_DT_ENUM(basis, x, y, radial, pinwheel, spiral, chevron, flag);
 DEFINE_DT_ENUM(direction, out, in, dual, bloom);
 DEFINE_DT_ENUM(palette, rainbow, solid);
 
@@ -64,12 +64,31 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
   }
   max_r = MAX(max_r, 1u);
 
+  /* Effects whose spatial coordinate wraps more than once across the board --
+   * the spiral, and the two mirrored centres of dual/bloom -- advance their
+   * temporal phase divided by the arm count, so each wrap's front keeps pace
+   * with a single-wrap effect at the same period. */
+  uint32_t arms = 1;
+  if (cfg->basis == DT_ENUM_CONST(basis, spiral) ||
+      (dual && (cfg->basis == DT_ENUM_CONST(basis, radial) ||
+                cfg->basis == DT_ENUM_CONST(basis, pinwheel))) ||
+      (cfg->direction == DT_ENUM_CONST(direction, bloom) &&
+       cfg->basis == DT_ENUM_CONST(basis, x))) {
+    arms = 2;
+  }
+  uint32_t phase01_eff = kp_rgb_arm_phase(phase01, arms);
+
   for (size_t i = 0; i < f->count; i++) {
     uint16_t x = f->coords[i].x;
     uint16_t y = f->coords[i].y;
     uint32_t spatial;
 
-    if (cfg->basis == DT_ENUM_CONST(basis, x)) {
+    if (cfg->basis == DT_ENUM_CONST(basis, flag)) {
+      /* FLAG: a horizontal sweep (so it travels with x) plus a per-row skew of
+       * up to an eighth of the hue wheel, so the bands undulate instead of
+       * staying parallel. */
+      spatial = (uint32_t)x * 65536u / bl + (uint32_t)y * 65536u / (8u * bh);
+    } else if (cfg->basis == DT_ENUM_CONST(basis, x)) {
       spatial = (uint32_t)x * 65536u / bl;
     } else if (cfg->basis == DT_ENUM_CONST(basis, y)) {
       spatial = (uint32_t)y * 65536u / bh;
@@ -119,7 +138,7 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
       spatial = local * 65536u / MAX(cx, 1u);
     }
 
-    uint32_t pos = (spatial + phase01) % 65536u;
+    uint32_t pos = (spatial + phase01_eff) % 65536u;
 
     struct kp_rgb_hsb hsb;
     if (rainbow) {

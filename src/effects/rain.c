@@ -16,6 +16,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_matrix_math.h>
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -84,7 +85,10 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
 
     if (cfg->mode == DT_ENUM_CONST(mode, fractal)) {
       /* Recompute brightness from the expanding pulse (ignores val[]). */
-      uint32_t phase01 = data->phase_ms * 65536u / period;
+      /* The pulse mirrors from the centre, so it has two fronts; halve the
+       * temporal phase to keep each front at a single-front rate. */
+      uint32_t phase01 =
+          kp_rgb_arm_phase(data->phase_ms * 65536u / period, 2u);
       uint32_t rad = phase01 * (bl / 2u + 100u) / 65536u;
       int32_t d = (int32_t)f->coords[i].x - bl / 2;
       if (d < 0) {

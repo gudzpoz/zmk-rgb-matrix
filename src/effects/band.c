@@ -62,6 +62,10 @@ static void kp_eff_band_render(const struct device *dev, struct kp_rgb_frame *f)
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = data->phase_ms % period;
   uint32_t phase01 = phase * 65536u / period;
+  /* The spiral wraps twice across the board (angle + radius), so halve its
+   * temporal phase to keep each wrap's front at a single-wrap rate. */
+  uint32_t phase_eff = kp_rgb_arm_phase(
+      phase01, cfg->shape == DT_ENUM_CONST(shape, spiral) ? 2u : 1u);
   uint16_t bl = MAX(f->board_length, 1u);
   uint16_t bh = MAX(f->board_height, 1u);
   uint16_t cx = bl / 2;
@@ -74,7 +78,7 @@ static void kp_eff_band_render(const struct device *dev, struct kp_rgb_frame *f)
     uint32_t s01 = kp_band_spatial(cfg->shape, f->coords[i].x, f->coords[i].y, bl, bh,
                                    max_r);
     /* Distance of this LED from the moving band front, wrapped to [-0.5, 0.5]. */
-    int32_t d = (int32_t)s01 - (int32_t)phase01;
+    int32_t d = (int32_t)s01 - (int32_t)phase_eff;
     if (d > 32768) {
       d -= 65536;
     } else if (d < -32768) {
