@@ -1,0 +1,11 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+# Build output and generated previews. Previews worth keeping should be copied
+# into docs/ rather than committed from here.
+build/
+out/
+*.bin
+*.gif
+palette.png
+__pycache__/

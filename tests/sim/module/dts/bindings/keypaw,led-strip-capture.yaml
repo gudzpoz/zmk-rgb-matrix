@@ -1,0 +1,14 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Preview-harness LED strip. A led_strip API device that appends every frame the
+  RGB matrix engine hands it to a capture file instead of driving hardware.
+
+  Sim only: this is never part of real firmware. The engine reaches it through
+  the ordinary `strip` phandle on keypaw,rgb-matrix, so nothing in the module
+  needs to know it exists.
+
+compatible: "keypaw,led-strip-capture"
+
+include: [led-strip.yaml]

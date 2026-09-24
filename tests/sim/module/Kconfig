@@ -1,0 +1,14 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config KEYPAW_SIM_CAPTURE
+    bool "native_sim RGB matrix frame capture"
+    default y
+    depends on ARCH_POSIX
+    depends on LED_STRIP
+    help
+      A led_strip device that records the RGB matrix frames, plus the
+      --effect/--capture native simulator command line options. Used by the
+      offline preview harness to turn the module's effects into GIFs. Never
+      built into real firmware: the module is only added to the build when the
+      harness passes it in ZMK_EXTRA_MODULES, and this depends on ARCH_POSIX.
