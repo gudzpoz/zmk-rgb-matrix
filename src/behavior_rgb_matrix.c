@@ -53,8 +53,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
                "keypaw,behavior-rgb-matrix: node name must fit the 9-byte "    \
                "split behavior_dev field");                                    \
   BUILD_ASSERT(                                                                \
-      DT_CHILD_NUM(DT_DRV_INST(inst)) <= KP_RGB_PERSIST_MAX_EFFECTS,           \
-      "raise KP_RGB_PERSIST_MAX_EFFECTS for the larger effect registry");      \
+      DT_CHILD_NUM(DT_DRV_INST(inst)) <= KP_RGB_MAX_REGISTRY_EFFECTS,          \
+      "raise KP_RGB_PERSIST_MAX_EFFECTS / enable a different registry cap for " \
+      "the larger effect registry");                                           \
   BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT8_MAX,                   \
                "effect count must fit the blob's count byte");                 \
   KP_RGB_BEHAVIOR_OVERLAYS(inst)                                               \

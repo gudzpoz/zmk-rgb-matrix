@@ -37,6 +37,16 @@ properties:
       Falloff radius for "disc" and "nexus", in the same physical-layout units
       as the LEDs (100 = one key width).
 
+      "disc" measures the radius from the pressed key. "nexus" measures it
+      outward from the excluded row/column cross instead, so the value is the
+      width of the band lit around that cross: small values hug the cross,
+      larger values reach further across the board, and brightness fades with
+      distance from the cross.
+
+      For "nexus", values at or below one key width (100) light nothing at all:
+      the cross already covers the pressed key's row and column, so the nearest
+      LED outside it is a full key pitch away.
+
   multi:
     type: boolean
     required: false

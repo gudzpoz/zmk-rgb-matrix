@@ -16,7 +16,21 @@ properties:
     description: |
       "brightness" (default) fades the whole board up and down (BREATHING).
       "river" offsets the fade by each LED's x position so the pulse travels
-      across the board (RIVERFLOW). "hue" oscillates a small hue offset while
+      across the board (RIVERFLOW). "hue" oscillates a hue offset while
       brightness stays put (HUE_BREATHING). "pendulum" moves that offset across
       x and reverses direction (HUE_PENDULUM). "wave" rolls the offset
       continuously in the opposite direction (HUE_WAVE).
+
+  hue-amplitude:
+    type: int
+    required: false
+    default: 45
+    description: |
+      How far the hue swings, in degrees, for the hue-oscillating modes ("hue",
+      "pendulum" and "wave"). Ignored by "brightness" and "river".
+
+      The offset runs from 0 up to this value and back once per period, so the
+      hue sweeps from the preset colour to preset + amplitude. The hue wheel is
+      360 degrees wide; larger values are clamped to it. The default is an
+      eighth of the wheel, which reads clearly as movement without turning into
+      a rainbow sweep. Values below ~15 are hard to notice at all.

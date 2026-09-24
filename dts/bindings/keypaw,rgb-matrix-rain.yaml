@@ -14,8 +14,14 @@ properties:
     default: "pixel"
     enum: ["pixel", "flow", "drops", "jellybean", "fractal"]
     description: |
-      "pixel"/"drops" light random keys with random hues (PIXEL_RAIN /
-      RAINDROPS), "jellybean" also randomises saturation (JELLYBEAN_RAINDROPS),
-      "flow" runs a cursor along the LED chain with random hues (PIXEL_FLOW), and
-      "fractal" pulses a single hue outward from the board centre
-      (PIXEL_FRACTAL).
+      "pixel" lights random keys with random hues (PIXEL_RAIN), "jellybean" also
+      randomises saturation (JELLYBEAN_RAINDROPS), "flow" runs a cursor along the
+      LED chain with random hues (PIXEL_FLOW), "fractal" pulses a single hue
+      outward from the board centre (PIXEL_FRACTAL), and "drops" nudges one
+      random key's hue each step while the rest of the board stays lit
+      (RAINDROPS).
+
+      Unlike every other mode, "drops" never turns an LED off, and it keeps the
+      preset's saturation while varying only the hue. It therefore needs a
+      saturated `color` to be visible: with a white preset every key renders as
+      the same white and the effect looks static.

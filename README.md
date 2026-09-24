@@ -291,7 +291,8 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
     <td>Board-wide fade or a position-aware oscillator over one period.</td>
     <td><code>mode</code> = <code>brightness</code> (BREATHING) |
         <code>river</code> (RIVERFLOW) | <code>hue</code> (HUE_BREATHING) |
-        <code>pendulum</code> (HUE_PENDULUM) | <code>wave</code> (HUE_WAVE)</td></tr>
+        <code>pendulum</code> (HUE_PENDULUM) | <code>wave</code> (HUE_WAVE)<br>
+        <code>hue-amplitude</code> (hue swing in degrees for the hue modes, default 45)</td></tr>
 <tr><td><code>spectrum</code></td>
     <td>Whole board cycles the hue wheel globally (QMK <code>CYCLE_ALL</code>).</td>
     <td>&mdash;</td></tr>
@@ -300,7 +301,7 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
     <td><code>spread</code> = <code>point</code> (key only) |
         <code>disc</code> (filled circle) | <code>cross</code> (row + column) |
         <code>nexus</code> (all but the cross, radial falloff)<br>
-        <code>spread-radius</code> (disc/nexus radius, in layout units)<br>
+        <code>spread-radius</code> (disc/nexus radius, in layout units; for nexus it is the band width measured outward from the excluded cross)<br>
         <code>background-brightness</code> (unlit-LED brightness, percent)<br>
         <code>multi</code> (accumulate several presses instead of the latest)<br>
         <code>palette</code> = <code>solid</code> (user hue) |
@@ -333,7 +334,8 @@ select behavior within a compatible; they do not imply unimplemented QMK modes.
 <tr><td><code>rain</code></td>
     <td>Randomly lit keys with random colours (QMK <code>PIXEL_RAIN</code>, <code>PIXEL_FLOW</code>,
         <code>RAINDROPS</code>, <code>JELLYBEAN_RAINDROPS</code>, <code>PIXEL_FRACTAL</code>).</td>
-    <td><code>mode</code> = <code>pixel</code> / <code>drops</code> (random keys, random hues) |
+    <td><code>mode</code> = <code>pixel</code> (random keys, random hues) |
+        <code>drops</code> (nudges one random key's hue each step; the board stays lit, so it needs a saturated colour) |
         <code>jellybean</code> (also randomises saturation) |
         <code>flow</code> (cursor along chain) |
         <code>fractal</code> (single hue pulses from centre)</td></tr>

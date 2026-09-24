@@ -85,6 +85,17 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
 #define KP_RGB_PERSIST_MAX_EFFECTS 16
 
+/* Largest effect registry the engine accepts. The persisted blob holds one
+ * fixed entry per effect, so with persistence compiled in that is what caps the
+ * registry. rgb_settings.c guards the whole blob with IS_ENABLED(CONFIG_SETTINGS),
+ * so without persistence the only real limit is the byte the effect index
+ * travels in (see the UINT8_MAX assert in behavior_rgb_matrix.c). */
+#if IS_ENABLED(CONFIG_SETTINGS)
+#define KP_RGB_MAX_REGISTRY_EFFECTS KP_RGB_PERSIST_MAX_EFFECTS
+#else
+#define KP_RGB_MAX_REGISTRY_EFFECTS UINT8_MAX
+#endif
+
 size_t kp_rgb_effect_count(const struct kp_rgb_behavior_context *ctx);
 const struct device *kp_rgb_effect_at(const struct kp_rgb_behavior_context *ctx,
                                       size_t index);

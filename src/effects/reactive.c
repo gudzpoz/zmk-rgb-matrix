@@ -60,26 +60,35 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
   case DT_ENUM_CONST(spread, disc): { /* disc: filled circle, brightness falls off to the radius */
     uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
     int32_t r = cfg->radius;
-    if ((int32_t)dist >= r) {
+    if (r <= 0 || (int32_t)dist >= r) {
       return 0;
     }
     return (uint8_t)(255u * (r - (int32_t)dist) / r);
   }
   case DT_ENUM_CONST(spread, cross): { /* cross: same column or row as the pressed key */
     uint16_t tol = 100; /* ~ one key width in layout units */
-    return (abs(dx) <= (int32_t)tol || abs(dy) <= (int32_t)tol) ? 255 : 0;
+    return (abs(dx) < (int32_t)tol || abs(dy) < (int32_t)tol) ? 255 : 0;
   }
-  case DT_ENUM_CONST(spread, nexus): { /* nexus: everything except the cross lines, radial falloff */
+  case DT_ENUM_CONST(spread, nexus): { /* nexus: everything except the cross lines, fading outward from it */
     uint16_t tol = 100;
-    if (abs(dx) <= (int32_t)tol || abs(dy) <= (int32_t)tol) {
+    int32_t ax = abs(dx);
+    int32_t ay = abs(dy);
+    if (ax < (int32_t)tol || ay < (int32_t)tol) {
       return 0;
     }
-    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
+    /* `radius` is the reach measured outward from the excluded cross, not from
+     * the pressed key. The cross is the union of the row and column strips, so
+     * the distance from a point outside it is the nearer of the two
+     * perpendicular distances. Measuring from the key instead would leave the
+     * knob dead across a wide range: the exclusion alone puts the nearest
+     * lightable LED at about the key pitch times sqrt(2), so any radius below
+     * that would silence the effect entirely. */
+    int32_t reach = MIN(ax, ay) - (int32_t)tol;
     int32_t r = cfg->radius;
-    if ((int32_t)dist >= r) {
+    if (r <= 0 || reach >= r) {
       return 0;
     }
-    return (uint8_t)(255u * (r - (int32_t)dist) / r);
+    return (uint8_t)(255u * (r - reach) / r);
   }
   default: /* point */
     return (dx == 0 && dy == 0) ? 255 : 0;

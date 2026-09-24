@@ -20,9 +20,25 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-/* pixel/drops = random keys, flow = cursor walking the chain, jellybean =
- * random hue and saturation, fractal = a single-hue pulse from the centre. */
+/* pixel = random keys, flow = cursor walking the chain, jellybean = random hue
+ * and saturation, fractal = a single-hue pulse from the centre, drops = QMK's
+ * RAINDROPS (see kp_rain_drops_hue below). */
 DEFINE_DT_ENUM(mode, pixel, flow, drops, jellybean, fractal);
+
+/* How many hue nudges RAINDROPS makes per animation period. QMK derives its rate
+ * from the global speed setting (and triggers on roughly every frame at the
+ * default speed), which this module has no equivalent of; tying it to the effect
+ * period keeps `duration` meaningful like every other effect here, and a nudge
+ * per ~60 ms reads as a continuous drift rather than a static mosaic. */
+#define KP_RAIN_DROPS_PER_PERIOD 64u
+
+/* QMK's RAINDROPS moves a key's hue along "the shortest path between hues": the
+ * distance to the antipode (half the wheel) split into four steps, applied zero,
+ * one or two times. In QMK's 0..255 hue space that is (int8_t)128 / 4 = -32, and
+ * the negative sign makes the hue walk down the wheel -- keep the direction so
+ * the drift looks the same. In degrees: -(360 / 2) / 4 = -45. */
+#define KP_RAIN_DROPS_HUE_STEP (-(KP_RGB_HUE_MAX / 8))
+#define KP_RAIN_DROPS_STEPS 3u /* QMK's random8_max(3): 0, 1 or 2 steps */
 
 struct kp_eff_rain_config {
   struct kp_rgb_effect_common_config common;
@@ -32,11 +48,25 @@ struct kp_eff_rain_config {
 struct kp_eff_rain_data {
   struct kp_rgb_effect_common_data common;
   uint8_t val[KP_LED_COUNT];  /* current brightness 0..255 */
-  uint8_t hue[KP_LED_COUNT];  /* per-LED hue while lit */
+  uint16_t hue[KP_LED_COUNT]; /* per-LED hue, 0..KP_RGB_HUE_MAX */
   uint8_t sat[KP_LED_COUNT];  /* per-LED saturation while lit */
   uint32_t flow_idx;
-  uint32_t phase_ms; /* fractal phase */
+  uint32_t phase_ms; /* fractal / drops phase */
+  bool drops_seeded;
 };
+
+/* One QMK RAINDROPS nudge: a fresh hue for a single key, derived from the
+ * preset. Saturation is deliberately left to the preset, so an unsaturated
+ * colour renders every nudge as the same washed-out white. */
+static uint16_t kp_rain_drops_hue(uint16_t base_hue) {
+  int32_t hue = (int32_t)base_hue +
+                (int32_t)KP_RAIN_DROPS_HUE_STEP *
+                    (int32_t)(sys_rand32_get() % KP_RAIN_DROPS_STEPS);
+  if (hue < 0) {
+    hue += KP_RGB_HUE_MAX;
+  }
+  return (uint16_t)hue;
+}
 
 static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f) {
   struct kp_eff_rain_data *data = dev->data;
@@ -47,9 +77,12 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
   struct kp_rgb_hsb base = data->common.color;
   uint16_t bl = MAX(f->board_length, 1u);
 
-  /* Decay every lit LED. */
-  for (size_t i = 0; i < f->count; i++) {
-    data->val[i] = data->val[i] > decay ? (uint8_t)(data->val[i] - decay) : 0;
+  /* Decay every lit LED. RAINDROPS is the exception: it never turns anything
+   * off, it only re-hues one key at a time, so every LED stays lit. */
+  if (cfg->mode != DT_ENUM_CONST(mode, drops)) {
+    for (size_t i = 0; i < f->count; i++) {
+      data->val[i] = data->val[i] > decay ? (uint8_t)(data->val[i] - decay) : 0;
+    }
   }
 
   switch (cfg->mode) {
@@ -57,19 +90,39 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
     data->flow_idx = (data->flow_idx + 1) % f->count;
     size_t idx = data->flow_idx;
     data->val[idx] = 255;
-    data->hue[idx] = (uint8_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
+    data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
     data->sat[idx] = base.s;
+    break;
+  }
+  case DT_ENUM_CONST(mode, drops): { /* RAINDROPS: nudge one key's hue, board stays lit */
+    if (!data->drops_seeded) {
+      /* QMK colours every LED on the effect's init frame. */
+      for (size_t i = 0; i < f->count; i++) {
+        data->val[i] = 255;
+        data->sat[i] = base.s;
+        data->hue[i] = kp_rain_drops_hue(base.h);
+      }
+      data->drops_seeded = true;
+      break;
+    }
+    data->phase_ms += f->elapsed;
+    uint32_t step_ms = MAX(period / KP_RAIN_DROPS_PER_PERIOD, 1u);
+    if (data->phase_ms >= step_ms) {
+      data->phase_ms -= step_ms;
+      size_t idx = sys_rand32_get() % f->count;
+      data->hue[idx] = kp_rain_drops_hue(base.h);
+    }
     break;
   }
   case DT_ENUM_CONST(mode, fractal): { /* a single-hue pulse expanding horizontally from centre */
     data->phase_ms = (data->phase_ms + f->elapsed) % period;
     break;
   }
-  default: { /* pixel / drops / jellybean: occasionally spark a random key */
+  default: { /* pixel / jellybean: occasionally spark a random key */
     if (sys_rand32_get() % 100 < 35) {
       size_t idx = sys_rand32_get() % f->count;
       data->val[idx] = 255;
-      data->hue[idx] = (uint8_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
+      data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
       /* jellybean also randomises saturation; the others keep the preset. */
       data->sat[idx] =
           (cfg->mode == DT_ENUM_CONST(mode, jellybean))

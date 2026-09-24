@@ -24,6 +24,8 @@ DEFINE_DT_ENUM(mode, brightness, river, hue, pendulum, wave);
 struct kp_eff_breathe_config {
   struct kp_rgb_effect_common_config common;
   mode_t mode;
+  /* Hue swing, in degrees, for the hue-oscillating modes. */
+  uint16_t hue_amplitude;
 };
 struct kp_eff_breathe_data {
   struct kp_rgb_effect_common_data common;
@@ -39,13 +41,12 @@ static uint32_t kp_breathe_wave(uint32_t phase, uint32_t period) {
   return kp_rgb_sin8((uint8_t)(phase * 256u / period + 192u));
 }
 
-#define KP_BREATHE_HUE_DELTA 12u
-
-static uint8_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
-                                     uint16_t x, uint16_t span, mode_t mode) {
+static uint16_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
+                                      uint16_t x, uint16_t span, mode_t mode,
+                                      uint16_t hue_amplitude) {
   uint32_t position;
   if (mode == DT_ENUM_CONST(mode, hue)) {
-    return (uint8_t)(kp_breathe_wave(phase, period) * KP_BREATHE_HUE_DELTA / 255u);
+    return (uint16_t)(kp_breathe_wave(phase, period) * hue_amplitude / 255u);
   }
 
   span = MAX(span, 1u);
@@ -57,7 +58,7 @@ static uint8_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
   } else {
     position = (x + (uint32_t)phase * span / period) % span;
   }
-  return (uint8_t)(position * KP_BREATHE_HUE_DELTA / span);
+  return (uint16_t)(position * hue_amplitude / span);
 }
 static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame *f) {
   struct kp_eff_breathe_data *data = dev->data;
@@ -72,8 +73,9 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
       cfg->mode == DT_ENUM_CONST(mode, wave)) {
     uint16_t span = MAX(f->board_length, 1u);
     for (size_t i = 0; i < f->count; i++) {
-      uint8_t offset = kp_breathe_hue_offset(phase, period, f->coords[i].x,
-                                             span, cfg->mode);
+      uint16_t offset = kp_breathe_hue_offset(phase, period, f->coords[i].x,
+                                              span, cfg->mode,
+                                              cfg->hue_amplitude);
       struct kp_rgb_hsb hsb = base;
       hsb.h = (uint16_t)((base.h + offset) % KP_RGB_HUE_MAX);
       f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
@@ -109,9 +111,16 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
 }
 
 #define KP_EFF_BREATHE_DEFINE(inst)                                            \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45) >= 0 &&        \
+                   DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45) <=         \
+                       UINT16_MAX,                                             \
+               "breathe hue-amplitude must fit a nonnegative uint16_t");       \
   static const struct kp_eff_breathe_config kp_eff_breathe_##inst##_cfg = {    \
       .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
-      .mode = CONV_DT_ENUM(inst, mode),                                       \
+      .mode = CONV_DT_ENUM(inst, mode),                                        \
+      .hue_amplitude =                                                         \
+          (uint16_t)CLAMP(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45), 0, \
+                          KP_RGB_HUE_MAX),                                     \
   };                                                                           \
   static struct kp_eff_breathe_data kp_eff_breathe_##inst##_data = {           \
       .common =                                                                \
