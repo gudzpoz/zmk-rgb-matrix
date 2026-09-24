@@ -7,7 +7,8 @@ description: |
   Ported from QMK's DIGITAL_RAIN.
 
   `color` and `duration` are inherited from the common effect binding. Set `color`
-  on the node for a non-green hue; `duration` controls fall speed (shorter is
-  faster). Defaults are applied in the effect's C define.
+  on the node for a non-green hue; `duration` is the fall speed, as the time a
+  drop takes to cross the board (each column is jittered between duration / 3 and
+  duration, so shorter is faster). Defaults are applied in the effect's C define.
 compatible: "keypaw,rgb-matrix-digital-rain"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]

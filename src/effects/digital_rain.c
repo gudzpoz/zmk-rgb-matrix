@@ -23,6 +23,25 @@
 /* Maximum number of discrete columns the LEDs are binned into by x. */
 #define KP_DIGITAL_COLS 24
 
+/* One key row, in layout units: physical-layout units are 100 per key. */
+#define KP_RGB_KEY_UNIT 100u
+
+/* Tail length, in key rows. QMK's DIGITAL_RAIN has no tail parameter at all: a
+ * cell decays over about 255 frames while the pattern shifts down one row every
+ * 29, so the tail settles at roughly nine rows at full brightness whatever the
+ * board size and column count. Counting in rows (rather than absolute layout
+ * units, which scale with the key pitch) is what keeps that relationship. */
+#define KP_DIGITAL_RAIN_TRAIL_ROWS 9u
+
+/* Heads and speeds are held in 1/256 of a layout unit. A column falls at
+ * 0.075-0.22 units/ms for the durations this module clamps to, which truncates
+ * to zero in whole units -- and a zero speed guard would then pin every column
+ * to the same minimum. Multiplying by a constant rather than shifting keeps the
+ * negative (above-the-board) start positions well defined. */
+#define KP_RAIN_Q8 (1 << 8)
+#define KP_RAIN_TO_Q8(v) ((int32_t)(v) * KP_RAIN_Q8)
+#define KP_RAIN_FROM_Q8(v) ((int32_t)(v) / KP_RAIN_Q8)
+
 struct kp_eff_digital_rain_config {
   struct kp_rgb_effect_common_config common;
 };
@@ -35,9 +54,24 @@ struct kp_eff_digital_rain_data {
   uint16_t min_y;
   uint16_t max_y;
   uint8_t col_of_led[KP_LED_COUNT]; /* column index per LED */
-  int16_t head_y[KP_DIGITAL_COLS];  /* current falling head y per column */
-  int16_t speed[KP_DIGITAL_COLS];    /* layout-units per ms, per column */
+  int32_t head_q8[KP_DIGITAL_COLS];  /* falling head y, 1/256 layout units */
+  int32_t speed_q8[KP_DIGITAL_COLS]; /* fall speed, 1/256 units per ms */
 };
+
+/* Where a recycled head restarts: somewhere above the top edge, so the columns
+ * do not drop in unison. */
+static int32_t kp_eff_digital_rain_start_q8(uint16_t min_y, uint16_t range_y) {
+  return KP_RAIN_TO_Q8((int32_t)min_y - (int32_t)(sys_rand32_get() % range_y));
+}
+
+/* Fall speed for one column: it crosses the board height in `period / jitter`,
+ * where jitter is 1.00x..2.98x so the columns drift apart. Tying it to the
+ * period is what makes `duration` mean "shorter is faster". */
+static int32_t kp_eff_digital_rain_speed_q8(uint16_t range_y, uint32_t period) {
+  uint32_t frac = 50u + (sys_rand32_get() % 100u);
+  uint32_t sp_q8 = (uint32_t)range_y * KP_RAIN_Q8 * frac / (period * 50u);
+  return (int32_t)MAX(sp_q8, 1u);
+}
 
 /* Discover the board's x/y extents and assign each LED to a column. Must run
  * after the engine has resolved `coords`, so it is done lazily on first render.
@@ -76,13 +110,8 @@ static void kp_eff_digital_rain_seed(const struct device *dev,
   }
 
   for (uint8_t c = 0; c < KP_DIGITAL_COLS; c++) {
-    /* Stagger the heads across and above the board so they don't fall in unison.
-     * A negative head is still above the top edge, dropping in over time. */
-    data->head_y[c] = (int16_t)((int32_t)min_y - (sys_rand32_get() % range_y));
-    /* Speed in layout-units per ms; each column varies a little. */
-    uint32_t frac = 50u + (sys_rand32_get() % 100u); /* 0.5x .. 1.49x */
-    uint32_t sp = range_y * frac / (duration * 50u);
-    data->speed[c] = (int16_t)(sp < 1u ? 1u : sp);
+    data->head_q8[c] = kp_eff_digital_rain_start_q8(min_y, (uint16_t)range_y);
+    data->speed_q8[c] = kp_eff_digital_rain_speed_q8((uint16_t)range_y, duration);
   }
 }
 
@@ -91,8 +120,11 @@ static void kp_eff_digital_rain_render(const struct device *dev,
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t pct = kp_rgb_brightness_pct(f);
-  /* Tail length in layout units: a quarter of the board height, at least a few. */
-  uint16_t trail = MAX(f->board_height / 4u, 4u);
+  /* Tail length in layout units, from the row count above. Capped at the board
+   * height so a short board fades out across its full height instead of glowing
+   * uniformly (a nine-row tail cannot fit a four-row board). */
+  uint16_t trail = MIN(KP_DIGITAL_RAIN_TRAIL_ROWS * KP_RGB_KEY_UNIT,
+                       MAX(f->board_height, KP_RGB_KEY_UNIT));
 
   if (!data->seeded) {
     kp_eff_digital_rain_seed(dev, f);
@@ -101,22 +133,19 @@ static void kp_eff_digital_rain_render(const struct device *dev,
 
   /* Advance every column's head and recycle it once it has cleared the bottom. */
   uint16_t range_y = MAX((uint16_t)(data->max_y - data->min_y), 1u);
+  int32_t recycle_q8 = KP_RAIN_TO_Q8((int32_t)data->max_y + (int32_t)trail);
+  uint32_t period = kp_rgb_effect_period(dev);
   for (uint8_t c = 0; c < KP_DIGITAL_COLS; c++) {
-    data->head_y[c] =
-        (int16_t)((int32_t)data->head_y[c] +
-                  (int32_t)data->speed[c] * (int32_t)f->elapsed);
-    if (data->head_y[c] > (int16_t)(data->max_y + trail)) {
-      data->head_y[c] =
-          (int16_t)((int32_t)data->min_y - (sys_rand32_get() % range_y));
-      uint32_t frac = 50u + (sys_rand32_get() % 100u);
-      uint32_t sp = range_y * frac / (kp_rgb_effect_period(dev) * 50u);
-      data->speed[c] = (int16_t)(sp < 1u ? 1u : sp);
+    data->head_q8[c] += data->speed_q8[c] * (int32_t)f->elapsed;
+    if (data->head_q8[c] > recycle_q8) {
+      data->head_q8[c] = kp_eff_digital_rain_start_q8(data->min_y, range_y);
+      data->speed_q8[c] = kp_eff_digital_rain_speed_q8(range_y, period);
     }
   }
 
   for (size_t i = 0; i < f->count; i++) {
     uint8_t c = data->col_of_led[i];
-    int32_t d = (int32_t)data->head_y[c] - (int32_t)f->coords[i].y;
+    int32_t d = KP_RAIN_FROM_Q8(data->head_q8[c]) - (int32_t)f->coords[i].y;
     /* Only the trail behind the falling head (the LEDs above it, smaller y) glow;
      * everything the head hasn't reached yet, and everything past the tail end, is
      * dark. */
