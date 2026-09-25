@@ -290,6 +290,34 @@ void zmk_rgb_matrix_flush(void) {
   k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
 }
 
+/* An input event reaches every effect a behavior's active view reads: the
+ * active effect itself, plus the effect each active overlay composites. A
+ * composited reactive/ripple effect reads state its on_event fills, so without
+ * this it would never see a keystroke.
+ *
+ * `seen` dedups by device so an effect that is both the active effect and an
+ * overlay target, or shared by two overlays, is delivered once. The cap is
+ * generous (one entry per overlay plus a few active effects); past it a
+ * duplicate is possible but an event is never dropped. */
+#define KP_RGB_EVENT_TARGETS_MAX (KP_RGB_OVERLAY_COUNT + 4)
+
+static void kp_rgb_deliver_event(const struct device *dev, const zmk_event_t *eh,
+                                 const struct device **seen, size_t *seen_len) {
+  for (size_t i = 0; i < *seen_len; i++) {
+    if (seen[i] == dev) {
+      return;
+    }
+  }
+  const struct kp_rgb_effect_api *api =
+      (const struct kp_rgb_effect_api *)dev->api;
+  if (api->on_event != NULL) {
+    api->on_event(dev, eh);
+  }
+  if (*seen_len < KP_RGB_EVENT_TARGETS_MAX) {
+    seen[(*seen_len)++] = dev;
+  }
+}
+
 static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
   const struct zmk_position_state_changed *pos_ev =
       as_zmk_position_state_changed(eh);
@@ -298,6 +326,8 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
       return ZMK_EV_EVENT_BUBBLE;
     }
     size_t led = kp_rgb_led_for_position(pos_ev->position);
+    const struct device *seen[KP_RGB_EVENT_TARGETS_MAX];
+    size_t seen_len = 0;
     for (size_t n = 0; n < kp_rgb_behavior_count(); n++) {
       struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(n);
       if (ctx == NULL || !ctx->state.on || ctx->state.active_fx == NULL ||
@@ -306,8 +336,27 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
       }
       const struct kp_rgb_effect_api *api =
           (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
-      if (api->on_event != NULL) {
-        api->on_event(ctx->state.active_fx, eh);
+      kp_rgb_deliver_event(ctx->state.active_fx, eh, seen, &seen_len);
+
+      /* Deliver only while the overlay actually renders, matching the render
+       * gate, so an inactive overlay does not accumulate stale state. */
+      const struct device *const *overlays =
+          api->overlays != NULL ? api->overlays : ctx->overlays;
+      size_t count =
+          api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
+      for (size_t i = 0; i < count; i++) {
+        if (overlays[i] == NULL) {
+          continue;
+        }
+        const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
+        if (ovl->event_target == NULL ||
+            !kp_rgb_overlay_gate(overlays[i], ovl)) {
+          continue;
+        }
+        const struct device *target = ovl->event_target(overlays[i]);
+        if (target != NULL) {
+          kp_rgb_deliver_event(target, eh, seen, &seen_len);
+        }
       }
     }
     kp_rgb_matrix_unlock();

@@ -1,0 +1,27 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Keymap-layer condition: active while a given layer is active.
+
+  Layer state exists only where the keymap does, which on a split is the central
+  half. A condition used by a `central-authoritative` overlay is therefore
+  evaluated on the central and pushed as a bit; the condition still compiles and
+  links on a peripheral and returns false there, so a shared devicetree
+  expands on both halves.
+
+compatible: "keypaw,rgb-condition-layer"
+
+properties:
+  layer:
+    type: int
+    required: true
+    description: |
+      Layer id this condition watches.
+
+  only-topmost:
+    type: boolean
+    description: |
+      Active only while this is the highest active layer. By default the
+      condition follows "this layer is active", which is what a momentary layer
+      key wants.

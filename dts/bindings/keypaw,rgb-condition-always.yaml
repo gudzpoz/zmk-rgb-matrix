@@ -1,0 +1,8 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Unconditionally active. Declare it as the final trigger-table rule to express
+  the "else" case, so something is asserting when no conditional rule matched.
+
+compatible: "keypaw,rgb-condition-always"

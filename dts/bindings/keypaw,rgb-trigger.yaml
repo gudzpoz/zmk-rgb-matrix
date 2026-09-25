@@ -1,0 +1,34 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  One rule in a keypaw,rgb-trigger-table. While its condition is active it is
+  the winning trigger, and its `bindings` run when it *becomes* the winner; the
+  declaration order of the table's children is the precedence order, so the
+  first active rule wins.
+
+  A trigger changes RGB *state* (on/off, cycle, colour, ...) rather than
+  compositing a *view* -- use an overlay to show an effect while a condition
+  holds. Its condition is a reusable keypaw,rgb-condition-* node, so one
+  predicate serves both an overlay and a trigger.
+
+compatible: "keypaw,rgb-trigger"
+
+properties:
+  condition:
+    type: phandle
+    required: false
+    description: |
+      Predicate that makes this trigger win. Omit it for an always-active rule
+      (the table's catch-all), which must be declared last.
+
+  bindings:
+    type: phandle-array
+    required: true
+    description: |
+      Commands to invoke, in order, when this trigger becomes the winning one.
+      Each element is a full behavior binding, normally targeting &kprgb, e.g.
+      `bindings = <&kprgb RGB_EFS_CMD 7>;`. Relative commands (RGB_HUI, RGB_BRI,
+      ...) are resolved to absolute values on the central before being sent, so
+      both halves converge. Keep the list short: each command is one packet per
+      peripheral half.

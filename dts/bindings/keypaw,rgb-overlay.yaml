@@ -1,0 +1,37 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Generic RGB matrix overlay: a compositor. While its condition is active it
+  renders exactly one effect and blends the result onto the targeted LEDs, over
+  whatever the active effect painted.
+
+  The effect is either a shared registry effect referenced with
+  `effect = <&fx>;` (a child of &kprgb, so it is selectable, persisted and
+  follows the user's hue/brightness/duration) or a single effect child of this
+  node (a private, fixed preset that consumes no registry slot). Use one or the
+  other, never both.
+
+  The parent of an effect node is what picks its role: a child of &kprgb is a
+  registry effect, a child of this overlay is a private renderer. Kinds that
+  used to be separate overlay compatibles (a layer indicator, Caps Lock, ...)
+  are now a condition plus a nested solid effect.
+
+compatible: "keypaw,rgb-overlay"
+
+include: ["keypaw,rgb-overlay-common.yaml"]
+
+properties:
+  condition:
+    type: phandle
+    required: false
+    description: |
+      Predicate (a keypaw,rgb-condition-* node) that gates the compositor.
+      Omit it for an overlay that composites unconditionally.
+
+  effect:
+    type: phandle
+    required: false
+    description: |
+      A registry effect (a child of keypaw,behavior-rgb-matrix) to composite.
+      Omit it and declare one effect child of this node for a private preset.

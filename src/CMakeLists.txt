@@ -8,10 +8,15 @@ zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX rgb_matrix.c rgb_utils.c)
 
-# Overlays are gated by their own DT-presence-derived Kconfig, so a device
-# always exists for every node that references one.
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_OVERLAY_CAPS_LOCK overlays/caps_lock.c)
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_OVERLAY_LAYER overlays/layer.c)
+# The generic overlay compositor is gated by its own DT-presence-derived
+# Kconfig, so a device always exists for every node that references one.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_OVERLAY overlays/overlay.c)
+
+# Conditions are stateless predicates shared by overlays and triggers; each is
+# likewise gated by its own DT-presence-derived Kconfig.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_LAYER conditions/layer.c)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/caps_lock.c)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_ALWAYS conditions/always.c)
 
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   # controller and effect persistence
@@ -35,11 +40,11 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   effects/digital_rain.c
 )
 
-# Trigger table: central-only, because its conditions read keymap layer state.
+# Trigger table: central-only, because a trigger's condition may read keymap
+# state, which does not exist on a peripheral.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_TRIGGERS
   rgb_triggers.c
-  triggers/layer.c
-  triggers/always.c
+  triggers/trigger.c
 )
 
 # Split state sync: central-only, because it needs the transport's connected

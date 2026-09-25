@@ -1,0 +1,16 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Container for RGB matrix condition nodes. A condition is a reusable predicate
+  consumed by overlays (`condition = <&...>`) and by triggers, so one definition
+  -- a keymap layer, Caps Lock, a catch-all -- serves every consumer instead of
+  each reimplementing it.
+
+  The node itself is not a device and has no driver; it only groups the
+  conditions for readability. Unlike an overlay, a condition has no ordinal and
+  no state, so nothing here is addressed on the split link: a
+  central-authoritative overlay evaluates its condition on the central and
+  pushes only the resulting on/off bit.
+
+compatible: "keypaw,rgb-conditions"

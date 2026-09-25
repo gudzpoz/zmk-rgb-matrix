@@ -206,33 +206,49 @@ as its children:
 ### Optional overlay configurations
 
 Optionally, you may also specify some LED overlays to indicate CapsLock or the
-current active layer, for example.
+current active layer, for example. An overlay is a **compositor**: it renders
+one effect while a **condition** is active, and blends the result over the LEDs
+it targets.
 
 ```dts
 / {
+    rgb_conditions: rgb_conditions {
+        compatible = "keypaw,rgb-conditions";
+        // Host CapsLock state
+        cond_caps: cond_caps {
+            compatible = "keypaw,rgb-condition-caps-lock";
+        };
+        // Layer 1 active state
+        cond_layer1: cond_layer1 {
+            compatible = "keypaw,rgb-condition-layer";
+            layer = <1>;
+        };
+    };
+
     rgb_overlays: rgb_overlays {
         compatible = "keypaw,rgb-overlays";
         // Light up Key No. 41 when CapsLock is active
         caps: caps {
-            compatible = "keypaw,rgb-overlay-caps-lock";
+            compatible = "keypaw,rgb-overlay";
+            condition = <&cond_caps>;
             keys = <41>;
-            color = <0x00FFFF>;
+            fx_caps {
+                compatible = "keypaw,rgb-matrix-solid";
+                #binding-cells = <0>;
+                color = <0x00FFFF>;
+            };
         };
         // Light up keys when Layer 1 is active
         layer_fn1: layer_fn1 {
-            compatible = "keypaw,rgb-overlay-layer";
+            compatible = "keypaw,rgb-overlay";
+            condition = <&cond_layer1>;
             central-authoritative;
-            layer = <1>;
             keys = <13 14 15 16 17 18 19 20 21 22>;
-            color = <0xFF8000>;
-        };
-        // Light up keys when Layer 2 is active
-        layer_fn2: layer_fn2 {
-            compatible = "keypaw,rgb-overlay-layer";
-            central-authoritative;
-            layer = <2>;
-            keys = <3 14 15 16 24 35>;
-            color = <0x0080FF>;
+            fx_fn1 {
+                compatible = "keypaw,rgb-matrix-solid";
+                #binding-cells = <0>;
+                color = <0xFF8000>;
+            };
         };
     };
 
@@ -240,17 +256,27 @@ current active layer, for example.
         kprgb: kprgb {
             compatible = "keypaw,behavior-rgb-matrix";
             #binding-cells = <2>;
-            overlays = <&caps &layer_fn1 &layer_fn2>;
+            overlays = <&caps &layer_fn1>;
             // ...
         };
     };
 };
 ```
 
-Note that `keypaw,rgb-overlays` (`rgb_overlays`) should not placed under
-`&kprgb`. Just add the overlays you want as children of a `keypaw,rgb-overlays`
-container, and then list them in paint order on the owning behavior node. You
-may use effect-level `overlays` and `no-overlays` to override this list.
+An overlay composites exactly **one** effect, given either way:
+
+- a nested child (as above) is a **private preset**: it consumes no registry slot,
+  cannot be cycled into, and does not follow the user's brightness/hue changes;
+- `effect = <&fx_solid>;` names a **shared registry effect** (a child of `&kprgb`),
+  which is live and adjustable.
+
+`keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes;
+neither belongs under `&kprgb`, whose children are the effect registry. List the
+overlays in paint order on the owning behavior node like `overlays = <&caps
+&layer_fn1>;` in the example above; an effect may override that list with its
+own `overlays`/`no-overlays`. A layer-condition overlay is marked
+`central-authoritative` because layer state exists only on the split central;
+CapsLock is not, so each half shows its own state.
 
 ### Controlling the RGB matrix
 
@@ -274,11 +300,12 @@ initial state is used at boot. The matrix turns off on idle by default;
 
 ## Built-in components
 
-This ZMK module is designed to be extensible: you can implement any effects,
-overlays or triggers in your own custom module without having to modify code in
-this module. However, we do hope and are trying to provide a good out-of-the-box
-experience with a number of built-in effects and overlays, which you can just
-use without having to touch any C code.
+This ZMK module is designed to be extensible: you can implement effects and
+conditions in your own custom module without having to modify code in this
+module. Overlays and triggers are configured entirely in devicetree from those.
+We also aim to provide a good out-of-the-box experience with a number of
+built-in effects, overlays and conditions, which you can just use without having
+to touch any C code.
 
 ### Built-in effects
 
@@ -452,12 +479,19 @@ QMK's beacon pair needs no dedicated variant: `RAINBOW_BEACON` is `rainbow`
 with `basis=pinwheel` and `palette=rainbow`, and `DUAL_BEACON` is the same
 with `palette=solid` and `direction=dual`.
 
-## Custom effects
+## Custom effects and conditions
 
-Third-party effect modules include the public API as `<zmk/rgb_matrix.h>`.
-Provide a binding that includes `keypaw,rgb-matrix-effect-common.yaml`, embed
+Third-party modules can add effects and conditions without editing this module;
+overlays and triggers are then configured in devicetree from them. The full
+authoring guide is
+[`docs/extending.md`](./docs/extending.md); module internals are documented in
+[`docs/development.md`](./docs/development.md).
+
+As a quick taste, a third-party effect module includes the public API as
+`<zmk/rgb_matrix.h>`, provides a binding that includes
+`keypaw,rgb-matrix-effect-common.yaml`, embeds
 `struct kp_rgb_effect_common_config` and `struct kp_rgb_effect_common_data` as
-the first member of the effect's config and data structures, and instantiate
+the first member of the effect's config and data structures, and instantiates
 each enabled devicetree node with `KP_RGB_EFFECT_DEFINE()`.
 
 `modules/zmk-rgb-effect-example` in the parent

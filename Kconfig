@@ -56,25 +56,47 @@ config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
       Without this the strip might latch at its last color through deep sleep
       and keeps drawing current.
 
-config KEYPAW_RGB_OVERLAY_CAPS_LOCK
+config KEYPAW_RGB_OVERLAY
     bool
     default y
-    depends on DT_HAS_KEYPAW_RGB_OVERLAY_CAPS_LOCK_ENABLED
+    depends on DT_HAS_KEYPAW_RGB_OVERLAY_ENABLED
+    help
+      Generic RGB matrix overlay: a compositor that renders one effect (nested
+      or referenced by phandle) while its optional condition is active, and
+      blends the result onto its targeted LEDs. Enabled by the presence of a
+      keypaw,rgb-overlay node, so a listed overlay always has a driver to link
+      against.
+
+# Conditions are stateless predicates shared by overlays and triggers. Each is
+# enabled by the presence of its node, so a condition referenced anywhere always
+# has a driver to link against.
+config KEYPAW_RGB_CONDITION_LAYER
+    bool
+    default y
+    depends on DT_HAS_KEYPAW_RGB_CONDITION_LAYER_ENABLED
+    help
+      Keymap-layer condition. Enabled by the presence of a
+      keypaw,rgb-condition-layer node. Compiles on both split halves; the
+      predicate returns false on a peripheral, where layer state does not exist.
+
+config KEYPAW_RGB_CONDITION_CAPS_LOCK
+    bool
+    default y
+    depends on DT_HAS_KEYPAW_RGB_CONDITION_CAPS_LOCK_ENABLED
     select ZMK_HID_INDICATORS
     help
-      Caps Lock overlay. Enabled by the presence of a
-      keypaw,rgb-overlay-caps-lock node, so a listed overlay always has a
-      driver to link against. Selects ZMK_HID_INDICATORS, which is what the host
-      sets when Caps Lock is on; note that a split peripheral also needs
-      CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS to receive the state.
+      Caps Lock condition. Enabled by the presence of a
+      keypaw,rgb-condition-caps-lock node. Selects ZMK_HID_INDICATORS, which is
+      what the host sets when Caps Lock is on; note that a split peripheral also
+      needs CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS to receive the state.
 
-config KEYPAW_RGB_OVERLAY_LAYER
+config KEYPAW_RGB_CONDITION_ALWAYS
     bool
     default y
-    depends on DT_HAS_KEYPAW_RGB_OVERLAY_LAYER_ENABLED
+    depends on DT_HAS_KEYPAW_RGB_CONDITION_ALWAYS_ENABLED
     help
-      Keymap layer overlay. Enabled by the presence of a
-      keypaw,rgb-overlay-layer node.
+      Unconditionally-active condition. Enabled by the presence of a
+      keypaw,rgb-condition-always node.
 
 endif # KEYPAW_RGB_MATRIX
 
@@ -90,13 +112,15 @@ config KEYPAW_RGB_TRIGGERS
     depends on KEYPAW_BEHAVIOR_RGB_MATRIX
     depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
     help
-      Ordered condition -> RGB command rules, declared as `triggers = <...>;` on
-      the behavior node. The first trigger whose condition is active wins, and
-      its bindings run when the winner changes.
+      Ordered condition -> RGB command rules, declared as the children of a
+      keypaw,rgb-trigger-table node (their declaration order is the precedence
+      order). The first trigger whose condition is active wins, and its bindings
+      run when the winner changes. Each trigger references a reusable
+      keypaw,rgb-condition-* node.
 
-      Built for the split central only: conditions read keymap layer state,
-      which does not exist on a peripheral. The commands still reach both halves
-      because the behavior is BEHAVIOR_LOCALITY_GLOBAL.
+      Built for the split central only: a trigger's condition may read keymap
+      state, which does not exist on a peripheral. The commands still reach both
+      halves because the behavior is BEHAVIOR_LOCALITY_GLOBAL.
 
 config KEYPAW_RGB_SPLIT_SYNC
     bool "Push the RGB state to a split peripheral when it connects"

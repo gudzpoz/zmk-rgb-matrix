@@ -70,6 +70,48 @@
         >;
     };
 
+    /* Conditions are reusable predicates consumed by overlays and triggers.
+     * The fixture instantiates one of each built-in kind so their sources are
+     * compiled and the DT-to-config mapping is exercised; nothing consumes them
+     * yet (the compositor overlay and generic trigger come next), so they are
+     * inert here. */
+    rgb_conditions: rgb_conditions {
+        compatible = "keypaw,rgb-conditions";
+
+        fixture_caps: fixture_caps {
+            compatible = "keypaw,rgb-condition-caps-lock";
+        };
+
+        fixture_layer: fixture_layer {
+            compatible = "keypaw,rgb-condition-layer";
+            layer = <1>;
+        };
+
+        fixture_always: fixture_always {
+            compatible = "keypaw,rgb-condition-always";
+        };
+    };
+
+    /* The generic compositor overlay. It targets no LEDs, so it exercises the
+     * render path (and its condition/effect resolution) without touching any
+     * preview pixel. Its effect is a `reactive` one on purpose: that is the
+     * only built-in that consumes `on_event`, so it exercises the engine's
+     * event fan-out to composited effects on each keypress. */
+    rgb_overlays: rgb_overlays {
+        compatible = "keypaw,rgb-overlays";
+
+        fixture_overlay: fixture_overlay {
+            compatible = "keypaw,rgb-overlay";
+            condition = <&fixture_always>;
+            fx_fixture {
+                compatible = "keypaw,rgb-matrix-reactive";
+                #binding-cells = <0>;
+                color = <0x102030>;
+                duration = <500>;
+            };
+        };
+    };
+
     behaviors {
         kprgb: kprgb {
             compatible = "keypaw,behavior-rgb-matrix";
@@ -77,6 +119,9 @@
 
             initial-effect = <0>;
             initial-on;
+
+            /* Listed so the compositor fixture is actually rendered each tick. */
+            overlays = <&fixture_overlay>;
 
             /* The real shield caps brightness to limit current draw, which
              * means nothing while recording. Previews read much better lit. */

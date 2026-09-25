@@ -1,0 +1,10 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Caps Lock condition: active while the host reports the HID Caps Lock LED as
+  set. Tracked from zmk_hid_indicators_changed rather than a getter, because a
+  split peripheral re-raises that event but has no hid_indicators getter to
+  call; the condition therefore works on both halves.
+
+compatible: "keypaw,rgb-condition-caps-lock"

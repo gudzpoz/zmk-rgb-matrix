@@ -109,6 +109,19 @@ void kp_rgb_overlay_paint(struct kp_rgb_frame *frame, const size_t *leds,
   }
 }
 
+void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
+                                 size_t led_count, const struct led_rgb *src,
+                                 uint8_t strength) {
+  /* The source is already at frame scale: a composited effect dims itself by
+   * the frame brightness, exactly as a flat paint colour is scaled above. */
+  for (size_t i = 0; i < led_count; i++) {
+    if (leds[i] < frame->count) {
+      frame->pixels[leds[i]] =
+          kp_rgb_rgb_mix(frame->pixels[leds[i]], src[leds[i]], strength);
+    }
+  }
+}
+
 /* -------------------------------------------------------------------------
  * Overlay state
  *

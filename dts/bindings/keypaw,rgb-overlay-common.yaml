@@ -24,19 +24,13 @@ properties:
       Raw WS2812 chain indices, for LEDs that are not under a key (the
       KP_RGB_NO_KEY entries in `mapping`).
 
-  color:
-    type: int
-    required: false
-    default: 0xFFFFFF
-    description: 24-bit RGB painted onto the targeted LEDs.
-
-  brightness:
+  opacity:
     type: int
     required: false
     default: 100
     description: |
-      Paint strength in percent: 100 replaces the effect's pixels on the targeted
-      LEDs, lower values mix the overlay colour over them.
+      Blend strength in percent: 100 replaces the underlying pixels on the
+      targeted LEDs, lower values mix the composited result over them.
 
   central-authoritative:
     type: boolean
