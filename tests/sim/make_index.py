@@ -63,6 +63,9 @@ PAGE = Template(
   code { color: #8ec07c; font-size: .85em; }
   pre code { color: #d8d8d8; font-size: 1em; }
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/styles/base16/twilight.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/languages/dts.min.js"></script>
 </head>
 <body>
 <header>
@@ -70,6 +73,7 @@ PAGE = Template(
   <p class="lede">$lede</p>
 </header>
 $sections
+<script>hljs.highlightAll();</script>
 </body>
 </html>
 """
@@ -90,8 +94,8 @@ ITEM = Template(
     """    <li id="$slug">
       <figure>
         <a href="$slug.gif"><img src="$slug.gif" alt="$name" loading="lazy"></a>
-        <figcaption><a href="#$slug">$name</a><br><code>$slug.gif</code></figcaption>
-        <pre><code>$dt</code></pre>
+        <figcaption><a href="#$slug">$name</a></figcaption>
+        <pre><code class="language-dts">$dt</code></pre>
       </figure>
     </li>"""
 )
@@ -173,7 +177,7 @@ def read_effect_nodes(path):
 
 
 def family_of(compatible, prefix):
-    return compatible[len(prefix) :] if compatible.startswith(prefix) else compatible
+    return compatible[len(prefix):] if compatible.startswith(prefix) else compatible
 
 
 def main():
