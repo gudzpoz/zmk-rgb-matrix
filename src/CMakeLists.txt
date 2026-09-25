@@ -6,17 +6,20 @@ zephyr_library()
 # ZMK app headers
 zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX rgb_matrix.c rgb_utils.c)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
+  # Engine
+  rgb_matrix.c
+  rgb_utils.c
 
-# The generic overlay compositor is gated by its own DT-presence-derived
-# Kconfig, so a device always exists for every node that references one.
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_OVERLAY overlays/overlay.c)
+  # Built-in stuff: zero cost when there's no DTS definitions
+  conditions/layer.c
+  conditions/always.c
+  overlays/overlay.c
+)
 
-# Conditions are stateless predicates shared by overlays and triggers; each is
-# likewise gated by its own DT-presence-derived Kconfig.
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_LAYER conditions/layer.c)
+# Non-zero cost when there's no DTS definitions:
+# - Caps Lock pulls in ZMK_HID_INDICATORS.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/caps_lock.c)
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_ALWAYS conditions/always.c)
 
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   # controller and effect persistence

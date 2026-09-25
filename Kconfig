@@ -56,29 +56,8 @@ config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
       Without this the strip might latch at its last color through deep sleep
       and keeps drawing current.
 
-config KEYPAW_RGB_OVERLAY
-    bool
-    default y
-    depends on DT_HAS_KEYPAW_RGB_OVERLAY_ENABLED
-    help
-      Generic RGB matrix overlay: a compositor that renders one effect (nested
-      or referenced by phandle) while its optional condition is active, and
-      blends the result onto its targeted LEDs. Enabled by the presence of a
-      keypaw,rgb-overlay node, so a listed overlay always has a driver to link
-      against.
-
-# Conditions are stateless predicates shared by overlays and triggers. Each is
-# enabled by the presence of its node, so a condition referenced anywhere always
-# has a driver to link against.
-config KEYPAW_RGB_CONDITION_LAYER
-    bool
-    default y
-    depends on DT_HAS_KEYPAW_RGB_CONDITION_LAYER_ENABLED
-    help
-      Keymap-layer condition. Enabled by the presence of a
-      keypaw,rgb-condition-layer node. Compiles on both split halves; the
-      predicate returns false on a peripheral, where layer state does not exist.
-
+# Caps Lock will pull in a HID-indicator event dependency. Disable it if you
+# don't need that.
 config KEYPAW_RGB_CONDITION_CAPS_LOCK
     bool
     default y
@@ -87,16 +66,7 @@ config KEYPAW_RGB_CONDITION_CAPS_LOCK
     help
       Caps Lock condition. Enabled by the presence of a
       keypaw,rgb-condition-caps-lock node. Selects ZMK_HID_INDICATORS, which is
-      what the host sets when Caps Lock is on; note that a split peripheral also
-      needs CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS to receive the state.
-
-config KEYPAW_RGB_CONDITION_ALWAYS
-    bool
-    default y
-    depends on DT_HAS_KEYPAW_RGB_CONDITION_ALWAYS_ENABLED
-    help
-      Unconditionally-active condition. Enabled by the presence of a
-      keypaw,rgb-condition-always node.
+      what the host sets when Caps Lock is on.
 
 endif # KEYPAW_RGB_MATRIX
 

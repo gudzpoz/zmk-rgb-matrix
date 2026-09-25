@@ -6,14 +6,6 @@
  * Built-in "caps lock" condition: active while the host reports the HID Caps
  * Lock LED as set.
  *
- * The state is tracked by subscribing to zmk_hid_indicators_changed rather than
- * by reading zmk_hid_indicators_get_current_profile(): hid_indicators.c is only
- * built for the central half (zmk/app/CMakeLists.txt gates it on "(NOT
- * CONFIG_ZMK_SPLIT) OR CONFIG_ZMK_SPLIT_ROLE_CENTRAL"), whereas the event
- * itself is compiled everywhere -- a split peripheral re-raises it from the
- * state the central forwards (split/peripheral.c), provided
- * CONFIG_ZMK_SPLIT_PERIPHERAL_HID_INDICATORS is on.
- *
  * Caps Lock is global keyboard state, so one cached flag serves every node; a
  * listener callback has no device argument to key an instance off anyway.
  */
