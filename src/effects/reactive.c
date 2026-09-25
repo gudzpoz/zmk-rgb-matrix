@@ -163,10 +163,10 @@ static void kp_eff_reactive_event(const struct device *dev, const zmk_event_t *e
 
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
-      .background_brightness = (uint8_t)CLAMP(                                \
-          DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),  \
-      .spread = CONV_DT_ENUM(inst, spread),                                   \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      .background_brightness = (uint8_t)CLAMP(                                 \
+          DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
+      .spread = CONV_DT_ENUM(inst, spread),                                    \
       .radius = DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250),             \
       .multi = DT_PROP_OR(DT_DRV_INST(inst), multi, 0),                        \
       .palette = CONV_DT_ENUM(inst, palette),                                  \

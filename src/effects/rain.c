@@ -173,8 +173,8 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
 
 #define KP_EFF_RAIN_DEFINE(inst)                                               \
   static const struct kp_eff_rain_config kp_eff_rain_##inst##_cfg = {          \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
-      .mode = CONV_DT_ENUM(inst, mode),                                       \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      .mode = CONV_DT_ENUM(inst, mode),                                        \
   };                                                                           \
   static struct kp_eff_rain_data kp_eff_rain_##inst##_data = {                 \
       .common =                                                                \

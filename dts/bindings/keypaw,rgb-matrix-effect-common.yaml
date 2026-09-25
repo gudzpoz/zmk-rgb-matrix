@@ -2,11 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 properties:
-  index:
-    type: int
-    required: true
-    description: Unique, stable effect index used on the wire.
-
   color:
     type: int
     required: false

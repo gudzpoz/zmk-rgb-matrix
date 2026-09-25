@@ -47,7 +47,7 @@ static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame
 
 #define KP_EFF_SPECTRUM_DEFINE(inst)                                           \
   static const struct kp_eff_spectrum_config kp_eff_spectrum_##inst##_cfg = {  \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
   };                                                                           \
   static struct kp_eff_spectrum_data kp_eff_spectrum_##inst##_data = {         \
       .common =                                                                \

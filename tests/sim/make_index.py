@@ -99,12 +99,6 @@ ITEM = Template(
 NODE_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s*\{\s*$")
 NAME_RE = re.compile(r'display-name\s*=\s*"([^"]+)"')
 COMPAT_RE = re.compile(r'compatible\s*=\s*"([^"]+)"')
-# The fixture's own `index` is meaningless to a reader (it just mirrors the
-# order in tests/sim/config/native_sim.overlay), and a wrong one makes the build
-# assert. The lede explains the rule instead.
-INDEX_LINE_RE = re.compile(
-    r"^[ \t]*index[ \t]*=[ \t]*<[^>]*>;[ \t]*(?:/\*.*\*/)?[ \t]*\n", re.M
-)
 
 
 def read_manifest(path):
@@ -234,7 +228,7 @@ def main():
             {
                 "slug": slug,
                 "name": name,
-                "dt": html.escape(INDEX_LINE_RE.sub("", dedent(text))),
+                "dt": html.escape(dedent(text)),
                 "line": line,
                 "compatible": compatible,
             }
@@ -268,10 +262,8 @@ def main():
     if repo:
         lede += f' <a href="{repo}">Source and documentation on GitHub</a>.'
     lede += (
-        " Each node is meant to be copied into your own <code>&amp;kprgb</code> registry,"
-        " where its <code>index</code> must equal its position among that node's children,"
-        " so the snippets leave it out. Follow <em>fixture node</em> on an effect for a"
-        " complete registry, indices and all."
+        " Each node is meant to be copied into your own <code>&amp;kprgb</code> registry."
+        " Follow <em>fixture node</em> on an effect for a complete registry."
     )
     args.output.write_text(
         PAGE.substitute(title=html.escape(args.title), lede=lede, sections="\n".join(sections)),

@@ -48,6 +48,14 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
                   (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
 
+#define KP_RGB_EFFECT_DEFAULT_ONE(node_id)                                     \
+  {.color = KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),                \
+   .duration_ms = (uint16_t)DT_PROP_OR(node_id, duration, 0)},
+#define KP_RGB_BEHAVIOR_DEFAULTS(inst)                                         \
+  static const struct kp_rgb_effect_defaults                                   \
+      kp_rgb_effect_defaults_##inst[KP_RGB_MAX_EFFECTS(inst)] = {              \
+          DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_EFFECT_DEFAULT_ONE)};
+
 #define KP_RGB_BEHAVIOR_DEFINE(inst)                                           \
   BUILD_ASSERT(sizeof(DEVICE_DT_NAME(DT_DRV_INST(inst))) <= 9,                 \
                "keypaw,behavior-rgb-matrix: node name must fit the 9-byte "    \
@@ -60,12 +68,14 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
                "effect count must fit the blob's count byte");                 \
   KP_RGB_BEHAVIOR_OVERLAYS(inst)                                               \
   KP_RGB_BEHAVIOR_LEDS(inst);                                                  \
+  KP_RGB_BEHAVIOR_DEFAULTS(inst)                                               \
   static const struct device *const kp_rgb_effects_##inst[KP_RGB_MAX_EFFECTS(  \
       inst)] = {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_EFFECT_DEVICE)};    \
   static const uint8_t kp_rgb_effect_no_cycle_##inst[KP_RGB_MAX_EFFECTS(       \
       inst)] = {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_RGB_NO_CYCLE_ONE)};     \
   static struct kp_rgb_behavior_context kp_rgb_context_##inst = {              \
       .effects = kp_rgb_effects_##inst,                                        \
+      .effect_defaults = kp_rgb_effect_defaults_##inst,                        \
       .no_cycle = kp_rgb_effect_no_cycle_##inst,                               \
       .effect_count = DT_CHILD_NUM(DT_DRV_INST(inst)),                         \
       .leds = kp_rgb_leds_##inst,                                              \
@@ -75,6 +85,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
                               (kp_rgb_overlays_##inst), (kp_rgb_no_overlays)), \
       .overlays_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), overlays, 0),          \
       .zone_valid = true,                                                      \
+      .initial_on = DT_PROP_OR(DT_DRV_INST(inst), initial_on, 1),              \
+      .initial_brightness =                                                    \
+          DT_PROP_OR(DT_DRV_INST(inst), initial_brightness, 30),               \
+      .initial_duration_ms =                                                   \
+          DT_PROP_OR(DT_DRV_INST(inst), initial_duration_ms, 1000),            \
+      .initial_effect =                                                        \
+          DT_PROP_OR(DT_DRV_INST(inst), initial_effect, 0),                    \
       .tuning =                                                                \
           {                                                                    \
               .max_brightness =                                                \
@@ -86,28 +103,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
   static int kp_rgb_behavior_init_##inst(const struct device *dev) {           \
     struct kp_rgb_behavior_context *ctx = &kp_rgb_context_##inst;              \
     ctx->dev = dev;                                                            \
-    ctx->state.on = DT_PROP_OR(DT_DRV_INST(inst), initial_on, 1);              \
-    ctx->state.user_on = ctx->state.on;                                        \
-    uint8_t brightness =                                                       \
-        (uint8_t)CLAMP(DT_PROP_OR(DT_DRV_INST(inst), initial_brightness, 30),  \
-                       0, KP_RGB_BRT_MAX);                                     \
-    int32_t default_duration =                                                 \
-        CLAMP(DT_PROP_OR(DT_DRV_INST(inst), initial_duration_ms, 1000),        \
-              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,                        \
-              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);                       \
-    for (size_t i = 0; i < ctx->effect_count; i++) {                           \
-      const struct device *fx = ctx->effects[i];                               \
-      if (fx == NULL) {                                                        \
-        continue;                                                              \
-      }                                                                        \
-      struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);         \
-      data->color.b = brightness;                                              \
-      if (data->duration_ms == 0) {                                            \
-        data->duration_ms = (uint16_t)default_duration;                        \
-      }                                                                        \
-    }                                                                          \
-    ctx->effect_index = DT_PROP_OR(DT_DRV_INST(inst), initial_effect, 0);      \
-    if (kp_rgb_resolve_active(ctx) < 0) {                                      \
+    ctx->state.on = ctx->initial_on;                                           \
+    if (kp_rgb_apply_defaults(ctx) < 0) {                                      \
       LOG_WRN("Initial RGB effect unavailable for %s", dev->name);             \
     }                                                                          \
     LOG_DBG("Registered %u RGB matrix effects for %s",                         \
@@ -160,6 +157,9 @@ static const struct behavior_parameter_value_metadata no_arg_values[] = {
     {.display_name = "Previous Effect",
      .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
      .value = RGB_EFR_CMD},
+    {.display_name = "Reset Settings",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_RESET_CMD},
 };
 static const struct behavior_parameter_metadata_set no_args_set = {
     .param1_values = no_arg_values,
@@ -256,6 +256,35 @@ int kp_rgb_resolve_active(struct kp_rgb_behavior_context *ctx) {
   }
   ctx->state.active_fx = fx;
   return 0;
+}
+
+/* Re-apply the devicetree defaults: power intent, every effect's preset colour
+ * and period, and the initial effect. Shared by behavior init and the settings
+ * reset, so a reset lands in exactly the state a fresh flash would show. */
+int kp_rgb_apply_defaults(struct kp_rgb_behavior_context *ctx) {
+  uint8_t brightness =
+      (uint8_t)CLAMP(ctx->initial_brightness, 0, KP_RGB_BRT_MAX);
+  uint16_t duration =
+      (uint16_t)CLAMP(ctx->initial_duration_ms,
+                      CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+                      CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+  kp_rgb_matrix_lock();
+  ctx->state.user_on = ctx->initial_on;
+  for (size_t i = 0; i < ctx->effect_count; i++) {
+    const struct device *fx = ctx->effects[i];
+    if (fx == NULL) {
+      continue;
+    }
+    const struct kp_rgb_effect_defaults *def = &ctx->effect_defaults[i];
+    struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+    data->color = def->color;
+    data->color.b = brightness;
+    data->duration_ms = def->duration_ms != 0 ? def->duration_ms : duration;
+  }
+  ctx->effect_index = ctx->initial_effect;
+  int ret = kp_rgb_resolve_active(ctx);
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index) {
@@ -545,6 +574,11 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                  .s = (binding->param2 >> 8) & 0xFF,
                                  .b = binding->param2 & 0xFF});
     break;
+  case RGB_RESET_CMD:
+    /* Clears persisted state and restores the defaults. The delete runs in a
+     * work item, so this must not fall through to kp_rgb_save_state(). */
+    kp_rgb_reset_state();
+    return 0;
   case RGB_OVL_STATE_CMD:
     /* Live overlay state pushed by the central, not a setting to be saved.
      * No-op on the central, as the words always equal, stopping dispatch() from

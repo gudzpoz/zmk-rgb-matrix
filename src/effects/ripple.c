@@ -140,7 +140,7 @@ static void kp_eff_ripple_event(const struct device *dev, const zmk_event_t *eh)
 
 #define KP_EFF_RIPPLE_DEFINE(inst)                                             \
   static const struct kp_eff_ripple_config kp_eff_ripple_##inst##_cfg = {      \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .background_brightness = (uint8_t)CLAMP(                                 \
           DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
   };                                                                           \

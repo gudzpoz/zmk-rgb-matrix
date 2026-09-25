@@ -26,11 +26,19 @@ struct kp_rgb_state {
   const struct device *active_fx;
 };
 
+/* One effect's devicetree defaults, baked at build time so a settings reset
+ * restores exactly what a fresh flash would show. */
+struct kp_rgb_effect_defaults {
+  struct kp_rgb_hsb color; /* b is overwritten by initial_brightness */
+  uint16_t duration_ms;    /* 0 -> the behavior's initial_duration_ms */
+};
+
 struct kp_rgb_behavior_context {
   const struct device *dev;
   struct kp_rgb_state state;
   struct kp_rgb_tuning tuning;
   const struct device *const *effects;
+  const struct kp_rgb_effect_defaults *effect_defaults;
   const uint8_t *no_cycle;
   size_t effect_count;
   size_t effect_index;
@@ -40,6 +48,12 @@ struct kp_rgb_behavior_context {
   const struct device *const *overlays;
   size_t overlays_len;
   bool zone_valid;
+  /* Boot defaults, re-applied by a settings reset. Raw devicetree values;
+   * kp_rgb_apply_defaults() clamps them. */
+  bool initial_on;
+  int32_t initial_brightness;
+  int32_t initial_duration_ms;
+  uint16_t initial_effect;
 #if IS_ENABLED(CONFIG_SETTINGS)
   struct k_work_delayable save_work;
 #endif
@@ -102,6 +116,16 @@ const struct device *kp_rgb_effect_at(const struct kp_rgb_behavior_context *ctx,
 size_t kp_rgb_selected_effect(const struct kp_rgb_behavior_context *ctx);
 
 int kp_rgb_save_state(struct kp_rgb_behavior_context *ctx);
+
+/* Restore the devicetree defaults (power intent, every effect's preset
+ * colour/period, the selected effect). Does not start or stop the tick timer;
+ * the caller applies power with zmk_rgb_matrix_on()/off(). Returns the
+ * resolve result: < 0 when no initial effect is available. */
+int kp_rgb_apply_defaults(struct kp_rgb_behavior_context *ctx);
+
+/* Clear this half's persisted RGB state and restore the defaults. Safe from a
+ * behavior handler: the flash work runs off the low-priority queue. */
+void kp_rgb_reset_state(void);
 
 int kp_rgb_calc_effect(struct kp_rgb_behavior_context *ctx, int16_t direction);
 struct kp_rgb_hsb kp_rgb_calc_hue(const struct kp_rgb_behavior_context *ctx,

@@ -42,7 +42,7 @@ struct kp_eff_static_data {
   BUILD_ASSERT(ARRAY_SIZE(kp_eff_static_##inst##_colors) <= KP_LED_COUNT,      \
                "led-colors has more entries than LEDs");                       \
   static const struct kp_eff_static_config kp_eff_static_##inst##_cfg = {      \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .colors = kp_eff_static_##inst##_colors,                                 \
       .colors_len = ARRAY_SIZE(kp_eff_static_##inst##_colors),                 \
   };                                                                           \

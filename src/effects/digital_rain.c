@@ -166,20 +166,20 @@ static void kp_eff_digital_rain_render(const struct device *dev,
   }
 }
 
-#define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                         \
-  static const struct kp_eff_digital_rain_config                                 \
-      kp_eff_digital_rain_##inst##_cfg = {                                      \
-          .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                \
-  };                                                                            \
-  static struct kp_eff_digital_rain_data kp_eff_digital_rain_##inst##_data = {   \
-      .common =                                                                 \
-          {                                                                     \
-              .color = KP_RGB_HSB_FROM_HEX(                                      \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00)),               \
-              .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 4000),      \
-          },                                                                    \
-  };                                                                            \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_digital_rain_render, NULL,      \
+#define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                       \
+  static const struct kp_eff_digital_rain_config                               \
+      kp_eff_digital_rain_##inst##_cfg = {                                     \
+          .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                      \
+  };                                                                           \
+  static struct kp_eff_digital_rain_data kp_eff_digital_rain_##inst##_data = { \
+      .common =                                                                \
+          {                                                                    \
+              .color = KP_RGB_HSB_FROM_HEX(                                    \
+                  DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00)),             \
+              .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 4000),    \
+          },                                                                   \
+  };                                                                           \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_digital_rain_render, NULL,    \
                        kp_eff_digital_rain_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_DIGITAL_RAIN_DEFINE)

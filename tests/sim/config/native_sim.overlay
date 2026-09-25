@@ -88,16 +88,14 @@
              * different speed override `duration` below. */
             initial-duration-ms = <4000>;
 
-            /* In declaration order: an effect's `index` must equal its position
-             * here (BUILD_ASSERT in the module). `display-name` becomes the
-             * preview's filename. */
+            /* In declaration order: an effect's position here is its identity.
+             * `display-name` becomes the preview's filename. */
 
             /* --- static fields ------------------------------------------- */
 
             fx_solid: fx_solid {
                 compatible = "keypaw,rgb-matrix-solid";
                 #binding-cells = <0>;
-                index = <0>;
                 display-name = "Solid";
                 color = <0xFF0000>;
             };
@@ -105,7 +103,6 @@
             fx_solid_v: fx_solid_v {
                 compatible = "keypaw,rgb-matrix-solid";
                 #binding-cells = <0>;
-                index = <1>;
                 display-name = "Solid (vertical)";
                 axis = "vertical";
                 color = <0xFF0000>;
@@ -114,7 +111,6 @@
             fx_solid_h: fx_solid_h {
                 compatible = "keypaw,rgb-matrix-solid";
                 #binding-cells = <0>;
-                index = <2>;
                 display-name = "Solid (horizontal)";
                 axis = "horizontal";
                 color = <0xFF0000>;
@@ -123,7 +119,6 @@
             fx_static: fx_static {
                 compatible = "keypaw,rgb-matrix-static";
                 #binding-cells = <0>;
-                index = <3>;
                 display-name = "Static";
                 /* One hue per column, repeated down the board. */
                 led-colors = <
@@ -143,7 +138,6 @@
             fx_breathe: fx_breathe {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <4>;
                 display-name = "Breathe (brightness)";
                 mode = "brightness";
                 color = <0x0000FF>;
@@ -152,7 +146,6 @@
             fx_breathe_river: fx_breathe_river {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <5>;
                 display-name = "Breathe (river)";
                 mode = "river";
                 color = <0x0000FF>;
@@ -161,7 +154,6 @@
             fx_breathe_hue: fx_breathe_hue {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <6>;
                 display-name = "Breathe (hue)";
                 mode = "hue";
                 color = <0x0000FF>;
@@ -170,7 +162,6 @@
             fx_breathe_pendulum: fx_breathe_pendulum {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <7>;
                 display-name = "Breathe (pendulum)";
                 mode = "pendulum";
                 color = <0x0000FF>;
@@ -179,7 +170,6 @@
             fx_breathe_wave: fx_breathe_wave {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <8>;
                 display-name = "Breathe (wave)";
                 mode = "wave";
                 color = <0x0000FF>;
@@ -188,7 +178,6 @@
             fx_spectrum: fx_spectrum {
                 compatible = "keypaw,rgb-matrix-spectrum";
                 #binding-cells = <0>;
-                index = <9>;
                 display-name = "Spectrum";
             };
 
@@ -197,7 +186,6 @@
             fx_rainbow: fx_rainbow {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <10>;
                 display-name = "Rainbow (x)";
                 basis = "x";
             };
@@ -205,7 +193,6 @@
             fx_rainbow_y: fx_rainbow_y {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <11>;
                 display-name = "Rainbow (y)";
                 basis = "y";
             };
@@ -213,7 +200,6 @@
             fx_rainbow_radial: fx_rainbow_radial {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <12>;
                 display-name = "Rainbow (radial)";
                 basis = "radial";
             };
@@ -221,7 +207,6 @@
             fx_rainbow_pinwheel: fx_rainbow_pinwheel {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <13>;
                 display-name = "Rainbow (pinwheel)";
                 basis = "pinwheel";
             };
@@ -229,7 +214,6 @@
             fx_rainbow_spiral: fx_rainbow_spiral {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <14>;
                 display-name = "Rainbow (spiral)";
                 basis = "spiral";
             };
@@ -237,7 +221,6 @@
             fx_rainbow_chevron: fx_rainbow_chevron {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <15>;
                 display-name = "Rainbow (chevron)";
                 basis = "chevron";
             };
@@ -245,7 +228,6 @@
             fx_rainbow_flag: fx_rainbow_flag {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <16>;
                 display-name = "Rainbow (flag)";
                 basis = "flag";
             };
@@ -253,7 +235,6 @@
             fx_rainbow_in: fx_rainbow_in {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <17>;
                 display-name = "Rainbow (in)";
                 basis = "x";
                 direction = "in";
@@ -262,7 +243,6 @@
             fx_rainbow_dual: fx_rainbow_dual {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <18>;
                 display-name = "Rainbow (dual)";
                 /* `dual` picks two centres, so it only reads against a radial
                  * basis; with basis x it renders exactly like plain x. */
@@ -273,7 +253,6 @@
             fx_rainbow_bloom: fx_rainbow_bloom {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <19>;
                 display-name = "Rainbow (bloom)";
                 basis = "x";
                 direction = "bloom";
@@ -282,7 +261,6 @@
             fx_rainbow_solid: fx_rainbow_solid {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <20>;
                 display-name = "Rainbow (solid)";
                 basis = "x";
                 palette = "solid";
@@ -292,7 +270,6 @@
             fx_band: fx_band {
                 compatible = "keypaw,rgb-matrix-band";
                 #binding-cells = <0>;
-                index = <21>;
                 display-name = "Band (saturation, linear)";
                 channel = "sat";
                 shape = "linear";
@@ -302,7 +279,6 @@
             fx_band_pinwheel: fx_band_pinwheel {
                 compatible = "keypaw,rgb-matrix-band";
                 #binding-cells = <0>;
-                index = <22>;
                 display-name = "Band (saturation, pinwheel)";
                 channel = "sat";
                 shape = "pinwheel";
@@ -312,7 +288,6 @@
             fx_band_spiral: fx_band_spiral {
                 compatible = "keypaw,rgb-matrix-band";
                 #binding-cells = <0>;
-                index = <23>;
                 display-name = "Band (saturation, spiral)";
                 channel = "sat";
                 shape = "spiral";
@@ -322,7 +297,6 @@
             fx_band_val: fx_band_val {
                 compatible = "keypaw,rgb-matrix-band";
                 #binding-cells = <0>;
-                index = <24>;
                 display-name = "Band (value, linear)";
                 channel = "val";
                 shape = "linear";
@@ -334,7 +308,6 @@
             fx_reactive: fx_reactive {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <25>;
                 display-name = "Reactive (point)";
                 spread = "point";
                 color = <0xFFFFFF>;
@@ -344,7 +317,6 @@
             fx_reactive_disc: fx_reactive_disc {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <26>;
                 display-name = "Reactive (disc)";
                 spread = "disc";
                 spread-radius = <250>;
@@ -355,7 +327,6 @@
             fx_reactive_cross: fx_reactive_cross {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <27>;
                 display-name = "Reactive (cross)";
                 spread = "cross";
                 color = <0xFFFFFF>;
@@ -365,7 +336,6 @@
             fx_reactive_nexus: fx_reactive_nexus {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <28>;
                 display-name = "Reactive (nexus)";
                 spread = "nexus";
                 spread-radius = <250>;
@@ -376,7 +346,6 @@
             fx_reactive_gradient: fx_reactive_gradient {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <29>;
                 display-name = "Reactive (gradient)";
                 spread = "disc";
                 palette = "gradient";
@@ -390,7 +359,6 @@
             fx_reactive_complement: fx_reactive_complement {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <30>;
                 display-name = "Reactive (complement)";
                 spread = "disc";
                 palette = "complement";
@@ -401,7 +369,6 @@
             fx_reactive_multi: fx_reactive_multi {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
-                index = <31>;
                 display-name = "Reactive (multi)";
                 spread = "disc";
                 multi;
@@ -412,7 +379,6 @@
             fx_ripple: fx_ripple {
                 compatible = "keypaw,rgb-matrix-ripple";
                 #binding-cells = <0>;
-                index = <32>;
                 display-name = "Ripple";
                 color = <0x00FFFF>;
                 duration = <2000>;
@@ -423,7 +389,6 @@
             fx_rain: fx_rain {
                 compatible = "keypaw,rgb-matrix-rain";
                 #binding-cells = <0>;
-                index = <33>;
                 display-name = "Rain (pixel)";
                 mode = "pixel";
                 /* Hue is randomised per LED but saturation comes from the
@@ -435,7 +400,6 @@
             fx_rain_flow: fx_rain_flow {
                 compatible = "keypaw,rgb-matrix-rain";
                 #binding-cells = <0>;
-                index = <34>;
                 display-name = "Rain (flow)";
                 mode = "flow";
                 color = <0xFF0000>;
@@ -444,7 +408,6 @@
             fx_rain_drops: fx_rain_drops {
                 compatible = "keypaw,rgb-matrix-rain";
                 #binding-cells = <0>;
-                index = <35>;
                 display-name = "Rain (drops)";
                 /* QMK's RAINDROPS: one random key's hue is nudged each step and
                  * the board never goes dark, so this preview is a lit mosaic
@@ -456,7 +419,6 @@
             fx_rain_jellybean: fx_rain_jellybean {
                 compatible = "keypaw,rgb-matrix-rain";
                 #binding-cells = <0>;
-                index = <36>;
                 display-name = "Rain (jellybean)";
                 mode = "jellybean";
                 color = <0xFF0000>;
@@ -465,7 +427,6 @@
             fx_rain_fractal: fx_rain_fractal {
                 compatible = "keypaw,rgb-matrix-rain";
                 #binding-cells = <0>;
-                index = <37>;
                 display-name = "Rain (fractal)";
                 mode = "fractal";
                 color = <0xFF0000>;
@@ -474,7 +435,6 @@
             fx_starlight: fx_starlight {
                 compatible = "keypaw,rgb-matrix-starlight";
                 #binding-cells = <0>;
-                index = <38>;
                 display-name = "Starlight";
                 color = <0xFFFFFF>;
             };
@@ -482,7 +442,6 @@
             fx_starlight_smooth: fx_starlight_smooth {
                 compatible = "keypaw,rgb-matrix-starlight";
                 #binding-cells = <0>;
-                index = <39>;
                 display-name = "Starlight (smooth)";
                 smooth;
                 color = <0xFFFFFF>;
@@ -491,7 +450,6 @@
             fx_starlight_dual_hue: fx_starlight_dual_hue {
                 compatible = "keypaw,rgb-matrix-starlight";
                 #binding-cells = <0>;
-                index = <40>;
                 display-name = "Starlight (dual hue)";
                 dual-hue;
                 /* Hue jitter is invisible on an unsaturated preset. */
@@ -501,7 +459,6 @@
             fx_starlight_dual_sat: fx_starlight_dual_sat {
                 compatible = "keypaw,rgb-matrix-starlight";
                 #binding-cells = <0>;
-                index = <41>;
                 display-name = "Starlight (dual sat)";
                 dual-sat;
                 color = <0x00FFFF>;
@@ -510,14 +467,12 @@
             fx_heatmap: fx_heatmap {
                 compatible = "keypaw,rgb-matrix-heatmap";
                 #binding-cells = <0>;
-                index = <42>;
                 display-name = "Heatmap";
             };
 
             fx_heatmap_slim: fx_heatmap_slim {
                 compatible = "keypaw,rgb-matrix-heatmap";
                 #binding-cells = <0>;
-                index = <43>;
                 display-name = "Heatmap (slim)";
                 slim;
             };
@@ -525,7 +480,6 @@
             fx_digital_rain: fx_digital_rain {
                 compatible = "keypaw,rgb-matrix-digital-rain";
                 #binding-cells = <0>;
-                index = <44>;
                 display-name = "Digital Rain";
                 color = <0x00FF00>;
             };

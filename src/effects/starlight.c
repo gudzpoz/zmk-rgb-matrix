@@ -94,14 +94,15 @@ static void kp_eff_starlight_render(const struct device *dev, struct kp_rgb_fram
   }
 }
 
-#define KP_EFF_STARLIGHT_DEFINE(inst)                                           \
-  static const struct kp_eff_starlight_config kp_eff_starlight_##inst##_cfg = { \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                   \
-      .smooth = DT_PROP_OR(DT_DRV_INST(inst), smooth, 0),                       \
-      .dual_hue = DT_PROP_OR(DT_DRV_INST(inst), dual_hue, 0),                   \
-      .dual_sat = DT_PROP_OR(DT_DRV_INST(inst), dual_sat, 0),                  \
+#define KP_EFF_STARLIGHT_DEFINE(inst)                                          \
+  static const struct kp_eff_starlight_config kp_eff_starlight_##inst##_cfg =  \
+      {                                                                        \
+          .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                      \
+          .smooth = DT_PROP_OR(DT_DRV_INST(inst), smooth, 0),                  \
+          .dual_hue = DT_PROP_OR(DT_DRV_INST(inst), dual_hue, 0),              \
+          .dual_sat = DT_PROP_OR(DT_DRV_INST(inst), dual_sat, 0),              \
   };                                                                           \
-  static struct kp_eff_starlight_data kp_eff_starlight_##inst##_data = {        \
+  static struct kp_eff_starlight_data kp_eff_starlight_##inst##_data = {       \
       .common =                                                                \
           {                                                                    \
               .color = KP_RGB_HSB_FROM_HEX(                                    \
@@ -109,7 +110,7 @@ static void kp_eff_starlight_render(const struct device *dev, struct kp_rgb_fram
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_starlight_render, NULL,        \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_starlight_render, NULL,       \
                        kp_eff_starlight_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_STARLIGHT_DEFINE)

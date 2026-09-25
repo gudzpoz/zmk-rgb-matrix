@@ -217,7 +217,7 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding_event event);
 
 struct kp_rgb_effect_common_config {
-  uint16_t index; /* user-assigned, unique, stable across rebuilds */
+  uint16_t index; /* registry slot; the effect's child position */
 };
 struct kp_rgb_effect_common_data {
   uint16_t duration_ms;    /* single cycle animation duration */
@@ -263,6 +263,12 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
               (COND_CODE_1(DT_NODE_HAS_PROP(node_id, overlays),                \
                            (cfg_inst##_overlays), (NULL))))
 
+/* An effect's registry slot: its position among the owning behavior's children.
+ * Each effect bakes this into struct kp_rgb_effect_common_config.index, which
+ * the shared convert hook reads (it has no `inst` in scope, so it cannot derive
+ * the slot itself). Declaration order is the identity. */
+#define KP_RGB_EFFECT_INDEX(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
+
 #define KP_RGB_EFFECT_DEFINE(node_id, render_fn, event_fn, cfg_inst)           \
   BUILD_ASSERT(                                                                \
       DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix),      \
@@ -279,8 +285,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        (const void *)&cfg_inst##_data.common,                  \
                "effect data must embed struct kp_rgb_effect_common_data "      \
                "as the first field");                                          \
-  BUILD_ASSERT(DT_PROP(node_id, index) == DT_NODE_CHILD_IDX(node_id),          \
-               "effect index must match the ordering of effects");             \
   BUILD_ASSERT(DT_PROP_LEN_OR(node_id, overlays, 1) > 0,                       \
                "an empty `overlays` list is not expressible; use "             \
                "`no-overlays;` for an effect that wants none");                \

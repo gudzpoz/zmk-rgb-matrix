@@ -116,7 +116,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
                        UINT16_MAX,                                             \
                "breathe hue-amplitude must fit a nonnegative uint16_t");       \
   static const struct kp_eff_breathe_config kp_eff_breathe_##inst##_cfg = {    \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .mode = CONV_DT_ENUM(inst, mode),                                        \
       .hue_amplitude =                                                         \
           (uint16_t)CLAMP(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45), 0, \

@@ -172,16 +172,12 @@ as its children:
             fx_breathe: fx_breathe {
                 compatible = "keypaw,rgb-matrix-breathe";
                 #binding-cells = <0>;
-                index = <0>;
-
                 color = <0x0000FF>;
                 duration = <2400>;
             };
             fx_rainbow: fx_rainbow {
                 compatible = "keypaw,rgb-matrix-rainbow";
                 #binding-cells = <0>;
-                index = <1>;
-
                 color = <0xFFFFFF>;
                 duration = <4000>;
                 basis = "x";
@@ -191,8 +187,6 @@ as its children:
             fx_heatmap: fx_heatmap {
                 compatible = "keypaw,rgb-matrix-heatmap";
                 #binding-cells = <0>;
-                index = <2>;
-
                 color = <0xFFFFFF>;
                 decrease-delay-ms = <25>;
                 spread = <150>;
@@ -205,9 +199,9 @@ as its children:
 ```
 
 > For split builds, you need to make sure that boards get the same effect
-> definitions: effects are synchronized between halves with its indices, and
-> when the indices mismatch, things go out of sync. The same also applies to
-> overlays (see below).
+> definitions: an effect is identified by its position in the registry, so a
+> different set or order desyncs the halves. The same also applies to overlays
+> (see below).
 
 ### Optional overlay configurations
 

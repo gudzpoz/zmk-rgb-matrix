@@ -159,7 +159,7 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
 
 #define KP_EFF_RAINBOW_DEFINE(inst)                                            \
   static const struct kp_eff_rainbow_config kp_eff_rainbow_##inst##_cfg = {    \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .basis = CONV_DT_ENUM(inst, basis),                                      \
       .direction = CONV_DT_ENUM(inst, direction),                              \
       .palette = CONV_DT_ENUM(inst, palette),                                  \

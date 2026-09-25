@@ -103,7 +103,7 @@ static void kp_eff_band_render(const struct device *dev, struct kp_rgb_frame *f)
 
 #define KP_EFF_BAND_DEFINE(inst)                                               \
   static const struct kp_eff_band_config kp_eff_band_##inst##_cfg = {          \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .channel = CONV_DT_ENUM(inst, channel),                                  \
       .shape = CONV_DT_ENUM(inst, shape),                                      \
   };                                                                           \

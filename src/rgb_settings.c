@@ -22,6 +22,7 @@
 
 #include <zmk/activity.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/workqueue.h>
 
 #include "rgb_matrix_internal.h"
 
@@ -204,6 +205,64 @@ int kp_rgb_save_state(struct kp_rgb_behavior_context *ctx) {
   return MIN(ret, 0);
 #else
   return 0;
+#endif
+}
+
+/* --- reset ---------------------------------------------------------------- */
+
+static void kp_rgb_restore_all(void) {
+  for (size_t i = 0; i < kp_rgb_behavior_count(); i++) {
+    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(i);
+    if (ctx == NULL) {
+      continue;
+    }
+    (void)kp_rgb_apply_defaults(ctx);
+    if (ctx->state.on) {
+      zmk_rgb_matrix_on(ctx->dev);
+    } else {
+      zmk_rgb_matrix_off(ctx->dev);
+    }
+  }
+  zmk_rgb_matrix_flush();
+}
+
+#if IS_ENABLED(CONFIG_SETTINGS)
+static void kp_rgb_reset_work_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  struct k_work_sync sync;
+  char path[KP_RGB_PERSIST_PATH_MAX];
+  /* Settle any in-flight debounced save first, or it would recreate the keys
+   * deleted below. No kp_rgb_matrix_lock here: the save handler takes it, so a
+   * sync cancel under the lock would deadlock. */
+  for (size_t i = 0; i < kp_rgb_behavior_count(); i++) {
+    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(i);
+    if (ctx == NULL) {
+      continue;
+    }
+    k_work_cancel_delayable_sync(&ctx->save_work, &sync);
+    snprintk(path, sizeof(path), KP_RGB_PERSIST_SUBTREE "/%s/state",
+             ctx->dev->name);
+    int err = settings_delete(path);
+    if (err < 0 && err != -ENOENT) {
+      LOG_WRN("Failed to clear RGB state for %s (err %d)", ctx->dev->name, err);
+    }
+  }
+  /* The pre-multi-context record. */
+  int err = settings_delete(KP_RGB_PERSIST_SUBTREE "/state");
+  if (err < 0 && err != -ENOENT) {
+    LOG_WRN("Failed to clear the legacy RGB state (err %d)", err);
+  }
+  kp_rgb_restore_all();
+}
+K_WORK_DEFINE(kp_rgb_reset_work, kp_rgb_reset_work_handler);
+#endif /* IS_ENABLED(CONFIG_SETTINGS) */
+
+void kp_rgb_reset_state(void) {
+#if IS_ENABLED(CONFIG_SETTINGS)
+  /* settings_delete blocks on flash I/O, so keep it off the behavior thread. */
+  k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_reset_work);
+#else
+  kp_rgb_restore_all();
 #endif
 }
 

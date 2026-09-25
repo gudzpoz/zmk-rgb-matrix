@@ -104,26 +104,29 @@ static void kp_eff_heatmap_event(const struct device *dev, const zmk_event_t *eh
 
 #define KP_EFF_HEATMAP_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25) >= 0 &&    \
-                   DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25) <= UINT16_MAX, \
-               "heatmap decrease-delay-ms must fit a nonnegative uint16_t");  \
-  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread, 40) >= 0 &&                \
-                   DT_PROP_OR(DT_DRV_INST(inst), spread, 40) <= UINT16_MAX,     \
+                   DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25) <=     \
+                       UINT16_MAX,                                             \
+               "heatmap decrease-delay-ms must fit a nonnegative uint16_t");   \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread, 40) >= 0 &&               \
+                   DT_PROP_OR(DT_DRV_INST(inst), spread, 40) <= UINT16_MAX,    \
                "heatmap spread must fit a nonnegative uint16_t");              \
-  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) >= 0 &&            \
-                   DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) <= UINT8_MAX,  \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) >= 0 &&           \
+                   DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) <= UINT8_MAX, \
                "heatmap area-limit must fit a nonnegative uint8_t");           \
-  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32) >= 0 &&         \
-                   DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32) <= UINT8_MAX, \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32) >= 0 &&        \
+                   DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32) <=         \
+                       UINT8_MAX,                                              \
                "heatmap increase-step must fit a nonnegative uint8_t");        \
-  static const struct kp_eff_heatmap_config kp_eff_heatmap_##inst##_cfg = {     \
-      .common = {.index = DT_PROP(DT_DRV_INST(inst), index)},                  \
-      .decrease_delay_ms = DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25), \
+  static const struct kp_eff_heatmap_config kp_eff_heatmap_##inst##_cfg = {    \
+      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      .decrease_delay_ms =                                                     \
+          DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25),                \
       .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
       .area_limit = DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16),             \
       .increase_step = DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32),       \
       .slim = DT_PROP_OR(DT_DRV_INST(inst), slim, 0),                          \
   };                                                                           \
-  static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {            \
+  static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {           \
       .common =                                                                \
           {                                                                    \
               .color = KP_RGB_HSB_FROM_HEX(                                    \
