@@ -501,9 +501,8 @@ with `palette=solid` and `direction=dual`.
 
 Third-party modules can add effects and conditions without editing this module;
 overlays and triggers are then configured in devicetree from them. The full
-authoring guide is
-[`docs/extending.md`](./docs/extending.md); module internals are documented in
-[`docs/development.md`](./docs/development.md).
+authoring guide is [`docs/extending.md`](./docs/extending.md); module internals
+are documented in [`docs/development.md`](./docs/development.md).
 
 As a quick taste, a third-party effect module includes the public API as
 `<zmk/rgb_matrix.h>`, provides a binding that includes

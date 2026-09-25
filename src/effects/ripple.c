@@ -111,10 +111,10 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
   }
 }
 
-static void kp_eff_ripple_event(const struct device *dev, const zmk_event_t *eh) {
-  const struct zmk_position_state_changed *ev = as_zmk_position_state_changed(eh);
-  if (ev == NULL || !ev->state) {
-    return;
+static void kp_eff_ripple_event(const struct device *dev,
+                                const struct zmk_position_state_changed *ev) {
+  if (!ev->state) {
+    return; /* only a press starts a ripple */
   }
 
   size_t led = kp_rgb_led_for_position(ev->position);

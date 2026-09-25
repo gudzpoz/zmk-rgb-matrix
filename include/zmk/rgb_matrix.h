@@ -17,6 +17,7 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/event_manager.h>
+#include <zmk/events/position_state_changed.h>
 #include <zmk/keymap.h>
 
 #include <zephyr/devicetree.h>
@@ -166,11 +167,20 @@ size_t kp_rgb_led_for_position(uint32_t position);
  * the frame publishes as `coords` -- or NULL when `led` is out of range. */
 const struct kp_rgb_coord *kp_rgb_led_coord(size_t led);
 
+/* A animation frame to be rendered. Units are all in layout units (standard key
+ * width = standard key height = 100). */
 struct kp_rgb_frame {
   const struct kp_rgb_tuning *tune;
+  /* The number of LEDs on this split half / this non-split keyboard, and also
+   * the length of `coords` and `pixels` */
   size_t count;
+  /* Each LED's center coordinates, in layout units */
   const struct kp_rgb_coord *coords;
+  /* Output pixels for each LED */
   struct led_rgb *pixels;
+  /* Milliseconds since the previous render. Not always
+   * `KEYPAW_RGB_MATRIX_TICK_MS` as API might request immediate animation
+   * flush. */
   uint32_t elapsed;
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
@@ -184,8 +194,13 @@ struct kp_rgb_frame {
 
 typedef void (*rgb_matrix_effect_render_callback_t)(const struct device *dev,
                                                     struct kp_rgb_frame *frame);
-typedef void (*rgb_matrix_effect_event_callback_t)(const struct device *dev,
-                                                   const zmk_event_t *eh);
+
+/* A key event callback. Both press events and release events are delivered. Use
+ * `ev->state` to tell them apart. kp_rgb_led_for_position() to find the LED,
+ * since there is no frame here. Runs under the matrix lock, so keep it
+ * short. */
+typedef void (*rgb_matrix_effect_event_callback_t)(
+    const struct device *dev, const struct zmk_position_state_changed *ev);
 
 /* Sentinel list meaning "this effect wants no overlays at all"; it is never
  * dereferenced, since the accompanying length is 0. */
@@ -287,7 +302,13 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  *   - child of keypaw,rgb-overlay         -> *private* effect: a compositor's
  *     renderer. No registry slot, no identity, no persistence.
  *
- * Same compatible, same driver, same binding; only the position differs. */
+ * Same compatible, same driver, same binding; only the position differs.
+ *
+ * Only those two parents are accepted, and the overlay case names the compositor
+ * kind specifically: it is the one kind that renders a nested effect, so an
+ * effect anywhere else would be silently dark. KP_RGB_EFFECT_PARENT_ASSERT makes
+ * that a build error rather than a dead device -- hence the exact-compat check
+ * rather than "any child of the overlays container". */
 #define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
   DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
 
