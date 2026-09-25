@@ -127,10 +127,10 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  *
  * One on/off bit per overlay ordinal (its position under the
  * keypaw,rgb-overlays container), held in uint16_t words. The central fills it
- * by evaluating each remote kind's `active` once a tick and pushes the words
- * whose bits changed over the split link; a peripheral fills it from that
- * command. A locally determined kind is never in it -- its gate calls `active`
- * directly.
+ * by evaluating every non-`local` overlay's `active` once a tick and pushes the
+ * words whose bits changed over the split link; a peripheral fills it from that
+ * command. A `local` overlay is never in it -- its gate calls `active` directly,
+ * on whichever half renders it.
  *
  * Written on the split's system workqueue (the command handler), read on the RGB
  * matrix's low-priority workqueue (the render tick); each aligned uint16_t
@@ -171,16 +171,25 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word) {
   return word < KP_RGB_OVERLAY_WORDS ? kp_overlay_state[word] : 0;
 }
 
+bool kp_rgb_overlay_covers_all(const struct device *dev) {
+  const struct kp_rgb_overlay_common_config *cfg = dev->config;
+  /* A kind promises this by setting `all-leds` and never blending below full
+   * opacity; the built-in compositor paints every LED at `opacity`, so >= 100
+   * replaces every pixel. */
+  return cfg->all_leds && cfg->opacity >= 100;
+}
+
 bool kp_rgb_overlay_gate(const struct device *dev,
                          const struct kp_rgb_overlay_api *api) {
-  if (api->active == NULL) {
-    return true; /* predicate-less kind renders every tick, as before */
-  }
   const struct kp_rgb_overlay_common_data *data = dev->data;
-  if (data->remote) {
-    return (kp_overlay_state[data->index / 16] >> (data->index % 16)) & 1u;
+
+  if (data->local) {
+    return api->active == NULL || api->active(dev);
   }
-  return api->active(dev);
+  /* Central-evaluated: refresh() filled the bit on the central, the
+   * RGB_OVL_STATE_CMD handler filled it on a peripheral. A condition-less
+   * overlay's bit is always set, so it renders every tick as before. */
+  return (kp_overlay_state[data->index / 16] >> (data->index % 16)) & 1u;
 }
 
 bool kp_rgb_overlay_refresh(void) {
@@ -191,11 +200,12 @@ bool kp_rgb_overlay_refresh(void) {
     if (dev == NULL) {
       continue;
     }
-    /* A remote kind's predicate reads a central-only symbol, so it is
-     * deliberately never called on a peripheral (see the #else branch). */
+    /* A `local` overlay evaluates its condition on each half and is never in
+     * the pushed words. Everything else is evaluated here on the central; the
+     * peripheral fills the same bit from the RGB_OVL_STATE_CMD handler. */
     const struct kp_rgb_overlay_api *api = dev->api;
     const struct kp_rgb_overlay_common_data *data = dev->data;
-    if (!data->remote) {
+    if (data->local) {
       continue;
     }
     if (api->active == NULL || api->active(dev)) {

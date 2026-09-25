@@ -373,9 +373,10 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  *
  * A condition whose source exists only on the split central (keymap layer
  * state) must still compile and link on a peripheral and return false there:
- * do not gate the device out, gate the read. A central-authoritative overlay
- * evaluates the condition on the central and pushes only the resulting bit, so
- * the condition itself is never addressed on the wire.
+ * do not gate the device out, gate the read. A default (central-evaluated)
+ * overlay never calls the condition on a peripheral -- the central evaluates it
+ * and pushes only the resulting bit -- but a `local` overlay does call it
+ * there, so the peripheral path has to exist.
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_condition_api {
@@ -413,10 +414,10 @@ struct kp_rgb_condition_api {
  * by `overlays` on the owning behavior node; individual effects may override
  * that list.
  *
- * The engine repaints on its own timer. A locally determined condition whose
- * source changes on an event (HID indicators) may call zmk_rgb_matrix_flush()
- * from that event's listener to repaint immediately; the engine already flushes
- * the central-authoritative path itself.
+ * The engine repaints on its own timer. A `local` condition whose source changes
+ * on an event may call zmk_rgb_matrix_flush() from that event's listener to
+ * repaint immediately; the engine already flushes the central-evaluated path
+ * itself.
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_overlay_api {
@@ -443,7 +444,7 @@ struct kp_rgb_overlay_common_data {
   size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
   size_t *leds;     /* the overlay's own storage */
   uint16_t index;   /* registry ordinal; state word index / 16, bit index % 16 */
-  bool remote;      /* True when `central-authoritative` */
+  bool local;       /* True when `local`: each half evaluates the condition */
 };
 
 /* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
@@ -537,8 +538,8 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
         cfg->keys, cfg->keys_len, cfg->leds, cfg->leds_len, data->leds,        \
         ARRAY_SIZE(cfg_inst##_targets));                                       \
     data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
-    data->remote = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                             \
-                   DT_PROP(DT_DRV_INST(inst), central_authoritative);          \
+    data->local = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                              \
+                  DT_PROP(DT_DRV_INST(inst), local);                           \
     kp_rgb_overlay_register(dev);                                              \
     return 0;                                                                  \
   }                                                                            \

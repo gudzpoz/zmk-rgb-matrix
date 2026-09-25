@@ -5,10 +5,10 @@ description: |
   Keymap-layer condition: active while a given layer is active.
 
   Layer state exists only where the keymap does, which on a split is the central
-  half. A condition used by a `central-authoritative` overlay is therefore
+  half. A condition used by a default (central-evaluated) overlay is therefore
   evaluated on the central and pushed as a bit; the condition still compiles and
-  links on a peripheral and returns false there, so a shared devicetree
-  expands on both halves.
+  links on a peripheral and returns false there, so a shared devicetree expands
+  on both halves (a `local` overlay would call it there).
 
 compatible: "keypaw,rgb-condition-layer"
 

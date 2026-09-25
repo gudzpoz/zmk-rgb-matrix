@@ -32,16 +32,17 @@ properties:
       Blend strength in percent: 100 replaces the underlying pixels on the
       targeted LEDs, lower values mix the composited result over them.
 
-  central-authoritative:
+  local:
     type: boolean
     description: |
-      The overlay's source of truth exists only on the split central (keymap
-      layer state, the dynamic-macro recorder, ...). The central evaluates the
-      kind's `active` predicate every tick and pushes the result over the split
-      link; on a peripheral the renderer is gated by that pushed state instead
-      of calling the predicate, because the predicate's source does not exist
-      there.
+      Evaluate this overlay's condition independently on each half, so each half
+      shows its own state (a battery bar, per-half activity). The condition must
+      then be truthful on a peripheral too, and the engine calls it there.
 
-      Leave this false for a locally determined kind (caps lock, a battery
-      overlay): every half then evaluates the predicate for itself, which is
-      what makes each half show its own state.
+      Omit it -- the common case -- to evaluate the condition once on the split
+      central and push the resulting on/off bit to the peripherals. On a
+      peripheral the compositor is then gated by that pushed state and never
+      calls the condition.
+
+      A condition evaluated only this way is a *view* of central state; use
+      `local` for state that genuinely differs per half.

@@ -242,7 +242,6 @@ it targets.
         layer_fn1: layer_fn1 {
             compatible = "keypaw,rgb-overlay";
             condition = <&cond_layer1>;
-            central-authoritative;
             keys = <13 14 15 16 17 18 19 20 21 22>;
             fx_fn1 {
                 compatible = "keypaw,rgb-matrix-solid";
@@ -270,13 +269,32 @@ An overlay composites exactly **one** effect, given either way:
 - `effect = <&fx_solid>;` names a **shared registry effect** (a child of `&kprgb`),
   which is live and adjustable.
 
+Use one or the other, never both. `opacity` (default 100) blends the composited
+result over the underlying pixels instead of replacing them; `all-leds;` targets
+every LED on the half instead of a `keys`/`leds` list, and at `opacity` 100 it
+replaces the frame outright, so the engine then skips rendering the active effect
+and any overlay below it, since none of them can be seen.
+
+By default the condition is evaluated **once on the central** and the resulting
+on/off bit is pushed to the peripherals, so a layer or CapsLock overlay needs
+nothing extra. Add **`local;`** only when each half should evaluate the condition
+for itself — that is what makes each half show its *own* state (a battery bar,
+per-half activity):
+
+```dts
+battery: battery {
+    compatible = "keypaw,rgb-overlay";
+    condition = <&cond_battery>;
+    local;                       /* each half reads its own charge */
+    keys = <...>;
+};
+```
+
 `keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes;
 neither belongs under `&kprgb`, whose children are the effect registry. List the
 overlays in paint order on the owning behavior node like `overlays = <&caps
 &layer_fn1>;` in the example above; an effect may override that list with its
-own `overlays`/`no-overlays`. A layer-condition overlay is marked
-`central-authoritative` because layer state exists only on the split central;
-CapsLock is not, so each half shows its own state.
+own `overlays`/`no-overlays`.
 
 ### Controlling the RGB matrix
 

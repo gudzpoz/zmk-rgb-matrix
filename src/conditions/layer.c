@@ -23,10 +23,10 @@
  * layer-state accessors) on "(NOT CONFIG_ZMK_SPLIT) OR
  * CONFIG_ZMK_SPLIT_ROLE_CENTRAL" in zmk/app/CMakeLists.txt, so on a split
  * peripheral this predicate has no source of truth. The node is meant to be
- * consumed by a `central-authoritative` overlay or a central-only trigger, so
- * it is never called on a peripheral -- but it must still compile and link
- * there, because a shared devicetree expands it on both halves. Gate the read,
- * not the device. */
+ * consumed by a default (central-evaluated) overlay or a central-only trigger,
+ * so it is normally never called on a peripheral -- but it must still compile
+ * and link there, because a shared devicetree expands it on both halves and a
+ * `local` overlay would call it. Gate the read, not the device. */
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 #define KP_COND_LAYER_HAS_KEYMAP 1
 #include <zmk/keymap.h>

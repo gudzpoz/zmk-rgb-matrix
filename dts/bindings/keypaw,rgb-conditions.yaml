@@ -9,8 +9,8 @@ description: |
 
   The node itself is not a device and has no driver; it only groups the
   conditions for readability. Unlike an overlay, a condition has no ordinal and
-  no state, so nothing here is addressed on the split link: a
-  central-authoritative overlay evaluates its condition on the central and
-  pushes only the resulting on/off bit.
+  no state, so nothing here is addressed on the split link: a default
+  (central-evaluated) overlay evaluates its condition on the central and pushes
+  only the resulting on/off bit.
 
 compatible: "keypaw,rgb-conditions"
