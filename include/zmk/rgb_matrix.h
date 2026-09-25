@@ -437,6 +437,10 @@ struct kp_rgb_overlay_common_config {
   const uint32_t *leds; /* raw chain indices, or NULL */
   size_t leds_len;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
+  /* Paint every LED rather than the resolved targets. With `opacity` 100 the
+   * kind must fully replace every pixel, which lets the engine skip the active
+   * effect and any overlay below it (see kp_rgb_overlay_covers_all). */
+  bool all_leds;
 };
 
 /* Kind-agnostic mutable part; must be the first member. */
@@ -504,7 +508,8 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
    .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                               \
    .leds = cfg_inst##_leds,                                                    \
    .leds_len = DT_PROP_LEN_OR(node_id, leds, 0),                               \
-   .opacity = DT_PROP_OR(node_id, opacity, 100)}
+   .opacity = DT_PROP_OR(node_id, opacity, 100),                               \
+   .all_leds = DT_PROP(node_id, all_leds)}
 
 /* Declare the device. Overlays are plain devices, never behaviors, so they
  * stay out of the behavior registry and cannot be keymap-bound. The macro also
@@ -528,15 +533,22 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
   BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                \
                                   keypaw_rgb_overlays),                        \
                "overlay must be a child of a keypaw,rgb-overlays node");       \
+  BUILD_ASSERT(!(DT_PROP(DT_DRV_INST(inst), all_leds) &&                       \
+                 (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
+                  DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
+               "`all-leds` replaces `keys`/`leds`; do not combine them");      \
   static size_t                                                                \
       cfg_inst##_targets[KP_RGB_OVERLAY_TARGET_CAP(DT_DRV_INST(inst))];        \
   static int cfg_inst##_init(const struct device *dev) {                       \
     const struct kp_rgb_overlay_common_config *cfg = dev->config;              \
     struct kp_rgb_overlay_common_data *data = dev->data;                       \
     data->leds = cfg_inst##_targets;                                           \
-    data->led_count = kp_rgb_resolve_targets(                                  \
-        cfg->keys, cfg->keys_len, cfg->leds, cfg->leds_len, data->leds,        \
-        ARRAY_SIZE(cfg_inst##_targets));                                       \
+    data->led_count = cfg->all_leds                                            \
+                          ? 0 /* paints every LED; no target list needed */    \
+                          : kp_rgb_resolve_targets(                            \
+                                cfg->keys, cfg->keys_len, cfg->leds,           \
+                                cfg->leds_len, data->leds,                     \
+                                ARRAY_SIZE(cfg_inst##_targets));               \
     data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
     data->local = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                              \
                   DT_PROP(DT_DRV_INST(inst), local);                           \

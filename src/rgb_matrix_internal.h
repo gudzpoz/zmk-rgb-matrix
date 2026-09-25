@@ -82,6 +82,9 @@ bool kp_rgb_behavior_any_on(void);
  * refresh()/dispatch() are central-only; on a peripheral they are no-ops. */
 bool kp_rgb_overlay_gate(const struct device *dev,
                          const struct kp_rgb_overlay_api *api);
+/* True when the overlay is `all-leds` at full opacity, i.e. it fully replaces
+ * every LED. The engine then skips the active effect and lower overlays. */
+bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
 uint16_t kp_rgb_overlay_word_count(void);

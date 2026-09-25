@@ -178,22 +178,39 @@ static void kp_start_timer(void) {
                 K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
 }
 
-static void kp_render_overlays(struct kp_rgb_behavior_context *ctx,
-                               struct kp_rgb_frame *frame,
-                               const struct kp_rgb_effect_api *api) {
-  const struct device *const *overlays =
-      api->overlays != NULL ? api->overlays : ctx->overlays;
-  size_t count =
-      api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
+/* Overlays paint in order over the active effect. An active overlay that fully
+ * covers every LED (`all-leds` at full opacity) hides the effect and every
+ * overlay below it, so their renders are skipped -- this is the point of the
+ * flag. Returns the index of the last such overlay, or SIZE_MAX when none
+ * covers, in which case the caller must render the effect and start at 0. */
+static size_t kp_last_covering_overlay(const struct device *const *overlays,
+                                       size_t count) {
+  size_t last = SIZE_MAX;
   for (size_t i = 0; i < count; i++) {
-    if (overlays[i] == NULL) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL || !kp_rgb_overlay_covers_all(dev)) {
       continue;
     }
-    const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
-    if (!kp_rgb_overlay_gate(overlays[i], ovl)) {
+    if (kp_rgb_overlay_gate(dev, dev->api)) {
+      last = i;
+    }
+  }
+  return last;
+}
+
+static void kp_render_overlays(struct kp_rgb_frame *frame,
+                               const struct device *const *overlays,
+                               size_t count, size_t first) {
+  for (size_t i = first; i < count; i++) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL) {
       continue;
     }
-    ovl->render(overlays[i], frame);
+    const struct kp_rgb_overlay_api *ovl = dev->api;
+    if (!kp_rgb_overlay_gate(dev, ovl)) {
+      continue;
+    }
+    ovl->render(dev, frame);
   }
 }
 
@@ -205,7 +222,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
-  /* Resolve every central-authoritative overlay before rendering */
+  /* Resolve every central-evaluated overlay before rendering */
   bool ovl_changed = kp_rgb_overlay_refresh();
   bool any_on;
   if (!kp_rgb_matrix_lock_patiently()) {
@@ -237,8 +254,17 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       };
       const struct kp_rgb_effect_api *api =
           (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
-      api->render(ctx->state.active_fx, &frame);
-      kp_render_overlays(ctx, &frame, api);
+      const struct device *const *overlays =
+          api->overlays != NULL ? api->overlays : ctx->overlays;
+      size_t overlay_count =
+          api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
+      /* Skip the effect and every overlay below an opaque full-cover overlay. */
+      size_t first = kp_last_covering_overlay(overlays, overlay_count);
+      if (first == SIZE_MAX) {
+        api->render(ctx->state.active_fx, &frame);
+        first = 0;
+      }
+      kp_render_overlays(&frame, overlays, overlay_count, first);
       if (ctx->all_leds) {
         memcpy(pixels, scratch, sizeof(pixels));
       } else {

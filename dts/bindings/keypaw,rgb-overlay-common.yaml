@@ -24,6 +24,18 @@ properties:
       Raw WS2812 chain indices, for LEDs that are not under a key (the
       KP_RGB_NO_KEY entries in `mapping`).
 
+  all-leds:
+    type: boolean
+    description: |
+      Paint every LED on the half, instead of resolving `keys`/`leds`. Do not
+      combine it with either.
+
+      Combined with `opacity` 100 this asserts the overlay *fully replaces*
+      every LED, so the engine skips rendering the active effect and any overlay
+      below (earlier than) this one: they cannot be seen. A kind must honour that
+      promise -- the built-in `keypaw,rgb-overlay` compositor does -- or it will
+      flash a stale frame.
+
   opacity:
     type: int
     required: false
