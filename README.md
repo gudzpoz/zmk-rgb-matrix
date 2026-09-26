@@ -312,6 +312,7 @@ for details: just replace their `&rgb_ug` with your `&kprgb`.
 bindings = <
     &kprgb RGB_TOG &fx_solid &fx_reactive
     &kprgb RGB_BRI &kprgb RGB_BRD
+    &kprgb RGB_RESET
 >;
 ```
 
@@ -319,6 +320,11 @@ Effect state is persisted when `CONFIG_SETTINGS=y`; otherwise the configured
 initial state is used at boot. The matrix turns off on idle by default;
 `CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n` keeps it lit and applies
 `idle-brightness` while idle.
+
+> In addition to ZMK commands, we offer a new `RGB_RESET` command. Because we
+> persist per-effect states, so when you change your devicetree RGB effect
+> definitions, things can go out of sync, when you might want to run this
+> `&kprgb RGB_RESET` command manually.
 
 ## Built-in components
 

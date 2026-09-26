@@ -32,6 +32,7 @@
  * starts clean. &kprgb is BEHAVIOR_LOCALITY_GLOBAL, so one press on the central
  * reaches each half, and each half deletes only its own keys. */
 #define RGB_RESET_CMD 0x102
+#define RGB_RESET RGB_RESET_CMD 0
 
 /* A "mapping" entry is one of two things:
  *
