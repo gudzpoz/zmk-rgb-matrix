@@ -24,6 +24,9 @@
 #define KP_RIPPLE_TRIGGERS 8
 /* Ring half-thickness, relative to the ripple radius, in percent. */
 #define KP_RIPPLE_WIDTH 60
+/* Share of the ripple's life spent fading out at the end, in percent. Without
+ * it the ring is culled at full brightness the moment it reaches the board. */
+#define KP_RIPPLE_FADE_PCT 25
 
 struct kp_eff_ripple_config {
   struct kp_rgb_effect_common_config common;
@@ -85,6 +88,13 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
     }
     int32_t half_band = MAX(radius * KP_RIPPLE_WIDTH / 100, 1);
 
+    /* Ease the ring out over the tail of its life, reaching zero exactly as the
+     * trigger expires, so it dims away instead of being cut off. */
+    uint32_t fade_window = MAX(period * KP_RIPPLE_FADE_PCT / 100u, 1u);
+    uint8_t fade = age + fade_window < period
+                       ? 255u
+                       : (uint8_t)(255u * (period - age) / fade_window);
+
     for (size_t i = 0; i < f->count; i++) {
       int32_t dx = (int32_t)f->coords[i].x - trigger->x;
       int32_t dy = (int32_t)f->coords[i].y - trigger->y;
@@ -102,6 +112,7 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
       }
 
       uint8_t amp = (uint8_t)(255u - (uint32_t)delta * 255u / (uint32_t)half_band);
+      amp = (uint8_t)((uint32_t)amp * fade / 255u);
       struct kp_rgb_hsb hsb = base;
       hsb.h = (uint16_t)((hsb.h + (uint32_t)radius * KP_RGB_HUE_MAX / f->board_length) %
                          KP_RGB_HUE_MAX);
