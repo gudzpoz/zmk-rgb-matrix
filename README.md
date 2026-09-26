@@ -208,9 +208,9 @@ as its children:
 ### Optional overlay configurations
 
 Optionally, you may also specify some LED overlays to indicate CapsLock or the
-current active layer, for example. An overlay is a **compositor**: it renders
-one effect while a **condition** is active, and blends the result over the LEDs
-it targets.
+current active layer, for example. The built-in overlay composites: it renders
+one effect while a condition is active, and blends the result over the LEDs it
+targets.
 
 ```dts
 / {
@@ -270,24 +270,23 @@ it targets.
 };
 ```
 
-An overlay composites exactly **one** effect, given either way:
+The effect that an overlay composites can be given in two ways:
 
-- a nested child (as above) is a **private preset**: it consumes no registry slot,
-  cannot be cycled into, and does not follow the user's brightness/hue changes;
-- `effect = <&fx_solid>;` names a **shared registry effect** (a child of `&kprgb`),
-  which is live and adjustable.
+- a nested child (as above) is "private": it consumes no registry slot, cannot
+  be cycled into, and does not follow the user's brightness/hue changes;
+- `effect = <&fx_solid>;` names a "shared" registry effect (a child of
+  `&kprgb`), which is live and adjustable.
 
-Use one or the other, never both. `opacity` (default 100) blends the composited
-result over the underlying pixels instead of replacing them; `all-leds;` targets
-every LED on the half instead of a `keys`/`leds` list, and at `opacity` 100 it
-replaces the frame outright, so the engine then skips rendering the active effect
-and any overlay below it, since none of them can be seen.
+There are some more attributes: `opacity = <...>;` adjusts how much of the
+output is mixed into the layers below; `all-leds;` is a convenient way to
+express that the effect renders over all LEDs (and, alternatively, you can limit
+the overlay effect to a few LEDs, specified with `keys` or `leds`).
 
-`keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes;
-neither belongs under `&kprgb`, whose children are the effect registry. An
-overlay's **declaration order** under `rgb_overlays` is its paint order: a later
-child composites on top. Every registered overlay is composited by default; an
-effect may narrow that list with its own `overlays`/`no-overlays`.
+`keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes,
+serving as registries. An overlay's declaration order under `rgb_overlays` is
+its paint order: a later child composites on top. Every registered overlay is
+composited by default; a public effect may narrow that list with its own
+`overlays`/`no-overlays`.
 
 > The `cond_batt` latch condition is a bit different from other conditions
 > above: it allows the user to toggle the condition via key bindings. Just bind
@@ -328,34 +327,17 @@ We also aim to provide a good out-of-the-box experience with a number of
 built-in effects, overlays and conditions, which you can just use without having
 to touch any C code.
 
-### Built-in conditions and overlays
-
-| Component | Compatible | Notes |
-|---|---|---|
-| Always-on condition | `keypaw,rgb-condition-always` | / |
-| Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
-| Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
-| Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
-| Overlay toggle | `keypaw,behavior-rgb-overlay-toggle` | Child of `keypaw,rgb-condition-latch`. Node name ≤ 8 chars |
-| Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
-
-The dynamic-macro module also ships `keypaw,rgb-condition-dynamic-macro`. The
-generic `keypaw,rgb-overlay` compositor is the other overlay kind: it renders one
-effect while its condition holds.
-
 ### Built-in effects
 
 These effects are grouped by rendering/state family: static fields (`solid`,
 `static`), global oscillators (`breathe`, `spectrum`), moving spatial fields
 (`rainbow`, `band`), reactive effects (`reactive`, `ripple`), and stochastic
-effects (`rain`, `starlight`, `heatmap`, `digital_rain`). The attributes below
-select behavior within a compatible; they do not imply unimplemented QMK modes.
+effects (`rain`, `starlight`, `heatmap`, `digital_rain`).
 
-Every animation below is rendered from ZMK's `native_sim//zmk_test_mock` "board"
-by the [preview harness](tests/sim). The label in front of each animation, and
-the effect name in its row, link to the [gallery
+Every animation below is rendered from ZMK's `native_sim//zmk_test_mock`
+"board". The links in the table point to the [gallery
 site](https://gudzpoz.github.io/zmk-rgb-matrix/), where each variant sits next
-to the devicetree node that produces it.
+to a copy-and-pastable devicetree snippet that produced it.
 
 <!-- No GIFs inside links: GitHub hides them for people with Accessibility.Motion = Disabled -->
 
@@ -511,16 +493,26 @@ Every effect accepts `color`, `duration`, `overlays`, `no-overlays`, and
 `no-cycle` attributes (though some attributes might be meaningless to some
 effects).
 
-QMK's beacon pair needs no dedicated variant: `RAINBOW_BEACON` is `rainbow`
-with `basis=pinwheel` and `palette=rainbow`, and `DUAL_BEACON` is the same
-with `palette=solid` and `direction=dual`.
+### Built-in conditions and overlays
+
+| Component | Compatible | Notes |
+|---|---|---|
+| Always-on condition | `keypaw,rgb-condition-always` | / |
+| Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
+| Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
+| Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
+| Overlay toggle | `keypaw,behavior-rgb-overlay-toggle` | Child of `keypaw,rgb-condition-latch`. Node name ≤ 8 chars |
+| Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
+
+The generic `keypaw,rgb-overlay` compositor is the other overlay kind: it
+renders one effect while its condition holds.
 
 ## Custom effects and conditions
 
-Third-party modules can add effects and conditions without editing this module;
-overlays and triggers are then configured in devicetree from them. The full
-authoring guide is [`docs/extending.md`](./docs/extending.md); module internals
-are documented in [`docs/development.md`](./docs/development.md).
+Third-party modules can add effects, conditions and overlays without editing
+this module; overlays and triggers are then configured in devicetree from them.
+The full authoring guide is [`docs/extending.md`](./docs/extending.md); module
+internals are documented in [`docs/development.md`](./docs/development.md).
 
 As a quick taste, a third-party effect module includes the public API as
 `<zmk/rgb_matrix.h>`, provides a binding that includes
