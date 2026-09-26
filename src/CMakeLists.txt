@@ -14,7 +14,10 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   # Built-in stuff: zero cost when there's no DTS definitions
   conditions/layer.c
   conditions/always.c
+  conditions/latch.c
   overlays/overlay.c
+  overlays/battery.c
+  behaviors/overlay_toggle.c
 )
 
 # Non-zero cost when there's no DTS definitions:

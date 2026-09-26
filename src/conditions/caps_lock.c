@@ -48,7 +48,7 @@ static bool kp_cond_caps_lock_active(const struct device *dev) {
 }
 
 #define KP_COND_CAPS_LOCK_DEFINE(inst)                                         \
-  KP_RGB_CONDITION_DEFINE(inst, kp_cond_caps_lock_active, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, kp_cond_caps_lock_active, NULL, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_COND_CAPS_LOCK_DEFINE)
 

@@ -90,6 +90,20 @@
         fixture_always: fixture_always {
             compatible = "keypaw,rgb-condition-always";
         };
+
+        /* A stateful latch with its nested toggle behavior. Nothing presses
+         * ovl_tog here (the harness has no behavior-injection option), so the
+         * latch stays off and no preview pixel changes; this exercises the
+         * driver, binding, Kconfig and DT path at compile/link time. The
+         * behavior name must be <=8 characters. */
+        fixture_latch: fixture_latch {
+            compatible = "keypaw,rgb-condition-latch";
+
+            ovl_tog: ovl_tog {
+                compatible = "keypaw,behavior-rgb-overlay-toggle";
+                #binding-cells = <0>;
+            };
+        };
     };
 
     /* The generic compositor overlay. It targets no LEDs, so it exercises the
@@ -110,6 +124,30 @@
                 duration = <500>;
             };
         };
+
+        /* The battery gauge, `all-leds` shape. `local;` is present only to
+         * exercise the per-half gate path at compile time -- the charge is read
+         * per half in the renderer regardless. The latch gate stays off in the
+         * fixture, so it never covers a preview. */
+        fixture_battery: fixture_battery {
+            compatible = "keypaw,rgb-overlay-battery";
+            condition = <&fixture_latch>;
+            all-leds;
+            local;
+            color = <0x00FF00>;
+        };
+
+        /* The battery gauge, subset shape: a few raw LEDs at non-100 opacity,
+         * exercising the keys/leds ordering and the blend path. Gated by the
+         * (off) latch too, so it changes no preview. */
+        fixture_batt_sub: fixture_batt_sub {
+            compatible = "keypaw,rgb-overlay-battery";
+            condition = <&fixture_latch>;
+            leds = <0 1 2 3>;
+            opacity = <50>;
+            reverse;
+            color = <0x102030>;
+        };
     };
 
     behaviors {
@@ -120,8 +158,10 @@
             initial-effect = <0>;
             initial-on;
 
-            /* Listed so the compositor fixture is actually rendered each tick. */
-            overlays = <&fixture_overlay>;
+            /* Listed so the compositor fixture is actually rendered each tick.
+             * The battery gauges are listed too, so both overlay shapes are
+             * compiled and gated (they stay dark while the latch is off). */
+            overlays = <&fixture_overlay &fixture_battery &fixture_batt_sub>;
 
             /* The real shield caps brightness to limit current draw, which
              * means nothing while recording. Previews read much better lit. */

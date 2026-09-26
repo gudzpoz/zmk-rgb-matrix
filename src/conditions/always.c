@@ -24,7 +24,7 @@ static bool kp_cond_always_active(const struct device *dev) {
 }
 
 #define KP_COND_ALWAYS_DEFINE(inst)                                            \
-  KP_RGB_CONDITION_DEFINE(inst, kp_cond_always_active, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, kp_cond_always_active, NULL, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_COND_ALWAYS_DEFINE)
 

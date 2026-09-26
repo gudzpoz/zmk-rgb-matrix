@@ -5,6 +5,14 @@
 # module or in a third-party one) include this fragment and add only the
 # properties specific to the state they show, the same way effects include
 # keypaw,rgb-matrix-effect-common.yaml.
+#
+# `keys`, `leds`, `all-leds` and `opacity` are the paint contract -- which LEDs
+# the overlay targets and how it blends onto them. `local` is the one property
+# here that is not about painting: it says where the overlay's gate is
+# evaluated. It stays on the overlay rather than on the condition because the
+# split push is per-overlay -- a condition has no ordinal and no state of its
+# own, and one condition is shared by overlays and by the central-only trigger
+# table, which has no notion of locality.
 
 properties:
   keys:
@@ -47,14 +55,19 @@ properties:
   local:
     type: boolean
     description: |
-      Evaluate this overlay's condition independently on each half, so each half
-      shows its own state (a battery bar, per-half activity). The condition must
-      then be truthful on a peripheral too, and the engine calls it there.
+      Evaluate this overlay's gate -- its `condition`, or a self-sampling
+      `active` -- independently on each half, instead of evaluating it once on
+      the split central and pushing only the resulting on/off bit. It chooses
+      *where the gate runs*, not what is painted: both halves run the renderer,
+      so a per-half source read inside it (a battery gauge's own charge) is
+      per-half with or without this flag.
 
-      Omit it -- the common case -- to evaluate the condition once on the split
-      central and push the resulting on/off bit to the peripherals. On a
-      peripheral the compositor is then gated by that pushed state and never
-      calls the condition.
+      Omit it -- the common case -- to evaluate the condition on the central and
+      push the bit to the peripherals; on a peripheral the compositor is then
+      gated by that pushed state and never calls the condition.
 
-      A condition evaluated only this way is a *view* of central state; use
-      `local` for state that genuinely differs per half.
+      Use it only for a condition whose value genuinely differs per half and is
+      not kept in step by the split link. None of the built-in conditions
+      qualifies: `layer` is central-only, `caps-lock` is a global host source,
+      and `latch` is synchronised by its GLOBAL toggle. Getting this wrong is
+      silent, so leave it off unless you can name the per-half source.

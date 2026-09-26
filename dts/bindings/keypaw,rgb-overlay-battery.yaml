@@ -1,0 +1,44 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Battery-gauge overlay: paints a positional level bar from this half's battery
+  state of charge, blending the lit part over its target LEDs and the rest
+  toward black, so the bar keeps a defined empty track.
+
+  It is an overlay kind, not an effect: it is gated by `condition` (normally a
+  keypaw,rgb-condition-latch). Target `all-leds;` for the whole half -- at
+  `opacity` 100 that replaces every pixel, so the kind claims the engine's
+  cover skip and the active effect and every overlay below it are hidden. Or
+  target a subset with `keys`/`leds` (a row, a column); such a gauge keeps the
+  effect visible on the LEDs it does not touch. The renderer paints nothing if
+  the overlay targets no LED, so that is a build error.
+
+  Each half reads its own charge in the renderer, which runs on that half, so it
+  shows its own charge without `local;` -- that flag only moves where the
+  `condition` is evaluated.
+
+compatible: "keypaw,rgb-overlay-battery"
+
+include: ["keypaw,rgb-overlay-common.yaml"]
+
+properties:
+  condition:
+    type: phandle
+    required: false
+    description: |
+      Predicate that gates the gauge; omit for always active. Usually a
+      keypaw,rgb-condition-latch so a key can toggle it.
+
+  color:
+    type: int
+    required: false
+    default: 0x00FF00
+    description: 24-bit 0xRRGGBB colour of the lit portion of the bar.
+
+  reverse:
+    type: boolean
+    description: |
+      Fill from the opposite end of the derived reading order. The order sorts
+      along the target LEDs' longer axis first (left-to-right for a wide half or
+      a wide row), then along the other axis.

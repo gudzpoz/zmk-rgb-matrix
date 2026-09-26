@@ -1,0 +1,16 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Manually toggled condition: active while its stored bool is set.
+
+  This is the one stateful condition kind. The bool lives in the driver's
+  dev->data and is flipped by a single keypaw,behavior-rgb-overlay-toggle child
+  of this node. The child reaches its parent with DT_PARENT; this node declares
+  no phandle to the child, which would be a devicetree cycle.
+
+  The state is volatile and per-half: it is never persisted, and both halves
+  start off after a reboot. Use it as an overlay's `condition` (directly, or
+  with `local;` so each half gates on its own latch).
+
+compatible: "keypaw,rgb-condition-latch"

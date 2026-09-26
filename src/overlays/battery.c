@@ -1,0 +1,172 @@
+/*
+ * Copyright (c) 2026 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Battery-gauge overlay kind: a positional level bar. While its condition is
+ * active it sorts its target LEDs into a reading order and lights the first
+ * `soc` percent of them, blending the rest toward black so the bar keeps a
+ * defined empty track.
+ *
+ * It is a custom overlay kind rather than a composited effect: a gauge is a
+ * view, not an animation, and it wants to replace its pixels outright.
+ * `all-leds;` targets every LED on the half, which at `opacity` 100 lets the
+ * kind claim the engine's cover skip, hiding the active effect and everything
+ * below it; `keys`/`leds` instead target a subset (a row, a column, ...) and
+ * forgo the skip -- the effect stays visible on the LEDs the bar does not
+ * touch, and is only hidden on the bar's own LEDs.
+ *
+ * The charge is read here, per half, so each half shows its own battery
+ * regardless of `local`; that flag only moves where the `condition` is
+ * evaluated.
+ */
+
+#define DT_DRV_COMPAT keypaw_rgb_overlay_battery
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#include <zephyr/device.h>
+#include <zephyr/sys/util.h>
+
+#include <zmk/battery.h>
+#include <zmk/rgb_matrix.h>
+
+#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
+
+struct kp_ovl_battery_config {
+  struct kp_rgb_overlay_common_config common; /* must be first */
+  const struct device *condition;             /* NULL = always active */
+  uint32_t color;                             /* 0xRRGGBB */
+  bool reverse;
+};
+struct kp_ovl_battery_data {
+  struct kp_rgb_overlay_common_data common; /* must be first */
+};
+
+static bool kp_ovl_battery_active(const struct device *dev) {
+  const struct kp_ovl_battery_config *cfg = dev->config;
+
+  if (cfg->condition == NULL) {
+    return true;
+  }
+  const struct kp_rgb_condition_api *cond =
+      (const struct kp_rgb_condition_api *)cfg->condition->api;
+  return cond->active(cfg->condition);
+}
+
+/* Reading order: find the target set's extents, sort along the longer axis
+ * first, then along the other; `reverse` flips the whole order so the bar can
+ * fill from either end. `idx[0..count)` holds the LED indices to order (filled
+ * by the caller) and is sorted in place; the extents come from those LEDs, not
+ * the whole board, so a row or column sorts along its own length. A pure
+ * function of the frame geometry. */
+static bool kp_ovl_battery_before(const struct kp_rgb_frame *frame, size_t a,
+                                  size_t b, bool x_primary, bool reverse) {
+  const struct kp_rgb_coord *ca = &frame->coords[a];
+  const struct kp_rgb_coord *cb = &frame->coords[b];
+
+  if (x_primary) {
+    if (ca->x != cb->x) {
+      return reverse ? ca->x > cb->x : ca->x < cb->x;
+    }
+    return reverse ? ca->y > cb->y : ca->y < cb->y;
+  }
+  if (ca->y != cb->y) {
+    return reverse ? ca->y > cb->y : ca->y < cb->y;
+  }
+  return reverse ? ca->x > cb->x : ca->x < cb->x;
+}
+
+static void kp_ovl_battery_order(const struct kp_rgb_frame *frame, size_t *idx,
+                                 size_t count, bool reverse) {
+  const struct kp_rgb_coord *coords = frame->coords;
+
+  uint16_t min_x = coords[idx[0]].x, max_x = coords[idx[0]].x;
+  uint16_t min_y = coords[idx[0]].y, max_y = coords[idx[0]].y;
+  for (size_t i = 1; i < count; i++) {
+    const struct kp_rgb_coord *c = &coords[idx[i]];
+    min_x = MIN(min_x, c->x);
+    max_x = MAX(max_x, c->x);
+    min_y = MIN(min_y, c->y);
+    max_y = MAX(max_y, c->y);
+  }
+  const bool x_primary = (uint16_t)(max_x - min_x) >= (uint16_t)(max_y - min_y);
+
+  /* Insertion sort: the count is a keyboard's LED count, so O(n^2) is fine and
+   * it keeps the ordering a single, dependency-free pass. */
+  for (size_t i = 1; i < count; i++) {
+    const size_t value = idx[i];
+    size_t j = i;
+    while (j > 0 && kp_ovl_battery_before(frame, value, idx[j - 1], x_primary,
+                                          reverse)) {
+      idx[j] = idx[j - 1];
+      j--;
+    }
+    idx[j] = value;
+  }
+}
+
+/* Overlay renderers run one at a time under the matrix lock, so one shared
+ * scratch order (like the compositor's shared layer buffer) is enough. */
+static size_t kp_ovl_battery_order_buf[KP_LED_COUNT];
+
+static void kp_ovl_battery_render(const struct device *dev,
+                                  struct kp_rgb_frame *frame) {
+  const struct kp_ovl_battery_config *cfg = dev->config;
+  const struct kp_ovl_battery_data *data = dev->data;
+  const bool all = cfg->common.all_leds;
+
+  /* `all-leds` orders the whole frame; otherwise order just the resolved
+   * targets (a row, a column, ...). An empty target list stays dark. */
+  const size_t count = all ? frame->count : data->common.led_count;
+  if (count == 0) {
+    return;
+  }
+  size_t *order = kp_ovl_battery_order_buf;
+  for (size_t i = 0; i < count; i++) {
+    order[i] = all ? i : data->common.leds[i];
+  }
+  kp_ovl_battery_order(frame, order, count, cfg->reverse);
+
+  uint8_t soc = 0;
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+  soc = zmk_battery_state_of_charge();
+#endif
+  soc = MIN(soc, 100);
+  const size_t lit = (count * soc + 50u) / 100u; /* rounded */
+
+  const struct led_rgb on =
+      kp_rgb_rgb_scale(kp_hex_to_rgb(cfg->color), kp_rgb_brightness_pct(frame));
+  const struct led_rgb off = {.r = 0, .g = 0, .b = 0};
+
+  /* Blend the lit bar over the targets and the empty track toward black. At
+   * `opacity` 100 this replaces them -- which is what makes an `all-leds`
+   * gauge's cover skip honest -- and below 100 it layers over the effect. */
+  for (size_t i = 0; i < count; i++) {
+    frame->pixels[order[i]] = kp_rgb_rgb_mix(
+        frame->pixels[order[i]], i < lit ? on : off, cfg->common.opacity);
+  }
+}
+
+#define KP_OVL_BATTERY_DEFINE(inst)                                            \
+  BUILD_ASSERT(DT_NODE_HAS_PROP(DT_DRV_INST(inst), all_leds) ||                \
+                   DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||           \
+                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0,             \
+               "keypaw,rgb-overlay-battery targets nothing: declare "          \
+               "`all-leds;`, `keys` or `leds`");                               \
+  KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_ovl_battery_##inst);                   \
+  static const struct kp_ovl_battery_config kp_ovl_battery_##inst##_cfg = {    \
+      .common =                                                                \
+          KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_battery_##inst),     \
+      .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
+      .color = DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00),                 \
+      .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
+  };                                                                           \
+  static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_active, kp_ovl_battery_render,    \
+                        NULL, kp_ovl_battery_##inst)
+
+DT_INST_FOREACH_STATUS_OKAY(KP_OVL_BATTERY_DEFINE)
+
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */

@@ -387,10 +387,10 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * Conditions
  *
  * A condition is a reusable predicate device consumed by overlays and
- * triggers. It carries no registry identity and no state of its own: a kind
- * samples whatever source it watches and reports whether it is active. Sharing
- * the predicate is the point -- one layer/caps-lock condition serves both an
- * overlay and a trigger instead of each reimplementing it.
+ * triggers. It carries no registry identity: a kind samples whatever source it
+ * watches and reports whether it is active. Sharing the predicate is the point
+ * -- one layer/caps-lock condition serves both an overlay and a trigger instead
+ * of each reimplementing it.
  *
  * A condition whose source exists only on the split central (keymap layer
  * state) must still compile and link on a peripheral and return false there:
@@ -404,16 +404,16 @@ struct kp_rgb_condition_api {
   bool (*active)(const struct device *dev);
 };
 
-/* Declare the device. A condition carries no mutable state and many kinds need
- * no config at all, so `cfg_expr` is a full expression (`&my_cfg` or NULL)
- * rather than a `cfg_inst` token. The api symbol is derived from `inst`; each
- * kind is its own translation unit, so these static names cannot collide. */
-#define KP_RGB_CONDITION_DEFINE(inst, active_fn, cfg_expr)                     \
+/* Declare the device. Many kinds need no config and no state, so `cfg_expr` and
+ * `data_expr` are full expressions (`&my_cfg` / `&my_data`, or NULL) rather than
+ * a `cfg_inst` token: pass NULL for both for a stateless condition, or a
+ * pointer to static data that active() may read. */
+#define KP_RGB_CONDITION_DEFINE(inst, active_fn, cfg_expr, data_expr)          \
   static const struct kp_rgb_condition_api kp_rgb_condition_##inst##_api = {   \
       .active = active_fn,                                                     \
   };                                                                           \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL, cfg_expr, POST_KERNEL, \
-                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                        \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, data_expr, cfg_expr,         \
+                   POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,           \
                    &kp_rgb_condition_##inst##_api)
 
 /* Resolve a node's `condition` phandle, or NULL when it has none (meaning

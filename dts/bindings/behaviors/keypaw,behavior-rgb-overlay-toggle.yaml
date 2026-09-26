@@ -1,0 +1,22 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Zero-parameter toggle for the latch condition it is nested under.
+
+  Declare one as the single child of a keypaw,rgb-condition-latch and bind it in
+  the keymap. Pressing it sets that latch to the absolute value resolved on the
+  split central, then repaints, so the overlay gated by the latch appears or
+  disappears.
+
+  It is BEHAVIOR_LOCALITY_GLOBAL on purpose: the absolute state reaches both
+  halves, so a `local;` overlay that evaluates its own latch still lights up on
+  a keypress, and a peripheral that rebooted converges on the next press.
+
+  The node name must be <= 8 characters: the split link serialises the behavior
+  name into a 9-byte field (ZMK_SPLIT_RUN_BEHAVIOR_DEV_LEN). A longer name is a
+  build error.
+
+compatible: "keypaw,behavior-rgb-overlay-toggle"
+
+include: [zero_param.yaml]

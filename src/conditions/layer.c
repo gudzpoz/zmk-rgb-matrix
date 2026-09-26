@@ -63,7 +63,7 @@ static bool kp_cond_layer_active(const struct device *dev) {
       .only_topmost = DT_PROP(DT_DRV_INST(inst), only_topmost),                \
   };                                                                           \
   KP_RGB_CONDITION_DEFINE(inst, kp_cond_layer_active,                          \
-                          &kp_cond_layer_##inst##_cfg)
+                          &kp_cond_layer_##inst##_cfg, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_COND_LAYER_DEFINE)
 

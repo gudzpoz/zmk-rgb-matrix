@@ -296,9 +296,11 @@ list works unchanged on both halves for split keyboards.
 
 ## Writing a condition
 
-A condition is a reusable predicate consumed by overlays (and, later, triggers).
-It carries no registry identity and no state of its own, so it passes no data
-pointer and needs no init function.
+A condition is a reusable predicate consumed by overlays and triggers. It carries
+no registry identity. Most conditions are stateless and pass `NULL` for both the
+config and the data slot, but a kind may keep state in `dev->data` (the latch
+kind does; see "Stateful conditions" below). No init function is needed -- a
+static initializer is enough.
 
 ### 1. Binding
 
@@ -328,17 +330,18 @@ static bool kp_cond_mything_active(const struct device *dev) {
 }
 
 #define KP_COND_MYTHING_DEFINE(inst)                                          \
-  KP_RGB_CONDITION_DEFINE(inst, kp_cond_mything_active, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, kp_cond_mything_active, NULL, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_COND_MYTHING_DEFINE)
 
 #endif
 ```
 
-`KP_RGB_CONDITION_DEFINE(inst, active_fn, cfg_expr)` takes the config as a full
-expression: pass `&my_cfg` when the predicate needs devicetree parameters (see
-[`layer.c`](../src/conditions/layer.c)) or `NULL` when it does not (see
-[`always.c`](../src/conditions/always.c)).
+`KP_RGB_CONDITION_DEFINE(inst, active_fn, cfg_expr, data_expr)` takes both the
+config and the data as full expressions: pass `&my_cfg` when the predicate needs
+devicetree parameters (see [`layer.c`](../src/conditions/layer.c)) and `&my_data`
+when it keeps state (see [`latch.c`](../src/conditions/latch.c)), or `NULL` for
+either when it does not (see [`always.c`](../src/conditions/always.c)).
 
 ### Where does the state live?
 
@@ -351,11 +354,15 @@ for the central half and peripherals.
   a source that is inherently central-only (keymap layer states) and a global
   host source (CapsLock).
 
-- **Per-half (`local;`).** When the source genuinely differs per half — a
-  battery bar, per-half activity — add `local;` to the overlay devicetree
-  definition. Each half then evaluates the condition for itself, so each half
-  shows its own state. The condition must be truthful on a peripheral, which is
-  what the `local` flag promises.
+- **Per-half (`local;`).** `local;` moves the condition's evaluation onto each
+  half -- each evaluates for itself and nothing is pushed. Add it only when the
+  condition's value genuinely differs per half and is not kept in step by the
+  split link; no built-in condition qualifies (`layer` is central-only,
+  `caps-lock` is a global host source, `latch` is synchronised by its GLOBAL
+  toggle). It decides *where the gate runs*, not what is painted: rendering
+  already happens per half, so a per-half source read in a renderer (a battery
+  gauge's charge) needs no flag. The condition must be truthful on a peripheral,
+  which is what the `local` flag promises.
 
 A condition that reads a central-only symbol must still **compile and link on
 the peripheral**, even when only default (central-evaluated) overlays use it,
@@ -566,10 +573,16 @@ initializer and `kp_ovl_myfilter_active` (not `NULL`) passed to
 
 Two contracts it must respect:
 
-- **Never claim `all-leds` at `opacity` 100.** That combination suggests to the
-  engine that the overlay covers and are independent of every rendered pixel,
-  when the engine will skip everything below it. If the overlay needs the
-  incoming `frame->pixels` data, keep the opacity non-`100`.
+- **Claim `all-leds` at `opacity` 100 only if you paint every pixel.** That
+  combination tells the engine the overlay covers every LED, so it skips the
+  active effect and every overlay below it. If your `render()` replaces every
+  targeted pixel -- like the built-in
+  [`battery.c`](../src/overlays/battery.c), which paints the lit bar and a black
+  track behind it -- claim it and take the skip. A kind may instead target a
+  subset (`keys`/`leds`), as the battery gauge also does: it then forgoes the
+  skip (the effect still shows on the LEDs it does not touch) and blends
+  `opacity` over the effect. If your render reads the incoming `frame->pixels`
+  (a *filter* over the composited result), keep the opacity non-`100`.
 - **Be cheap and touch no state.** `render()` runs every tick under the matrix
   lock on the low-priority workqueue, and its output must be a pure function of
   the frame. Changing RGB state (the active effect, power, colour) is a
@@ -603,6 +616,8 @@ Before shipping a third-party extension, confirm:
 - [ ] Custom overlay kinds should assert about its `opacity` being non-`100`
       unless its `render()` truly replaces every pixel, independent of previous
       values.
+- [ ] A `GLOBAL` behavior's node name is 8 characters or fewer (the split link
+      serialises it into a 9-byte field).
 
 And if you are also drafting devicetree definitions:
 

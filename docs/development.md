@@ -16,9 +16,12 @@ src/behavior_rgb_matrix.c         &kprgb command dispatch, effect registry
 src/rgb_settings.c                persistence (CONFIG_SETTINGS)
 src/rgb_split_sync.c              central-only connect-time state push
 src/rgb_triggers.c                central-only trigger evaluator
-src/overlays/overlay.c            the generic compositor (the only overlay kind)
+src/overlays/overlay.c            the generic compositor
+src/overlays/battery.c            the battery-gauge level bar
 src/conditions/, src/triggers/    built-in conditions and the trigger kind
+src/behaviors/overlay_toggle.c    nested toggle for a latch condition
 src/effects/                      built-in effects
+src/conditions/rgb_latch.h        state shared by the latch + its toggle
 src/rgb_matrix_internal.h         private; never included by third-party code
 dts/bindings/                     one binding per compatible
 tests/sim/                        native_sim preview harness
@@ -125,14 +128,25 @@ effect.
 
 ### Conditions are the shared primitive
 
-A condition is a stateless predicate (`kp_rgb_condition_api`) consumed by both an
-overlay and a trigger, so a layer or CapsLock predicate is written once. The
+A condition is a predicate (`kp_rgb_condition_api`) consumed by both an overlay
+and a trigger, so a layer or CapsLock predicate is written once. The
 compositor's `active()` delegates to its node's `condition` phandle and the
-trigger's does the same; `NULL` means unconditionally active. Conditions carry no
-ordinal and no split state of their own — the central-evaluated **overlay** pushes
-a bit per overlay, not per condition. Note the split of authority: whether the
-condition is evaluated once on the central or per half is the consuming overlay's
-`local` flag to declare, because the push bit belongs to the overlay.
+trigger's does the same; `NULL` means unconditionally active. Conditions carry
+no ordinal and no split state of their own — the central-evaluated **overlay**
+pushes a bit per overlay, not per condition. Note the split of authority:
+whether the condition is evaluated once on the central or per half is the
+consuming overlay's `local` flag to declare, because the push bit belongs to the
+overlay.
+
+Most conditions are stateless, but the API does not require it. The one built-in
+exception is `keypaw,rgb-condition-latch`: it keeps a bool in `dev->data` (the
+fourth argument of `KP_RGB_CONDITION_DEFINE`) that a
+`keypaw,behavior-rgb-overlay-toggle` nested under it flips. That state is
+deliberately volatile and per-half — never persisted, and not in the overlay
+state words. It needs no engine support: the engine already samples `active()`
+every tick, so a default overlay pushes the resulting bit and a `local` overlay
+reads its own latch. The toggle is `GLOBAL` and resolves "flip" to an absolute
+value on the central, so both halves agree even after a peripheral reboots.
 
 ### The compositor
 
@@ -180,10 +194,10 @@ Two contracts make this sound, so a kind must honour both:
 - `opacity >= 100` really means "replace every targeted pixel", and
 - `all-leds` really means every LED on the half, not a subset.
 
-The built-in compositor does. A kind that lies about either would let a stale
-frame show through. This is a per-render skip only: the effect's `on_event` still
-runs, and its animation clock does not advance while it is hidden, so it resumes
-where it left off when the cover goes away.
+A kind that lies about either would let a stale frame show through. This is a
+per-render skip only: the effect's `on_event` still runs, and its animation
+clock does not advance while it is hidden, so it resumes where it left off when
+the cover goes away.
 
 An overlay composites exactly **one** effect, and how it is given decides its
 lifetime:
@@ -262,8 +276,12 @@ common case:
   the dynamic-macro recorder) and a global host source (CapsLock) alike, so the
   DTS needs no flag for any of them.
 - **Per-half (`local;`).** The overlay sets `local;` and each half calls
-  `active()` for itself, so each half shows its own state (a battery bar,
-  per-half activity). Such an overlay is never in the pushed words.
+  `active()` for itself; such an overlay is never in the pushed words. It
+  changes *where the gate runs*, not what is rendered — both halves run the
+  renderer either way, so only a condition whose value genuinely differs per
+  half and is not kept in step by the split link needs it, and no built-in
+  condition does (`layer` is central-only, `caps-lock` is a global host source,
+  `latch` is synchronised by its GLOBAL toggle).
 
 The default is deliberately the common case: getting it wrong the other way (a
 central source left to the peripherals) fails silently, whereas a global source

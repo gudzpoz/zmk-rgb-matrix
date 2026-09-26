@@ -1,7 +1,7 @@
 # ZMK RGB Matrix
 
-![GitHub Actions Workflow
-Status](https://img.shields.io/github/actions/workflow/status/gudzpoz/zmk-rgb-matrix/previews.yml?label=previews)
+[![GitHub Actions Workflow
+Status](https://img.shields.io/github/actions/workflow/status/gudzpoz/zmk-rgb-matrix/previews.yml?label=previews)](https://gudzpoz.github.io/zmk-rgb-matrix/)
 
 <table><tbody>
 <tr>
@@ -223,6 +223,14 @@ it targets.
             compatible = "keypaw,rgb-condition-layer";
             layer = <1>;
         };
+        // When the user toggles &tg_batt with key bindings
+        cond_batt: cond_batt {
+            compatible = "keypaw,rgb-condition-latch";
+            tg_batt: tg_batt {
+                compatible = "keypaw,behavior-rgb-overlay-toggle";
+                #binding-cells = <0>;
+            };
+        };
     };
 
     rgb_overlays: rgb_overlays {
@@ -249,13 +257,20 @@ it targets.
                 color = <0xFF8000>;
             };
         };
+        // A built-in battery indicator overlay
+        batt: batt {
+            compatible = "keypaw,rgb-overlay-battery";
+            condition = <&cond_batt>;
+            all-leds;
+            color = <0x00FF00>;
+        };
     };
 
     behaviors {
         kprgb: kprgb {
             compatible = "keypaw,behavior-rgb-matrix";
             #binding-cells = <2>;
-            overlays = <&caps &layer_fn1>;
+            overlays = <&caps &layer_fn1 &batt>;
             // ...
         };
     };
@@ -275,26 +290,15 @@ every LED on the half instead of a `keys`/`leds` list, and at `opacity` 100 it
 replaces the frame outright, so the engine then skips rendering the active effect
 and any overlay below it, since none of them can be seen.
 
-By default the condition is evaluated **once on the central** and the resulting
-on/off bit is pushed to the peripherals, so a layer or CapsLock overlay needs
-nothing extra. Add **`local;`** only when each half should evaluate the condition
-for itself — that is what makes each half show its *own* state (a battery bar,
-per-half activity):
-
-```dts
-battery: battery {
-    compatible = "keypaw,rgb-overlay";
-    condition = <&cond_battery>;
-    local;                       /* each half reads its own charge */
-    keys = <...>;
-};
-```
-
 `keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes;
 neither belongs under `&kprgb`, whose children are the effect registry. List the
 overlays in paint order on the owning behavior node like `overlays = <&caps
 &layer_fn1>;` in the example above; an effect may override that list with its
 own `overlays`/`no-overlays`.
+
+> The `cond_batt` latch condition is a bit different from other conditions
+> above: it allows the user to toggle the condition via key bindings. Just bind
+> `&tg_batt` anywhere in the keymap.
 
 ### Controlling the RGB matrix
 
@@ -324,6 +328,21 @@ module. Overlays and triggers are configured entirely in devicetree from those.
 We also aim to provide a good out-of-the-box experience with a number of
 built-in effects, overlays and conditions, which you can just use without having
 to touch any C code.
+
+### Built-in conditions and overlays
+
+| Component | Compatible | Notes |
+|---|---|---|
+| Always-on condition | `keypaw,rgb-condition-always` | / |
+| Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
+| Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
+| Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
+| Overlay toggle | `keypaw,behavior-rgb-overlay-toggle` | Child of `keypaw,rgb-condition-latch`. Node name ≤ 8 chars |
+| Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
+
+The dynamic-macro module also ships `keypaw,rgb-condition-dynamic-macro`. The
+generic `keypaw,rgb-overlay` compositor is the other overlay kind: it renders one
+effect while its condition holds.
 
 ### Built-in effects
 
