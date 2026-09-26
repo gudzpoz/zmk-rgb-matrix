@@ -106,11 +106,8 @@
         };
     };
 
-    /* The generic compositor overlay. It targets no LEDs, so it exercises the
-     * render path (and its condition/effect resolution) without touching any
-     * preview pixel. Its effect is a `reactive` one on purpose: that is the
-     * only built-in that consumes `on_event`, so it exercises the engine's
-     * event fan-out to composited effects on each keypress. */
+    /* Container of all overlays.
+     * Overlays are tested and rendered in declaration order. */
     rgb_overlays: rgb_overlays {
         compatible = "keypaw,rgb-overlays";
 
@@ -157,11 +154,6 @@
 
             initial-effect = <0>;
             initial-on;
-
-            /* Listed so the compositor fixture is actually rendered each tick.
-             * The battery gauges are listed too, so both overlay shapes are
-             * compiled and gated (they stay dark while the latch is off). */
-            overlays = <&fixture_overlay &fixture_battery &fixture_batt_sub>;
 
             /* The real shield caps brightness to limit current draw, which
              * means nothing while recording. Previews read much better lit. */
@@ -553,6 +545,7 @@
                 compatible = "keypaw,rgb-matrix-heatmap";
                 #binding-cells = <0>;
                 display-name = "Heatmap";
+                spread = <300>;
             };
 
             fx_heatmap_slim: fx_heatmap_slim {

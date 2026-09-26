@@ -45,8 +45,6 @@ struct kp_rgb_behavior_context {
   const uint32_t *leds;
   size_t leds_len;
   bool all_leds;
-  const struct device *const *overlays;
-  size_t overlays_len;
   bool zone_valid;
   /* Boot defaults, re-applied by a settings reset. Raw devicetree values;
    * kp_rgb_apply_defaults() clamps them. */
@@ -87,6 +85,10 @@ bool kp_rgb_overlay_gate(const struct device *dev,
 bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
+/* Every registered overlay, in container order. The default paint list for an
+ * effect with no `overlays`/`no-overlays` override. */
+const struct device *const *kp_rgb_overlay_list(void);
+size_t kp_rgb_overlay_count(void);
 uint16_t kp_rgb_overlay_word_count(void);
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);

@@ -35,14 +35,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_NO_CYCLE_ONE(node_id) DT_PROP(node_id, no_cycle),
 
-#define KP_RGB_BEHAVIOR_OVERLAYS(inst)                                         \
-  COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(DT_DRV_INST(inst), overlays),                           \
-      (static const struct device *const kp_rgb_overlays_##inst[] =            \
-           {LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), overlays),                  \
-                    KP_RGB_OVERLAYS_AT_IDX, (, ), DT_DRV_INST(inst))};),       \
-      ())
-
 #define KP_RGB_BEHAVIOR_LEDS(inst)                                             \
   static const uint32_t kp_rgb_leds_##inst[] =                                 \
       COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
@@ -66,7 +58,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       "the larger effect registry");                                           \
   BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT8_MAX,                   \
                "effect count must fit the blob's count byte");                 \
-  KP_RGB_BEHAVIOR_OVERLAYS(inst)                                               \
   KP_RGB_BEHAVIOR_LEDS(inst);                                                  \
   KP_RGB_BEHAVIOR_DEFAULTS(inst)                                               \
   static const struct device *const kp_rgb_effects_##inst[KP_RGB_MAX_EFFECTS(  \
@@ -81,9 +72,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       .leds = kp_rgb_leds_##inst,                                              \
       .leds_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0),                  \
       .all_leds = !DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                  \
-      .overlays = COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), overlays),   \
-                              (kp_rgb_overlays_##inst), (kp_rgb_no_overlays)), \
-      .overlays_len = DT_PROP_LEN_OR(DT_DRV_INST(inst), overlays, 0),          \
       .zone_valid = true,                                                      \
       .initial_on = DT_PROP_OR(DT_DRV_INST(inst), initial_on, 1),              \
       .initial_brightness =                                                    \

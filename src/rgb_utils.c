@@ -157,6 +157,14 @@ void kp_rgb_overlay_register(const struct device *dev) {
   kp_overlay_registry[data->index] = dev;
 }
 
+/* Every registered overlay, in container order: the default paint list for any
+ * effect that does not override it. Slots not yet registered (or absent) are
+ * NULL and skipped by the callers. */
+const struct device *const *kp_rgb_overlay_list(void) {
+  return kp_overlay_registry;
+}
+size_t kp_rgb_overlay_count(void) { return KP_RGB_OVERLAY_COUNT; }
+
 uint16_t kp_rgb_overlay_word_count(void) { return KP_RGB_OVERLAY_WORDS; }
 
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value) {

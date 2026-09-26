@@ -20,9 +20,10 @@ properties:
     type: phandles
     required: false
     description: |
-      Overlay list to use while this effect is active, replacing the list on
-      its parent behavior node. A devicetree array cannot be empty, so use
-      `no-overlays;` for an effect that wants none.
+      Overlay list to paint while this effect is active, replacing the default
+      of every registered overlay in `rgb_overlays` declaration order. A
+      devicetree array cannot be empty, so use `no-overlays;` for an effect
+      that wants none.
 
   no-overlays:
     type: boolean

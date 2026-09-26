@@ -250,8 +250,8 @@ Overlays are typically used as indicators: layer indicators, CapsLock
 indicators... Under the hood, an overlay is a **compositor**: while its
 condition is active it renders one effect and blends the result over the LEDs it
 targets. It is not a behavior and cannot be keymap-bound; it is declared as a
-child of a `keypaw,rgb-overlays` container and listed on the behavior (or on an
-individual effect, which overrides the list) in paint order.
+child of a `keypaw,rgb-overlays` container, and its paint order is its
+declaration order there (a later child composites on top).
 
 ```dts
 rgb_conditions: rgb_conditions {
@@ -292,7 +292,9 @@ either way:
   which is live and adjustable.
 
 Use one or the other, never both. Targets are resolved per half, so a `keys`
-list works unchanged on both halves for split keyboards.
+list works unchanged on both halves for split keyboards. Every registered overlay
+is composited by default; an effect narrows that with its own `overlays`/
+`no-overlays` (see [Declaration order](#declaration-order)).
 
 ## Writing a condition
 
@@ -589,8 +591,8 @@ Two contracts it must respect:
   trigger's job, not a filter's.
 
 A filter is gated, ordered, and split-pushed exactly like a compositor overlay,
-so it goes in the same `keypaw,rgb-overlays` container and the same paint-order
-list.
+so it goes in the same `keypaw,rgb-overlays` container, and its declaration order
+there is its paint order.
 
 ## Declaration order
 
@@ -599,6 +601,16 @@ that index travels the link. **Both halves must build the same set of effects
 and overlays, in the same order.** The same applies across a flash: an effect's
 state is addressed by its slot, so reordering `&kprgb`'s children while
 `CONFIG_SETTINGS=y` re-points persisted state.
+
+Overlay declaration order is also the paint order, and every registered overlay
+is composited by default. An effect narrows that with its own `overlays`/
+`no-overlays`. That list must not name an overlay that composites the same
+effect (`fx -> ovl -> fx`): it is a devicetree cycle and the build rejects it
+with `cycle in devicetree involving ...`. Pointing at an overlay that composites
+a *different* effect is fine.
+
+Unlike effect slots, overlay order is not persisted, so reordering overlays is
+safe across a flash as long as both halves use the same devicetree.
 
 ## Split checklist
 

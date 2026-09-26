@@ -200,8 +200,10 @@ as its children:
 
 > For split builds, you need to make sure that boards get the same effect
 > definitions: an effect is identified by its position in the registry, so a
-> different set or order desyncs the halves. The same also applies to overlays
-> (see below).
+> different set or order desyncs the halves. The same applies to overlays: both
+> the split state bit and the paint order come from an overlay's position under
+> `rgb_overlays`, so both halves must declare the same overlays in the same
+> order.
 
 ### Optional overlay configurations
 
@@ -265,15 +267,6 @@ it targets.
             color = <0x00FF00>;
         };
     };
-
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            overlays = <&caps &layer_fn1 &batt>;
-            // ...
-        };
-    };
 };
 ```
 
@@ -291,10 +284,10 @@ replaces the frame outright, so the engine then skips rendering the active effec
 and any overlay below it, since none of them can be seen.
 
 `keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes;
-neither belongs under `&kprgb`, whose children are the effect registry. List the
-overlays in paint order on the owning behavior node like `overlays = <&caps
-&layer_fn1>;` in the example above; an effect may override that list with its
-own `overlays`/`no-overlays`.
+neither belongs under `&kprgb`, whose children are the effect registry. An
+overlay's **declaration order** under `rgb_overlays` is its paint order: a later
+child composites on top. Every registered overlay is composited by default; an
+effect may narrow that list with its own `overlays`/`no-overlays`.
 
 > The `cond_batt` latch condition is a bit different from other conditions
 > above: it allows the user to toggle the condition via key bindings. Just bind

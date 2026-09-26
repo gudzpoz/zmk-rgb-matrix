@@ -255,9 +255,9 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       const struct kp_rgb_effect_api *api =
           (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
       const struct device *const *overlays =
-          api->overlays != NULL ? api->overlays : ctx->overlays;
+          api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
       size_t overlay_count =
-          api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
+          api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
       /* Skip the effect and every overlay below an opaque full-cover overlay. */
       size_t first = kp_last_covering_overlay(overlays, overlay_count);
       if (first == SIZE_MAX) {
@@ -371,9 +371,9 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
       /* Deliver only while the overlay actually renders, matching the render
        * gate, so an inactive overlay does not accumulate stale state. */
       const struct device *const *overlays =
-          api->overlays != NULL ? api->overlays : ctx->overlays;
+          api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
       size_t count =
-          api->overlays != NULL ? api->overlays_len : ctx->overlays_len;
+          api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
       for (size_t i = 0; i < count; i++) {
         if (overlays[i] == NULL) {
           continue;

@@ -249,10 +249,12 @@ property — which would be a hard dtc error. The same trick picks between `effe
 ## Overlay registry and the pushed state words
 
 An overlay's ordinal is its position under the `keypaw,rgb-overlays` container.
-Overlay state is one bit per ordinal, held as `ceil(count / 16)` `uint16_t`
-words (`kp_overlay_state` in `src/rgb_utils.c`) — sized from
-`DT_CHILD_NUM`, so there is **no fixed cap** (the old `KP_RGB_OVERLAY_MAX` is
-gone).
+That position is also its **paint order**: a later child composites on top. There
+is deliberately no `overlays = <...>;` list on the behavior — see the cycle in
+[Devicetree traps](#devicetree-traps). Overlay state is one bit per ordinal, held
+as `ceil(count / 16)` `uint16_t` words (`kp_overlay_state` in `src/rgb_utils.c`) —
+sized from `DT_CHILD_NUM`, so there is **no fixed cap** (the old
+`KP_RGB_OVERLAY_MAX` is gone).
 
 ### Predicate vs renderer
 
@@ -551,7 +553,17 @@ Found while building this module; they generalise.
   without a `default:` are unaffected.
 - `condition` and `effect` must be `type: phandle` (a bare phandle), not
   `phandle-array`, which would demand `#condition-cells` / `#effect-cells` on
-  every target. The related `overlays = <&a &b>;` list is `type: phandles`.
+  every target. An effect's `overlays = <&a &b>;` override list is
+  `type: phandles`.
+- **No overlay list on the owning behavior.** edtlib makes every child depend on
+  its parent, and a node depend on its phandle targets. A registry effect is a
+  child of the behavior, so `kprgb -> overlay` (a list) plus `overlay -> effect`
+  (its `effect` phandle) plus `effect -> kprgb` (parenthood) is a cycle, which
+  `gen_defines` rejects with `cycle in devicetree involving ...`. Paint order is
+  therefore the `rgb_overlays` declaration order, and the behavior holds no list.
+  An effect's own `overlays` override must not name an overlay that composites
+  that same effect: that 2-cycle is rejected by the same check, with the same
+  error.
 - An effect binding includes `zero_param.yaml`, which marks `#binding-cells`
   required. A nested (private) effect is *not* a keymap binding, but it must
   still declare `#binding-cells = <0>` or dtc rejects the node.

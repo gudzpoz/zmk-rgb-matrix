@@ -215,7 +215,8 @@ struct kp_rgb_effect_api {
    * effect node's devicetree:
    *   overlays = <&a &b>;  -> exactly those, in order
    *   no-overlays;         -> kp_rgb_no_overlays (non-NULL, length 0)
-   *   neither                -> NULL, inherit the owning behavior's list
+   *   neither                -> NULL, every registered overlay in
+   *                             keypaw,rgb-overlays declaration order
    */
   const struct device *const *overlays;
   size_t overlays_len;
@@ -431,9 +432,10 @@ struct kp_rgb_condition_api {
  * renders one effect (nested or referenced) into a private layer buffer and
  * blends it onto the targeted LEDs over whatever the active effect painted.
  * `keypaw,rgb-overlay` is the only kind; third parties extend the module with
- * conditions and effects, not overlay kinds. Overlays are listed in paint order
- * by `overlays` on the owning behavior node; individual effects may override
- * that list.
+ * conditions and effects, not overlay kinds. Overlays paint in their
+ * `keypaw,rgb-overlays` declaration order (later children composite on top);
+ * an individual effect may override that list with its own `overlays`/
+ * `no-overlays`.
  *
  * The engine repaints on its own timer. A `local` condition whose source changes
  * on an event may call zmk_rgb_matrix_flush() from that event's listener to
