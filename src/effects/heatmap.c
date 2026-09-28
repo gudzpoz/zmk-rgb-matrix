@@ -41,7 +41,6 @@ static void kp_eff_heatmap_render(const struct device *dev, struct kp_rgb_frame 
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
-  /* Heat decay: lose `elapsed / decrease_delay` shades this tick. */
   uint32_t loss = f->elapsed / MAX(cfg->decrease_delay_ms, 1u);
   for (size_t i = 0; i < f->count; i++) {
     data->temp[i] = loss >= data->temp[i] ? 0 : (uint8_t)(data->temp[i] - loss);

@@ -25,18 +25,12 @@
  * RAINDROPS (see kp_rain_drops_hue below). */
 DEFINE_DT_ENUM(mode, pixel, flow, drops, jellybean, fractal);
 
-/* How many hue nudges RAINDROPS makes per animation period. QMK derives its rate
- * from the global speed setting (and triggers on roughly every frame at the
- * default speed), which this module has no equivalent of; tying it to the effect
- * period keeps `duration` meaningful like every other effect here, and a nudge
- * per ~60 ms reads as a continuous drift rather than a static mosaic. */
+/* Hue nudges RAINDROPS makes per animation period. Tying the rate to the period
+ * keeps `duration` meaningful here as it is for every other effect. */
 #define KP_RAIN_DROPS_PER_PERIOD 64u
 
-/* QMK's RAINDROPS moves a key's hue along "the shortest path between hues": the
- * distance to the antipode (half the wheel) split into four steps, applied zero,
- * one or two times. In QMK's 0..255 hue space that is (int8_t)128 / 4 = -32, and
- * the negative sign makes the hue walk down the wheel -- keep the direction so
- * the drift looks the same. In degrees: -(360 / 2) / 4 = -45. */
+/* QMK's RAINDROPS walks a key's hue toward the antipode in four steps; the
+ * negative step makes it walk down the wheel, as QMK does. */
 #define KP_RAIN_DROPS_HUE_STEP (-(KP_RGB_HUE_MAX / 8))
 #define KP_RAIN_DROPS_STEPS 3u /* QMK's random8_max(3): 0, 1 or 2 steps */
 
@@ -77,8 +71,7 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
   struct kp_rgb_hsb base = data->common.color;
   uint16_t bl = MAX(f->board_length, 1u);
 
-  /* Decay every lit LED. RAINDROPS is the exception: it never turns anything
-   * off, it only re-hues one key at a time, so every LED stays lit. */
+  /* RAINDROPS never dims: it re-hues one key at a time and stays lit. */
   if (cfg->mode != DT_ENUM_CONST(mode, drops)) {
     for (size_t i = 0; i < f->count; i++) {
       data->val[i] = data->val[i] > decay ? (uint8_t)(data->val[i] - decay) : 0;
@@ -137,9 +130,8 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
     uint8_t v = data->val[i];
 
     if (cfg->mode == DT_ENUM_CONST(mode, fractal)) {
-      /* Recompute brightness from the expanding pulse (ignores val[]). */
-      /* The pulse mirrors from the centre, so it has two fronts; halve the
-       * temporal phase to keep each front at a single-front rate. */
+      /* The pulse has two fronts (it mirrors from the centre), so halve the
+       * phase to keep each front at a single-front rate. */
       uint32_t phase01 =
           kp_rgb_arm_phase(data->phase_ms * 65536u / period, 2u);
       uint32_t rad = phase01 * (bl / 2u + 100u) / 65536u;

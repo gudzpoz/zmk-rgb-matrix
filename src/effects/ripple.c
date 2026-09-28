@@ -88,8 +88,8 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
     }
     int32_t half_band = MAX(radius * KP_RIPPLE_WIDTH / 100, 1);
 
-    /* Ease the ring out over the tail of its life, reaching zero exactly as the
-     * trigger expires, so it dims away instead of being cut off. */
+  /* Ease the ring out so it dims away as the trigger expires instead of being
+   * cut off. */
     uint32_t fade_window = MAX(period * KP_RIPPLE_FADE_PCT / 100u, 1u);
     uint8_t fade = age + fade_window < period
                        ? 255u
@@ -98,11 +98,9 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
     for (size_t i = 0; i < f->count; i++) {
       int32_t dx = (int32_t)f->coords[i].x - trigger->x;
       int32_t dy = (int32_t)f->coords[i].y - trigger->y;
-      /* Linear distance from the ring's centre, as every other spatial effect
-       * does. Comparing a squared distance against the linear `half_band`
-       * collapses the ring to a band a fraction of a layout unit wide, far
-       * narrower than the LED pitch, so it only ever catches an LED by
-       * accident. */
+      /* Linear distance, as every other spatial effect uses: comparing a squared
+       * distance against the linear `half_band` collapses the ring to a sliver
+       * narrower than the LED pitch. */
       int32_t delta = (int32_t)kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy)) - radius;
       if (delta < 0) {
         delta = -delta;

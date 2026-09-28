@@ -56,9 +56,8 @@ static inline uint8_t kp_rgb_sin8(uint8_t theta) {
 }
 
 /* Temporal phase for an effect whose spatial coordinate wraps `arms` times
- * across the board. Dividing the (16.16) temporal phase by the arm count keeps
- * each wrap's front moving at the same physical rate as a single-wrap effect,
- * so multi-arm patterns do not outrun single-arm ones at the same period. */
+ * across the board. Dividing by the arm count keeps a multi-arm pattern from
+ * outrunning a single-arm one at the same period. */
 static inline uint32_t kp_rgb_arm_phase(uint32_t phase01, uint32_t arms) {
   return arms > 1 ? phase01 / arms : phase01;
 }

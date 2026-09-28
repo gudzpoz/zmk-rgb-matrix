@@ -64,10 +64,8 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
   }
   max_r = MAX(max_r, 1u);
 
-  /* Effects whose spatial coordinate wraps more than once across the board --
-   * the spiral, and the two mirrored centres of dual/bloom -- advance their
-   * temporal phase divided by the arm count, so each wrap's front keeps pace
-   * with a single-wrap effect at the same period. */
+  /* The spiral and the mirrored dual/bloom centres wrap twice, so their phase is
+   * divided by the arm count to keep pace with a single-wrap effect. */
   uint32_t arms = 1;
   if (cfg->basis == DT_ENUM_CONST(basis, spiral) ||
       (dual && (cfg->basis == DT_ENUM_CONST(basis, radial) ||

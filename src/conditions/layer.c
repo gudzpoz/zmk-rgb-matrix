@@ -19,14 +19,8 @@
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/rgb_matrix.h>
 
-/* Layers only exist where the keymap does. ZMK gates src/keymap.c (and so the
- * layer-state accessors) on "(NOT CONFIG_ZMK_SPLIT) OR
- * CONFIG_ZMK_SPLIT_ROLE_CENTRAL" in zmk/app/CMakeLists.txt, so on a split
- * peripheral this predicate has no source of truth. The node is meant to be
- * consumed by a default (central-evaluated) overlay or a central-only trigger,
- * so it is normally never called on a peripheral -- but it must still compile
- * and link there, because a shared devicetree expands it on both halves and a
- * `local` overlay would call it. Gate the read, not the device. */
+/* Layers only exist where the keymap does, so on a split peripheral this
+ * predicate has no source of truth; it must still compile and link there. */
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 #define KP_COND_LAYER_HAS_KEYMAP 1
 #include <zmk/keymap.h>
@@ -68,9 +62,8 @@ static bool kp_cond_layer_active(const struct device *dev) {
 DT_INST_FOREACH_STATUS_OKAY(KP_COND_LAYER_DEFINE)
 
 #if KP_COND_LAYER_HAS_KEYMAP
-/* Repaint on the layer edge instead of waiting for the next engine tick, so a
- * layer change is immediate on the central and the push to the peripheral
- * starts at once. Central only: there is no layer state on a peripheral. */
+/* Repaint on the layer edge so the change is immediate on the central and the
+ * push to the peripheral starts at once. Central only. */
 static int kp_cond_layer_state_listener(const zmk_event_t *eh) {
   if (as_zmk_layer_state_changed(eh) != NULL) {
     zmk_rgb_matrix_flush();

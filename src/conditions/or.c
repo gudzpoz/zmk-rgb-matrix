@@ -7,10 +7,8 @@
  * `conditions = <&a &b ...>;` list is active. Operands may themselves be
  * combinators; the reference graph must be acyclic.
  *
- * The predicate is sampled, never cached: it recurses into each operand's own
- * active(), so whatever split locality the consuming overlay declares applies
- * transitively -- a default overlay evaluates the whole tree on the central,
- * a `local` one on each half.
+ * The predicate is sampled, never cached, so the consuming overlay's split
+ * locality applies transitively.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_or

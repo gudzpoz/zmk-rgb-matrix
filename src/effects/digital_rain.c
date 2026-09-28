@@ -26,18 +26,13 @@
 /* One key row, in layout units: physical-layout units are 100 per key. */
 #define KP_RGB_KEY_UNIT 100u
 
-/* Tail length, in key rows. QMK's DIGITAL_RAIN has no tail parameter at all: a
- * cell decays over about 255 frames while the pattern shifts down one row every
- * 29, so the tail settles at roughly nine rows at full brightness whatever the
- * board size and column count. Counting in rows (rather than absolute layout
- * units, which scale with the key pitch) is what keeps that relationship. */
+/* Tail length, in key rows: roughly QMK's DIGITAL_RAIN tail. Counting in rows
+ * rather than layout units keeps it independent of the key pitch. */
 #define KP_DIGITAL_RAIN_TRAIL_ROWS 9u
 
-/* Heads and speeds are held in 1/256 of a layout unit. A column falls at
- * 0.075-0.22 units/ms for the durations this module clamps to, which truncates
- * to zero in whole units -- and a zero speed guard would then pin every column
- * to the same minimum. Multiplying by a constant rather than shifting keeps the
- * negative (above-the-board) start positions well defined. */
+/* Heads and speeds in 1/256 of a layout unit: whole units truncate to zero at
+ * the speeds this module produces. Multiplication (not a shift) keeps negative
+ * above-the-board start positions well defined. */
 #define KP_RAIN_Q8 (1 << 8)
 #define KP_RAIN_TO_Q8(v) ((int32_t)(v) * KP_RAIN_Q8)
 #define KP_RAIN_FROM_Q8(v) ((int32_t)(v) / KP_RAIN_Q8)
@@ -64,9 +59,8 @@ static int32_t kp_eff_digital_rain_start_q8(uint16_t min_y, uint16_t range_y) {
   return KP_RAIN_TO_Q8((int32_t)min_y - (int32_t)(sys_rand32_get() % range_y));
 }
 
-/* Fall speed for one column: it crosses the board height in `period / jitter`,
- * where jitter is 1.00x..2.98x so the columns drift apart. Tying it to the
- * period is what makes `duration` mean "shorter is faster". */
+/* Fall speed: crosses the board height in `period / jitter` (1.00x..2.98x, so
+ * the columns drift apart), which makes `duration` mean "shorter is faster". */
 static int32_t kp_eff_digital_rain_speed_q8(uint16_t range_y, uint32_t period) {
   uint32_t frac = 50u + (sys_rand32_get() % 100u);
   uint32_t sp_q8 = (uint32_t)range_y * KP_RAIN_Q8 * frac / (period * 50u);
@@ -120,9 +114,8 @@ static void kp_eff_digital_rain_render(const struct device *dev,
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t pct = kp_rgb_brightness_pct(f);
-  /* Tail length in layout units, from the row count above. Capped at the board
-   * height so a short board fades out across its full height instead of glowing
-   * uniformly (a nine-row tail cannot fit a four-row board). */
+  /* Tail length in layout units, capped at the board height so a short board
+   * fades across its full height instead of glowing uniformly. */
   uint16_t trail = MIN(KP_DIGITAL_RAIN_TRAIL_ROWS * KP_RGB_KEY_UNIT,
                        MAX(f->board_height, KP_RGB_KEY_UNIT));
 
@@ -131,7 +124,6 @@ static void kp_eff_digital_rain_render(const struct device *dev,
     data->seeded = true;
   }
 
-  /* Advance every column's head and recycle it once it has cleared the bottom. */
   uint16_t range_y = MAX((uint16_t)(data->max_y - data->min_y), 1u);
   int32_t recycle_q8 = KP_RAIN_TO_Q8((int32_t)data->max_y + (int32_t)trail);
   uint32_t period = kp_rgb_effect_period(dev);
@@ -146,16 +138,13 @@ static void kp_eff_digital_rain_render(const struct device *dev,
   for (size_t i = 0; i < f->count; i++) {
     uint8_t c = data->col_of_led[i];
     int32_t d = KP_RAIN_FROM_Q8(data->head_q8[c]) - (int32_t)f->coords[i].y;
-    /* Only the trail behind the falling head (the LEDs above it, smaller y) glow;
-     * everything the head hasn't reached yet, and everything past the tail end, is
-     * dark. */
+    /* Only the trail above the falling head glows; the rest is dark. */
     if (d < 0 || d > (int32_t)trail) {
       f->pixels[i] = (struct led_rgb){0, 0, 0};
       continue;
     }
-    /* b: 255 right at the head, fading to 0 at the tail end. A 0..255 factor,
-     * scaled onto the preset brightness -- hsb.b is 0..100, so assigning it
-     * directly overflows. */
+    /* A 0..255 factor scaled onto the preset brightness: hsb.b is 0..100, so
+     * assigning the factor directly would overflow. */
     uint32_t b = 255u * (uint32_t)(trail - d) / trail;
     struct kp_rgb_hsb hsb;
     hsb.h = base.h;

@@ -3,15 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Built-in "latch" condition: a manually toggled bool. It is the one stateful
- * condition kind -- the state lives in dev->data and is flipped by a
- * keypaw,behavior-rgb-overlay-toggle nested under the same devicetree node.
- *
- * The engine needs no support for it: it samples active() every tick like any
- * other condition, so a default (central-evaluated) overlay pushes the
- * resulting bit and a `local` overlay evaluates each half's own latch. The
- * toggle resolves to an absolute value on the central and is GLOBAL, so both
- * halves agree after a press.
+ * Built-in "latch" condition: a manually toggled bool, the one stateful kind.
+ * The state lives in dev->data and is flipped by a keypaw,behavior-rgb-overlay-
+ * toggle nested under the same devicetree node.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_latch

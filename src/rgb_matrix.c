@@ -138,13 +138,10 @@ bool kp_rgb_behavior_any_on(void) { return kp_any_on_locked(); }
 void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
 void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
 
-/* The lock is never held across flash I/O (rgb_settings.c encodes under it and
- * saves outside it) and every holder runs at a higher priority than this
- * low-priority queue, so a busy mutex is a hiccup rather than a deadlock. Wait
- * it out instead of dropping the frame: a dropped frame also skips the
- * overlay dispatch that shares the tick, costing a full period on both
- * halves. Bounded, so a genuinely stuck holder still surfaces a warning
- * instead of hanging this queue forever. */
+/* The lock is never held across flash I/O and every holder outranks this
+ * low-priority queue, so waiting is a hiccup, not a deadlock. Dropping the frame
+ * would also skip the overlay dispatch on this tick. Bounded, so a stuck holder
+ * warns instead of hanging the queue. */
 #define KP_RGB_LOCK_RETRY_MS 1
 #define KP_RGB_LOCK_RETRIES 8
 
@@ -159,10 +156,9 @@ static bool kp_rgb_matrix_lock_patiently(void) {
 
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
-/* Runs in the system timer ISR, so it must not take kp_rgb_lock: a mutex is
- * illegal in ISR context. Read `on` without the lock, exactly as
- * zmk_rgb_matrix_flush() does -- a racy read only decides whether a frame is
- * worth scheduling, and the work handler re-checks everything under the lock. */
+/* Runs in the system timer ISR, so it must not take kp_rgb_lock (a mutex is
+ * illegal in ISR context). The unlocked read only decides whether a frame is
+ * worth scheduling; the work handler re-checks under the lock. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
   if (kp_any_on_locked()) {
@@ -178,11 +174,9 @@ static void kp_start_timer(void) {
                 K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
 }
 
-/* Overlays paint in order over the active effect. An active overlay that fully
- * covers every LED (`all-leds` at full opacity) hides the effect and every
- * overlay below it, so their renders are skipped -- this is the point of the
- * flag. Returns the index of the last such overlay, or SIZE_MAX when none
- * covers, in which case the caller must render the effect and start at 0. */
+/* Returns the index of the last overlay covering every LED, or SIZE_MAX when
+ * none does; the caller then renders the effect and starts painting at 0. See
+ * docs/development.md#an-opaque-full-cover-overlay-skips-what-it-hides. */
 static size_t kp_last_covering_overlay(const struct device *const *overlays,
                                        size_t count) {
   size_t last = SIZE_MAX;
@@ -222,7 +216,6 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
-  /* Resolve every central-evaluated overlay before rendering */
   bool ovl_changed = kp_rgb_overlay_refresh();
   bool any_on;
   if (!kp_rgb_matrix_lock_patiently()) {
@@ -258,7 +251,6 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
           api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
       size_t overlay_count =
           api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
-      /* Skip the effect and every overlay below an opaque full-cover overlay. */
       size_t first = kp_last_covering_overlay(overlays, overlay_count);
       if (first == SIZE_MAX) {
         api->render(ctx->state.active_fx, &frame);
@@ -285,7 +277,6 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       LOG_WRN("Failed to update the RGB strip (%d)", err);
     }
   }
-  /* Push the new overlay state after the local paint. */
   if (ovl_changed) {
     kp_rgb_overlay_dispatch();
   }
@@ -303,13 +294,9 @@ void zmk_rgb_matrix_flush(void) {
   if (!kp_rgb_matrix_valid) {
     return;
   }
-  /* No lock on purpose: `on` only decides whether a frame is worth scheduling,
-   * a racy read costs at most one redundant frame, and this runs from the split
-   * RX and event contexts where blocking would be worse. Concurrent callers
-   * need no dedup of their own -- k_work_submit_to_queue() does nothing when
-   * the work is already queued (returns 0) and re-queues it, one extra frame,
-   * only while it is running (returns 2). The return value is ignored, as in
-   * the timer handler below. */
+  /* No lock on purpose: a racy read costs at most one redundant frame, and this
+   * runs from contexts where blocking would be worse. Concurrent callers need
+   * no dedup -- k_work_submit_to_queue() drops a duplicate queued work. */
   if (!kp_any_on_locked()) {
     return;
   }

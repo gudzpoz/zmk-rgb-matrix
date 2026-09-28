@@ -23,12 +23,8 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util_macro.h>
 
-/* The engine's devicetree node. Effects are separate device instances (their
- * own DT_DRV_COMPAT), so they cannot use DT_DRV_INST() to reach the strip: an
- * effect's own DT_DRV_INST(0) would resolve to the effect node. Spell the
- * compatible out instead, so any effect TU (in any module) can size its state
- * from the real LED count.
- */
+/* The engine's devicetree node, spelled out so an effect TU can size its state
+ * from the real LED count: DT_DRV_INST() would resolve to the effect's node. */
 #if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_matrix)
 #define KP_RGB_NODE DT_INST(0, keypaw_rgb_matrix)
 #define KP_RGB_STRIP DT_PHANDLE(KP_RGB_NODE, strip)
@@ -45,10 +41,7 @@ struct kp_rgb_hsb {
 };
 
 /* Compile-time 0xRRGGBB -> struct kp_rgb_hsb initializer, so an effect's preset
- * colour can stay a devicetree constant while the effect state holds HSB (see
- * kp_rgb_effect_common_data). This mirrors the runtime conversion this file
- * used to expose, down to the truncating division, so a given `color` property
- * yields the same preset either way. */
+ * colour can stay a devicetree constant while the effect state holds HSB. */
 #define KP_RGB_HEX_R(hex) ((int)(((uint32_t)(hex) >> 16) & 0xFFu))
 #define KP_RGB_HEX_G(hex) ((int)(((uint32_t)(hex) >> 8) & 0xFFu))
 #define KP_RGB_HEX_B(hex) ((int)((uint32_t)(hex) & 0xFFu))
@@ -63,9 +56,8 @@ struct kp_rgb_hsb {
                   KP_RGB_HEX_B(hex))
 #define KP_RGB_HEX_DELTA(hex) (KP_RGB_HEX_MAX(hex) - KP_RGB_HEX_MIN(hex))
 
-/* Adding KP_RGB_HUE_MAX before the modulo keeps the red-dominant term (the only
- * one that can go negative) in range; the green- and blue-dominant terms are
- * already in [60, 180] and [180, 300]. */
+/* The +KP_RGB_HUE_MAX keeps the red-dominant term, the only one that can go
+ * negative, in range before the modulo. */
 #define KP_RGB_HEX_HUE(hex)                                                    \
   (KP_RGB_HEX_DELTA(hex) == 0 ? 0                                              \
    : KP_RGB_HEX_MAX(hex) == KP_RGB_HEX_R(hex)                                  \
@@ -95,19 +87,12 @@ struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
 /* -------------------------------------------------------------------------
  * Devicetree string-enum -> C enum helpers
  *
- * Usage (inside an effect .c, after `#define DT_DRV_COMPAT ...`):
- *
  *     DEFINE_DT_ENUM(axis, none, vertical, horizontal);
- *
- * The value list is the enum values in the binding YAML. The DT value is
- * converted into this enum with:
- *
  *     .axis = CONV_DT_ENUM(inst, axis),
- *
- * and compared in render code either against the bare constant or via
- * DT_ENUM_CONST, which keeps the property name for readability:
- *
  *     if (cfg->axis == DT_ENUM_CONST(axis, vertical)) { ... }
+ *
+ * The value list is the binding YAML's enum, in order. See
+ * docs/extending.md#devicetree-string-enum-helper.
  * ------------------------------------------------------------------------- */
 
 #define KP_ENUM_ENTRY(idx, val, prop)                                          \
@@ -207,7 +192,7 @@ typedef void (*rgb_matrix_effect_event_callback_t)(
 extern const struct device *const kp_rgb_no_overlays[];
 
 struct kp_rgb_effect_api {
-  const struct behavior_driver_api behavior; /* must be first */
+  const struct behavior_driver_api behavior;
   rgb_matrix_effect_render_callback_t render;
   rgb_matrix_effect_event_callback_t on_event;
   const struct device *owner; /* parent keypaw,behavior-rgb-matrix */
@@ -221,6 +206,10 @@ struct kp_rgb_effect_api {
   const struct device *const *overlays;
   size_t overlays_len;
 };
+
+BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
+             "kp_rgb_effect_api.behavior must be first: the effect api is "
+             "reached as a struct behavior_driver_api *");
 
 /* The brightness a renderer should apply this frame. */
 static inline uint8_t kp_rgb_brightness_pct(const struct kp_rgb_frame *frame) {
@@ -240,8 +229,8 @@ struct kp_rgb_effect_common_data {
   struct kp_rgb_hsb color; /* current color */
 };
 
-/* Both common structs must be the first member of the effect's own config/data:
- * the shared command handlers reach them through these casts. */
+/* The shared command handlers reach the effect's own config/data through these
+ * casts. */
 static inline struct kp_rgb_effect_common_data *
 kp_rgb_effect_data(const struct device *dev) {
   return (struct kp_rgb_effect_common_data *)dev->data;
@@ -251,11 +240,8 @@ kp_rgb_effect_cfg(const struct device *dev) {
   return (const struct kp_rgb_effect_common_config *)dev->config;
 }
 
-/* The period an effect falls back to when its `duration` property is 0. A
- * registry effect is seeded with the owning behavior's initial-duration-ms at
- * boot, so this normally applies only to a private effect nested under an
- * overlay, which is not seeded. It matches the behavior binding's
- * initial-duration-ms default. */
+/* The period `duration = 0` falls back to, for an effect the owner never seeded
+ * (a private effect nested under an overlay). See docs/development.md. */
 #define KP_RGB_EFFECT_PERIOD_FALLBACK_MS 1000u
 
 /* The effect's animation period in milliseconds; never 0, so an effect can use
@@ -265,9 +251,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   return duration != 0 ? duration : KP_RGB_EFFECT_PERIOD_FALLBACK_MS;
 }
 
-/* Expand one entry of an `overlays = <&a &b>;` list. The properties are of
- * type `phandles` (not `phandle-array`, which would demand #overlay-cells),
- * so DT_PROP_BY_IDX is the accessor that yields a node identifier. */
+/* Expand one entry of an `overlays = <&a &b>;` list. */
 #define KP_RGB_OVERLAYS_AT_IDX(idx, node_id)                                   \
   DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, overlays, idx))
 
@@ -287,34 +271,23 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                            (cfg_inst##_overlays), (NULL))))
 
 /* An effect's registry slot: its position among the owning behavior's children.
- * Each effect bakes this into struct kp_rgb_effect_common_config.index, which
- * the shared convert hook reads (it has no `inst` in scope, so it cannot derive
- * the slot itself). Declaration order is the identity.
- *
- * A private effect (below) also stores this, but the field is never read for
- * one -- only the registry paths read `.index` -- so no change is needed here. */
+ * Declaration order is the identity; the shared convert hook reads the baked
+ * copy, since it has no `inst` in scope. */
 #define KP_RGB_EFFECT_INDEX(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
 
-/* An effect plays one of two roles, and its parent is what picks the role:
+/* An effect plays one of two roles, chosen by its parent:
  *
  *   - child of keypaw,behavior-rgb-matrix -> *registry* effect: selectable,
  *     cyclable, persisted, split-addressed, keymap-bindable, seeded with the
  *     behavior's boot defaults.
  *   - child of keypaw,rgb-overlay         -> *private* effect: a compositor's
  *     renderer. No registry slot, no identity, no persistence.
- *
- * Same compatible, same driver, same binding; only the position differs.
- *
- * Only those two parents are accepted, and the overlay case names the compositor
- * kind specifically: it is the one kind that renders a nested effect, so an
- * effect anywhere else would be silently dark. KP_RGB_EFFECT_PARENT_ASSERT makes
- * that a build error rather than a dead device -- hence the exact-compat check
- * rather than "any child of the overlays container". */
+ */
 #define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
   DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
 
-/* Reject an effect whose parent is neither. A private effect must not carry the
- * registry-only properties: they have no meaning without a registry slot. */
+/* Reject an effect whose parent is neither, and registry-only properties on a
+ * private effect. */
 #define KP_RGB_EFFECT_PARENT_ASSERT(node_id)                                   \
   COND_CODE_1(                                                                 \
       KP_RGB_EFFECT_IS_REGISTRY(node_id), (),                                  \
@@ -330,9 +303,8 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                     "overlays/no-overlays are registry-only; overlays are not "\
                     "composed onto a nested effect");))
 
-/* The owning behavior, for the binding-conversion hook. A private effect has
- * none, so misuse as a keymap binding fails instead of retargeting at the
- * overlay's device name. */
+/* The owning behavior, for the binding-conversion hook; NULL for a private
+ * effect, so a keymap binding of one fails instead of retargeting. */
 #define KP_RGB_EFFECT_OWNER(node_id)                                           \
   COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
               (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
@@ -389,16 +361,11 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  *
  * A condition is a reusable predicate device consumed by overlays and
  * triggers. It carries no registry identity: a kind samples whatever source it
- * watches and reports whether it is active. Sharing the predicate is the point
- * -- one layer/caps-lock condition serves both an overlay and a trigger instead
- * of each reimplementing it.
+ * watches and reports whether it is active.
  *
- * A condition whose source exists only on the split central (keymap layer
- * state) must still compile and link on a peripheral and return false there:
- * do not gate the device out, gate the read. A default (central-evaluated)
- * overlay never calls the condition on a peripheral -- the central evaluates it
- * and pushes only the resulting bit -- but a `local` overlay does call it
- * there, so the peripheral path has to exist.
+ * A condition whose source exists only on the split central must still compile
+ * and link on a peripheral and return false there: gate the read, not the
+ * device.
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_condition_api {
@@ -418,9 +385,7 @@ struct kp_rgb_condition_api {
                    &kp_rgb_condition_##inst##_api)
 
 /* Resolve a node's `condition` phandle, or NULL when it has none (meaning
- * "unconditionally active"). Shared by the compositor overlay and the trigger.
- * COND_CODE_1 does not expand its unselected branch, so the DT_PROP is only
- * evaluated when the property is present. */
+ * "unconditionally active"). Shared by the compositor overlay and the trigger. */
 #define KP_RGB_CONDITION_PTR(node_id)                                          \
   COND_CODE_1(DT_NODE_HAS_PROP(node_id, condition),                            \
               (DEVICE_DT_GET(DT_PROP(node_id, condition))), (NULL))
@@ -453,24 +418,23 @@ struct kp_rgb_overlay_api {
   const struct device *(*event_target)(const struct device *dev);
 };
 
-/* Kind-agnostic part of an overlay's config; must be its first member. */
+/* Kind-agnostic part of an overlay's config. */
 struct kp_rgb_overlay_common_config {
   const uint32_t *keys; /* key positions, or NULL */
   size_t keys_len;
   const uint32_t *leds; /* raw chain indices, or NULL */
   size_t leds_len;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
-  /* Paint every LED rather than the resolved targets. With `opacity` 100 the
-   * kind must fully replace every pixel, which lets the engine skip the active
-   * effect and any overlay below it (see kp_rgb_overlay_covers_all). */
+  /* Paint every LED rather than the resolved targets; at `opacity` 100 this
+   * lets the engine skip the effect and the overlays below it. */
   bool all_leds;
 };
 
-/* Kind-agnostic mutable part; must be the first member. */
+/* Kind-agnostic mutable part. */
 struct kp_rgb_overlay_common_data {
   size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
   size_t *leds;     /* the overlay's own storage */
-  uint16_t index;   /* registry ordinal; state word index / 16, bit index % 16 */
+  uint16_t index;   /* registry ordinal */
   bool local;       /* True when `local`: each half evaluates the condition */
 };
 
@@ -483,8 +447,7 @@ struct kp_rgb_overlay_common_data {
 #endif
 #define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
 
-/* Add a device to the engine's overlay registry, where `index` places it.
- * Called by KP_RGB_OVERLAY_DEFINE; a kind never calls this itself. */
+/* Add a device to the engine's overlay registry, where `index` places it. */
 void kp_rgb_overlay_register(const struct device *dev);
 
 /* The most targets an overlay can resolve. */
@@ -596,8 +559,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * Every overlay is the same generic kind (`keypaw,rgb-overlay`): it composites
  * exactly one effect (nested or referenced) while its optional condition is
  * active. These helpers resolve the two and enforce the "exactly one effect"
- * rule. COND_CODE_1 does not expand its unselected branch, so neither accessor
- * evaluates the path it did not choose.
+ * rule.
  * ------------------------------------------------------------------------- */
 
 /* `effect = <&fx>;` names a shared registry effect; otherwise the single nested
@@ -626,18 +588,8 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * Triggers
  *
  * A trigger is a non-behavior device holding a condition plus the `&kprgb`
- * bindings to invoke when that condition wins. Triggers are the children of a
- * keypaw,rgb-trigger-table node, and their declaration order is their
- * precedence: the first trigger whose condition is active wins, and its
- * bindings run only when the winner changes. That edge behaviour is what lets a
- * manual RGB_EFF/RGB_EFS survive until the mapping actually changes, and stops
- * relative commands (RGB_HUI, RGB_BRI, ...) from re-firing on unrelated layer
- * events.
- *
- * The table cannot be &kprgb itself (its children are the effect registry) and
- * cannot hold a phandle list of its own children (a node depends on its parent,
- * so that is a devicetree cycle), hence the separate node and declaration
- * order.
+ * bindings to invoke when that condition wins. Their declaration order is
+ * their precedence, and the bindings run only when the winner changes.
  *
  * Evaluation needs the keymap, so it runs on the split central only; the
  * emitted commands still reach both halves because &kprgb is
@@ -648,7 +600,7 @@ struct kp_rgb_trigger_api {
   bool (*active)(const struct device *dev);
 };
 
-/* Kind-agnostic part of a trigger's config; must be its first member. */
+/* Kind-agnostic part of a trigger's config. */
 struct kp_rgb_trigger_common_config {
   const struct zmk_behavior_binding *bindings;
   size_t bindings_len;

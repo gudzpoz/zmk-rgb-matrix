@@ -9,9 +9,8 @@
  *
  * The effect is either nested (one child of this node: a private preset) or
  * referenced (`effect = <&fx>;`: a shared registry effect). The layer buffer is
- * shared across instances because overlay renderers run one at a time, serialised
- * under the engine lock in the render tick; a per-instance buffer would only
- * waste RAM.
+ * shared across instances because overlay renderers run one at a time under the
+ * engine lock.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_overlay
@@ -64,9 +63,8 @@ static void kp_ovl_render(const struct device *dev, struct kp_rgb_frame *frame) 
   const struct kp_rgb_effect_api *fx =
       (const struct kp_rgb_effect_api *)cfg->effect->api;
 
-  /* The engine calls this only while kp_ovl_active() is true. Effects overwrite
-   * the whole frame, so render into the layer buffer and then blend only this
-   * overlay's targets back onto the real one. */
+  /* Effects overwrite the whole frame, so render into the shared layer buffer and
+   * blend only this overlay's targets back. */
   struct led_rgb *base = frame->pixels;
   memset(kp_ovl_layer, 0, sizeof(kp_ovl_layer));
   frame->pixels = kp_ovl_layer;

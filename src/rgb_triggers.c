@@ -3,17 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Trigger evaluator. Owns the ordered table declared by keypaw,rgb-trigger-table
- * and invokes the winning trigger's bindings whenever the winner changes.
- *
- * Modelled on zmk/app/src/conditional_layer.c: a listener on
- * zmk_layer_state_changed, built only for the split central because layer state
- * does not exist on a peripheral. It differs from conditional layers in one
- * important way: a then-layer can be activated *and deactivated*, whereas there
- * is no way to "deactivate" an effect. So a trigger asserts on the transition
- * into winning and is otherwise left alone. That edge behaviour is what lets a
- * manual effect selection, or a relative command such as RGB_HUI, survive until
- * the mapping actually changes instead of being re-fired on every layer event.
+ * Trigger evaluator: owns the ordered table declared by keypaw,rgb-trigger-table
+ * and invokes the winning trigger's bindings whenever the winner changes. Built
+ * for the split central only, as layer state does not exist on a peripheral.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_trigger_table
@@ -37,12 +29,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_TRIG_TABLE DT_DRV_INST(0)
 
-/* Declaration order is the precedence order. There is no `triggers` phandle
- * list on purpose: a parent referencing its own child is a devicetree cycle
- * (every node depends on its parent), which edtlib rejects outright or, if the
- * child is also a phandle target, silently gives both nodes an ordinal of -1.
- * This mirrors zmk/app/src/conditional_layer.c, which enumerates its configs
- * with DT_INST_FOREACH_CHILD for the same reason. */
+/* Declaration order is the precedence order; there is no `triggers` phandle list
+ * on purpose. See docs/development.md#why-there-is-no-triggers-list. */
 #define KP_TRIGGERS_ONE_CHILD(node_id) DEVICE_DT_GET(node_id),
 
 static const struct device *const kp_triggers[] = {DT_FOREACH_CHILD_STATUS_OKAY(
@@ -54,8 +42,8 @@ static const struct device *kp_last_winner;
 static void kp_triggers_apply(const struct device *winner) {
   const struct kp_rgb_trigger_common_config *cfg = winner->config;
 
-  /* A mostly-zeroed event is fine: the &kprgb handlers ignore it, and only the
-   * already-converted binding travels the split link. */
+  /* The &kprgb handlers ignore the event; only the converted binding travels
+   * the split link. */
   struct zmk_behavior_binding_event event = {.timestamp = k_uptime_get()};
 
   for (size_t i = 0; i < cfg->bindings_len; i++) {
@@ -98,10 +86,9 @@ static int kp_triggers_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(kp_rgb_triggers, kp_triggers_listener);
 ZMK_SUBSCRIPTION(kp_rgb_triggers, zmk_layer_state_changed);
 
-/* Evaluate once at boot. This runs at APPLICATION, after the behavior's
- * POST_KERNEL init has applied `initial-effect`, so a layer-0 or catch-all
- * trigger takes effect immediately rather than waiting for the first layer
- * change. `kp_last_winner` starts NULL, so the first winner always fires. */
+/* Evaluate once at boot, after the behavior's POST_KERNEL init applied
+ * `initial-effect`, so a catch-all trigger takes effect immediately.
+ * `kp_last_winner` starts NULL, so the first winner always fires. */
 static int kp_triggers_init(void) {
   kp_triggers_evaluate();
   return 0;

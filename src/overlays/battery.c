@@ -3,10 +3,8 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Battery-gauge overlay kind: a positional level bar. While its condition is
- * active it sorts its target LEDs into a reading order and lights the first
- * `soc` percent of them, blending the rest toward black so the bar keeps a
- * defined empty track.
+ * Battery-gauge overlay kind: a positional level bar that lights the first
+ * `soc` percent of its targets, with a defined empty track.
  *
  * The charge is read per half, so each half shows its own battery.
  */
@@ -25,14 +23,14 @@
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 struct kp_ovl_battery_config {
-  struct kp_rgb_overlay_common_config common; /* must be first */
-  const struct device *condition;             /* NULL = always active */
-  uint32_t color;                             /* 0xRRGGBB */
-  uint32_t background_color;                  /* 0xRRGGBB */
+  struct kp_rgb_overlay_common_config common;
+  const struct device *condition; /* NULL = always active */
+  uint32_t color;                 /* 0xRRGGBB */
+  uint32_t background_color;      /* 0xRRGGBB */
   bool reverse;
 };
 struct kp_ovl_battery_data {
-  struct kp_rgb_overlay_common_data common; /* must be first */
+  struct kp_rgb_overlay_common_data common;
 };
 
 static bool kp_ovl_battery_active(const struct device *dev) {
@@ -46,9 +44,8 @@ static bool kp_ovl_battery_active(const struct device *dev) {
   return cond->active(cfg->condition);
 }
 
-/* Reading order: find the target set's extents, sort along the longer axis
- * first, then along the other; `reverse` flips the whole order so the bar can
- * fill from either end. `idx[0..count)` is sorted in place. */
+/* Reading order: the longer board axis first, then the other; `reverse` flips it
+ * so the bar can fill from either end. */
 static bool kp_ovl_battery_before(const struct kp_rgb_frame *frame, size_t a,
                                   size_t b, bool x_primary, bool reverse) {
   const struct kp_rgb_coord *ca = &frame->coords[a];
@@ -81,8 +78,7 @@ static void kp_ovl_battery_order(const struct kp_rgb_frame *frame, size_t *idx,
   }
   const bool x_primary = (uint16_t)(max_x - min_x) >= (uint16_t)(max_y - min_y);
 
-  /* Insertion sort: the count is a keyboard's LED count, so O(n^2) is fine and
-   * it keeps the ordering a single, dependency-free pass. */
+  /* Insertion sort: n is a keyboard's LED count. */
   for (size_t i = 1; i < count; i++) {
     const size_t value = idx[i];
     size_t j = i;
@@ -127,9 +123,7 @@ static void kp_ovl_battery_render(const struct device *dev,
   const struct led_rgb off = kp_rgb_rgb_scale(
       kp_hex_to_rgb(cfg->background_color), kp_rgb_brightness_pct(frame));
 
-  /* Blend the lit bar over the targets and the empty track toward black. At
-   * `opacity` 100 this replaces them -- which is what makes an `all-leds`
-   * gauge's cover skip honest -- and below 100 it layers over the effect. */
+  /* At opacity 100 this is a replace, which the all-leds cover skip relies on. */
   for (size_t i = 0; i < count; i++) {
     frame->pixels[order[i]] = kp_rgb_rgb_mix(
         frame->pixels[order[i]], i < lit ? on : off, cfg->common.opacity);

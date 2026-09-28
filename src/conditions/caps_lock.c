@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: MIT
  *
  * Built-in "caps lock" condition: active while the host reports the HID Caps
- * Lock LED as set.
- *
- * Caps Lock is global keyboard state, so one cached flag serves every node; a
- * listener callback has no device argument to key an instance off anyway.
+ * Lock LED as set. Caps Lock is global keyboard state, so one cached flag serves
+ * every node.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_caps_lock

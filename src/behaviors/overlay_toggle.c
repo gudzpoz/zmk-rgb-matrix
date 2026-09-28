@@ -3,14 +3,12 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * The toggle half of a keypaw,rgb-condition-latch. It is declared as a child of
- * the condition node so it can reach that condition with DT_PARENT -- a phandle
- * from the parent to the child would be a devicetree cycle.
+ * The toggle half of a keypaw,rgb-condition-latch, declared as its child so it
+ * can reach the condition with DT_PARENT (a phandle from the parent would be a
+ * devicetree cycle).
  *
- * The binding carries no parameters. "Flip" is resolved to an absolute value on
- * the split central (binding_convert_central_state_dependent_params), and that
- * absolute value is both applied locally and forwarded, so every half agrees.
- * The state is volatile: nothing here is persisted.
+ * The binding carries no parameters; "flip" is resolved to an absolute value on
+ * the central and forwarded, so every half agrees. The state is volatile.
  */
 
 #define DT_DRV_COMPAT keypaw_behavior_rgb_overlay_toggle
@@ -24,17 +22,13 @@
 #include <zmk/behavior.h>
 #include <zmk/rgb_matrix.h>
 
-/* The header lives beside the latch condition it belongs to; this TU is the
- * only consumer outside conditions/, so it reaches across with a relative
- * include rather than adding src/ to the library include path. */
 #include "../conditions/rgb_latch.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 /* Internal wire opcode, replacing the binding's 0/0 after central conversion.
- * It is not a devicetree cell and is deliberately absent from
- * behavior_parameter_metadata: advertising a value would make the metadata
- * check reject the zero-parameter binding. */
+ * Deliberately absent from behavior_parameter_metadata: advertising a value
+ * would make the metadata check reject the zero-parameter binding. */
 #define KP_RGB_OVL_LATCH_SET 1u
 
 struct kp_ovl_toggle_config {
@@ -42,7 +36,7 @@ struct kp_ovl_toggle_config {
 };
 
 /* The convert hook and the pressed handler get no `dev`, only the binding, so
- * resolve the device from its name -- the pattern behavior_rgb_matrix.c uses. */
+ * resolve the device from its name. */
 static const struct kp_ovl_toggle_config *
 kp_ovl_toggle_cfg(const struct zmk_behavior_binding *binding) {
   const struct device *dev = zmk_behavior_get_binding(binding->behavior_dev);
@@ -70,9 +64,9 @@ static int kp_ovl_toggle_convert(struct zmk_behavior_binding *binding,
   return 0;
 }
 
-/* Runs on every executing half: locally on the central with the converted
- * binding, and on each peripheral from the forwarded payload (which is already
- * converted). Absolute, so the two halves cannot end up inverted. */
+/* Runs on every executing half: locally with the converted binding, and on each
+ * peripheral from the forwarded payload. Absolute, so the halves cannot end up
+ * inverted. */
 static int kp_ovl_toggle_pressed(struct zmk_behavior_binding *binding,
                                  struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);

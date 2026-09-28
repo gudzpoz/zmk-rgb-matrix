@@ -86,8 +86,8 @@ properties:
 
 #### Devicetree string enum helper
 
-The built-in rainbow effect, for example, allows the user to choose from an list
-of supported styles:
+A string property with an `enum`, as the rainbow effect's `basis` uses, is
+awkward to check in C. A few helpers turn it into a real C enum:
 
 ```yaml
 properties:
@@ -98,20 +98,16 @@ properties:
     enum: ["x", "y", "radial", "pinwheel", "spiral", "chevron", "flag"]
 ```
 
-And properties like this, at least for me, are a pain to check against in C
-code. If you agree on that, we have a few tiny helpers for it:
-
 ```c
-// Define the enum: you still need to supply the allowed values in the YAML
+// Define the enum: the allowed values must still be listed in the YAML.
 DEFINE_DT_ENUM(basis, x, y, radial, pinwheel, spiral, chevron, flag);
 // The type name is `<enum_name>_t`, so `basis` -> `basis_t`.
 
-// You may use this to convert DTS values to our enum value with CONV_DT_ENUM,
-// which is often used in your config initializer:
-  .mode = CONV_DT_ENUM(inst, mode),
+// Convert a devicetree value in a config initializer:
+.basis = CONV_DT_ENUM(inst, basis),
 
-// Then, in your code, you may check the enum value against DT_ENUM_CONST:
-if (cfg->mode == DT_ENUM_CONST(mode, disc)) { ... }
+// Compare against a named constant in render code:
+if (cfg->basis == DT_ENUM_CONST(basis, spiral)) { ... }
 ```
 
 ### 2. Config and data structs

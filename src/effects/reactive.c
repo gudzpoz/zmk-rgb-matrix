@@ -33,7 +33,6 @@ DEFINE_DT_ENUM(spread, point, disc, cross, nexus);
 DEFINE_DT_ENUM(palette, solid, gradient, complement);
 
 struct kp_eff_reactive_config {
-  /* Must embed the common config as its first member. */
   struct kp_rgb_effect_common_config common;
   /* Unlit-LED brightness relative to the effect colour, in percent. Effect
    * local on purpose: it is not the keyboard-wide idle brightness. */
@@ -76,13 +75,8 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
     if (ax < (int32_t)tol || ay < (int32_t)tol) {
       return 0;
     }
-    /* `radius` is the reach measured outward from the excluded cross, not from
-     * the pressed key. The cross is the union of the row and column strips, so
-     * the distance from a point outside it is the nearer of the two
-     * perpendicular distances. Measuring from the key instead would leave the
-     * knob dead across a wide range: the exclusion alone puts the nearest
-     * lightable LED at about the key pitch times sqrt(2), so any radius below
-     * that would silence the effect entirely. */
+    /* Measured from the excluded cross, not the key: from the key, any radius
+     * below the key pitch times sqrt(2) would silence the effect entirely. */
     int32_t reach = MIN(ax, ay) - (int32_t)tol;
     int32_t r = cfg->radius;
     if (r <= 0 || reach >= r) {

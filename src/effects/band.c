@@ -62,8 +62,8 @@ static void kp_eff_band_render(const struct device *dev, struct kp_rgb_frame *f)
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = data->phase_ms % period;
   uint32_t phase01 = phase * 65536u / period;
-  /* The spiral wraps twice across the board (angle + radius), so halve its
-   * temporal phase to keep each wrap's front at a single-wrap rate. */
+  /* The spiral wraps twice (angle + radius), so halve its phase to keep each
+   * front at a single-wrap rate. */
   uint32_t phase_eff = kp_rgb_arm_phase(
       phase01, cfg->shape == DT_ENUM_CONST(shape, spiral) ? 2u : 1u);
   uint16_t bl = MAX(f->board_length, 1u);

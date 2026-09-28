@@ -6,11 +6,6 @@
  * Built-in "and" condition: active only while every condition in its
  * `conditions = <&a &b ...>;` list is active. Operands may themselves be
  * combinators; the reference graph must be acyclic.
- *
- * The predicate is sampled, never cached: it recurses into each operand's own
- * active(), so whatever split locality the consuming overlay declares applies
- * transitively -- a default overlay evaluates the whole tree on the central,
- * a `local` one on each half.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_and

@@ -247,8 +247,7 @@ int kp_rgb_resolve_active(struct kp_rgb_behavior_context *ctx) {
 }
 
 /* Re-apply the devicetree defaults: power intent, every effect's preset colour
- * and period, and the initial effect. Shared by behavior init and the settings
- * reset, so a reset lands in exactly the state a fresh flash would show. */
+ * and period, and the initial effect. */
 int kp_rgb_apply_defaults(struct kp_rgb_behavior_context *ctx) {
   uint8_t brightness =
       (uint8_t)CLAMP(ctx->initial_brightness, 0, KP_RGB_BRT_MAX);

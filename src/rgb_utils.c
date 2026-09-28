@@ -113,7 +113,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength) {
   /* The source is already at frame scale: a composited effect dims itself by
-   * the frame brightness, exactly as a flat paint colour is scaled above. */
+   * the frame brightness. */
   for (size_t i = 0; i < led_count; i++) {
     if (leds[i] < frame->count) {
       frame->pixels[leds[i]] =
@@ -125,12 +125,9 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
 /* -------------------------------------------------------------------------
  * Overlay state
  *
- * One on/off bit per overlay ordinal (its position under the
- * keypaw,rgb-overlays container), held in uint16_t words. The central fills it
- * by evaluating every non-`local` overlay's `active` once a tick and pushes the
- * words whose bits changed over the split link; a peripheral fills it from that
- * command. A `local` overlay is never in it -- its gate calls `active` directly,
- * on whichever half renders it.
+ * One on/off bit per overlay ordinal, held in uint16_t words. A `local` overlay
+ * is never in it -- its gate calls `active` directly, on whichever half renders
+ * it.
  *
  * Written on the split's system workqueue (the command handler), read on the RGB
  * matrix's low-priority workqueue (the render tick); each aligned uint16_t
@@ -141,11 +138,9 @@ static const struct device *kp_overlay_registry[KP_OVERLAY_SLOTS];
 static volatile uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-/* What every peripheral was last told. dispatch() sends only the words that
- * differ from this. Keeping a mirror rather than a changed-word list means a
- * change also survives a tick that could not take the matrix lock and had to
- * skip its dispatch: `state != sent` stays true, so the next tick still has
- * something to push. Central only: a peripheral never dispatches. */
+/* What every peripheral was last told; dispatch() sends only differing words. A
+ * mirror rather than a changed-word list means a change also survives a tick
+ * that skipped its dispatch: `state != sent` stays true. Central only. */
 static uint16_t kp_overlay_sent[KP_RGB_OVERLAY_WORDS];
 #endif
 
@@ -157,8 +152,7 @@ void kp_rgb_overlay_register(const struct device *dev) {
   kp_overlay_registry[data->index] = dev;
 }
 
-/* Every registered overlay, in container order: the default paint list for any
- * effect that does not override it. Slots not yet registered (or absent) are
+/* Every registered overlay, in container order; slots not yet registered are
  * NULL and skipped by the callers. */
 const struct device *const *kp_rgb_overlay_list(void) {
   return kp_overlay_registry;
@@ -181,9 +175,8 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word) {
 
 bool kp_rgb_overlay_covers_all(const struct device *dev) {
   const struct kp_rgb_overlay_common_config *cfg = dev->config;
-  /* A kind promises this by setting `all-leds` and never blending below full
-   * opacity; the built-in compositor paints every LED at `opacity`, so >= 100
-   * replaces every pixel. */
+  /* `all-leds` at `opacity` 100 replaces every pixel, so the engine may skip
+   * what is painted below. */
   return cfg->all_leds && cfg->opacity >= 100;
 }
 
@@ -194,9 +187,8 @@ bool kp_rgb_overlay_gate(const struct device *dev,
   if (data->local) {
     return api->active == NULL || api->active(dev);
   }
-  /* Central-evaluated: refresh() filled the bit on the central, the
-   * RGB_OVL_STATE_CMD handler filled it on a peripheral. A condition-less
-   * overlay's bit is always set, so it renders every tick as before. */
+  /* Central-evaluated: the bit was filled by refresh() on the central or by the
+   * RGB_OVL_STATE_CMD handler on a peripheral. */
   return (kp_overlay_state[data->index / 16] >> (data->index % 16)) & 1u;
 }
 
@@ -208,9 +200,7 @@ bool kp_rgb_overlay_refresh(void) {
     if (dev == NULL) {
       continue;
     }
-    /* A `local` overlay evaluates its condition on each half and is never in
-     * the pushed words. Everything else is evaluated here on the central; the
-     * peripheral fills the same bit from the RGB_OVL_STATE_CMD handler. */
+    /* A `local` overlay evaluates its condition on each half. */
     const struct kp_rgb_overlay_api *api = dev->api;
     const struct kp_rgb_overlay_common_data *data = dev->data;
     if (data->local) {
@@ -237,11 +227,9 @@ bool kp_rgb_overlay_refresh(void) {
 
 void kp_rgb_overlay_dispatch(void) {
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-  /* Any behavior node works: the command reads no context state and is
-   * BEHAVIOR_LOCALITY_GLOBAL, so zmk_behavior_invoke_binding() reaches every
-   * peripheral (and re-invokes the local no-op). Only words that differ from
-   * the last broadcast are sent, so a change costs one command per *changed*
-   * word rather than one per word. */
+  /* Any behavior node works: the command is BEHAVIOR_LOCALITY_GLOBAL and reads
+   * no context state, so this reaches every peripheral. Only words that differ
+   * from the last broadcast are sent. */
   struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(0);
   if (ctx == NULL) {
     return;
@@ -258,8 +246,7 @@ void kp_rgb_overlay_dispatch(void) {
         .param2 = RGB_OVL_STATE_VAL(w, bits),
     };
     zmk_behavior_invoke_binding(&binding, event, true);
-    /* Best effort: a split drop is silent, so this records the attempt. A
-     * reconnect re-sends every word (rgb_split_sync.c). */
+    /* Best effort: a split drop is silent, so this records the attempt. */
     kp_overlay_sent[w] = bits;
   }
 #endif

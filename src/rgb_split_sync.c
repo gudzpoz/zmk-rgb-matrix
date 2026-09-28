@@ -3,20 +3,12 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * Split RGB state sync. A &kprgb command is BEHAVIOR_LOCALITY_GLOBAL, so every
- * command typed on the central reaches the peripheral and is persisted there. A
- * peripheral that was off while the settings changed never saw the command, keeps
- * its stale flash defaults, and reloads them on the next power-up. This pushes the
- * selected effect (index, colour, period) and the user on/off intent to a
- * peripheral when it newly appears.
+ * Split RGB state sync: pushes the selected effect (index, colour, period) and
+ * the user on/off intent to a peripheral when it newly appears, so a peripheral
+ * that was off during a settings change does not keep its stale flash defaults.
  *
- * No peripheral code is needed: its command handler dispatches straight to
- * behavior_keymap_binding_pressed(), and this behavior's handler ends in
- * kp_rgb_save_state(), so a push is both applied and persisted.
- *
- * Central only. There is no central-side "peripheral connected" event, and the BLE
- * transport's single status callback is already owned by central_init(), so the
- * trigger is a poll of the transport's in-RAM connected-source list.
+ * Central only; the trigger is a poll, as there is no central-side "peripheral
+ * connected" event. See docs/development.md.
  */
 
 #include <stdbool.h>
@@ -69,9 +61,9 @@ static struct k_work_delayable kp_rgb_sync_step;
 static struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
 
-/* Mirrors select_first_available_transport(): registration order is priority
- * order, and a NULL get_status means "always available". active_transport is
- * private to the split central, so the transport has to be re-derived here. */
+/* Registration order is priority order, and a NULL get_status means "always
+ * available". active_transport is private to the split central, so the transport
+ * has to be re-derived here. */
 static const struct zmk_split_transport_central *kp_rgb_sync_pick_transport(void) {
   STRUCT_SECTION_FOREACH(zmk_split_transport_central, t) {
     if (t->api == NULL || t->api->send_command == NULL ||
@@ -125,9 +117,9 @@ static void kp_rgb_sync_refresh(void) {
       st->ctx_index = 0;
       st->phase = KP_RGB_SYNC_SELECT;
       st->mask_word = 0;
-      /* A peripheral is marked connected before its GATT characteristics have
-       * been discovered, and the split worker silently drops commands sent in
-       * that window, so give discovery and the security upgrade time to land. */
+      /* A peripheral is marked connected before its GATT characteristics are
+       * discovered, and the split worker silently drops commands in that
+       * window. */
       st->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
       LOG_INF("Queued for source %u", (uint32_t)s);
     } else if (!present[s] && st->seen) {

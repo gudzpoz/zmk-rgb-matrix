@@ -46,8 +46,7 @@ struct kp_rgb_behavior_context {
   size_t leds_len;
   bool all_leds;
   bool zone_valid;
-  /* Boot defaults, re-applied by a settings reset. Raw devicetree values;
-   * kp_rgb_apply_defaults() clamps them. */
+  /* Boot defaults, re-applied by a settings reset. Raw devicetree values. */
   bool initial_on;
   int32_t initial_brightness;
   int32_t initial_duration_ms;
@@ -80,8 +79,7 @@ bool kp_rgb_behavior_any_on(void);
  * refresh()/dispatch() are central-only; on a peripheral they are no-ops. */
 bool kp_rgb_overlay_gate(const struct device *dev,
                          const struct kp_rgb_overlay_api *api);
-/* True when the overlay is `all-leds` at full opacity, i.e. it fully replaces
- * every LED. The engine then skips the active effect and lower overlays. */
+/* True when the overlay is `all-leds` at full opacity. */
 bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
@@ -94,9 +92,7 @@ bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word as
- * (word << 16) | bits. C-only, so unlike the command constant in
- * dt-bindings/keypaw/rgb_matrix.h this may use casts -- nothing parses this
- * header with the devicetree compiler. */
+ * (word << 16) | bits. */
 #define RGB_OVL_STATE_VAL(word, value)                                         \
   (((uint32_t)(word) << 16) | ((uint32_t)(value) & 0xFFFFu))
 #define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
@@ -104,11 +100,8 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
 #define KP_RGB_PERSIST_MAX_EFFECTS 16
 
-/* Largest effect registry the engine accepts. The persisted blob holds one
- * fixed entry per effect, so with persistence compiled in that is what caps the
- * registry. rgb_settings.c guards the whole blob with IS_ENABLED(CONFIG_SETTINGS),
- * so without persistence the only real limit is the byte the effect index
- * travels in (see the UINT8_MAX assert in behavior_rgb_matrix.c). */
+/* Largest effect registry the engine accepts: the persisted blob holds one fixed
+ * entry per effect. Without persistence the effect index byte is the limit. */
 #if IS_ENABLED(CONFIG_SETTINGS)
 #define KP_RGB_MAX_REGISTRY_EFFECTS KP_RGB_PERSIST_MAX_EFFECTS
 #else
