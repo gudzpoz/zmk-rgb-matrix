@@ -104,6 +104,19 @@
                 #binding-cells = <0>;
             };
         };
+
+        /* Combinators over the conditions above, to compile their operand-list
+         * plumbing. `conditions` is a plain phandles list, so sibling
+         * references are a DAG and need no #*-cells. */
+        fixture_and: fixture_and {
+            compatible = "keypaw,rgb-condition-and";
+            conditions = <&fixture_always &fixture_layer>;
+        };
+
+        fixture_or: fixture_or {
+            compatible = "keypaw,rgb-condition-or";
+            conditions = <&fixture_caps &fixture_latch>;
+        };
     };
 
     /* Container of all overlays.

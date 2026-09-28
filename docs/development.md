@@ -138,6 +138,12 @@ whether the condition is evaluated once on the central or per half is the
 consuming overlay's `local` flag to declare, because the push bit belongs to the
 overlay.
 
+Boolean compositions are also implemented as conditions:
+`keypaw,rgb-condition-and` / `-or`. It inherits that overlay's locality, which
+probably is not the most flexible design. Referencing sibling condition nodes is
+a DAG (edtlib only makes a child depend on its parent, not on its phandles);
+only a self- or mutual reference is a genuine cycle.
+
 Most conditions are stateless, but the API does not require it. The one built-in
 exception is `keypaw,rgb-condition-latch`: it keeps a bool in `dev->data` (the
 fourth argument of `KP_RGB_CONDITION_DEFINE`) that a

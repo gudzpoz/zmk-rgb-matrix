@@ -501,6 +501,8 @@ effects).
 | Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
 | Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
 | Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
+| And condition | `keypaw,rgb-condition-and` | All listed conditions active |
+| Or condition | `keypaw,rgb-condition-or` | Any listed condition active |
 | Overlay toggle | `keypaw,behavior-rgb-overlay-toggle` | Child of `keypaw,rgb-condition-latch`. Node name ≤ 8 chars |
 | Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
 

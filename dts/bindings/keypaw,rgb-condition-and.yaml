@@ -1,0 +1,19 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Logical AND over other conditions: active only while every referenced
+  condition is active. `conditions` lists the operands; a combinator may itself
+  reference other combinators, but the reference graph must be acyclic. An
+  omitted `condition` on a consumer means "unconditionally active"; this node is
+  how two or more predicates are combined instead.
+
+compatible: "keypaw,rgb-condition-and"
+
+properties:
+  conditions:
+    type: phandles
+    required: true
+    description: |
+      Conditions to combine, all of which must be active. A devicetree array
+      cannot be empty, and an empty list is rejected at build time.

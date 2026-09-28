@@ -1,0 +1,17 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Logical OR over other conditions: active while any referenced condition is
+  active. `conditions` lists the operands; a combinator may itself reference
+  other combinators, but the reference graph must be acyclic.
+
+compatible: "keypaw,rgb-condition-or"
+
+properties:
+  conditions:
+    type: phandles
+    required: true
+    description: |
+      Conditions to combine, at least one of which must be active. A devicetree
+      array cannot be empty, and an empty list is rejected at build time.
