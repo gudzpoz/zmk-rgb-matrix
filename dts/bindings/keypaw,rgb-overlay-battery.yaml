@@ -6,17 +6,7 @@ description: |
   state of charge, blending the lit part over its target LEDs and the rest
   toward black, so the bar keeps a defined empty track.
 
-  It is an overlay kind, not an effect: it is gated by `condition` (normally a
-  keypaw,rgb-condition-latch). Target `all-leds;` for the whole half -- at
-  `opacity` 100 that replaces every pixel, so the kind claims the engine's
-  cover skip and the active effect and every overlay below it are hidden. Or
-  target a subset with `keys`/`leds` (a row, a column); such a gauge keeps the
-  effect visible on the LEDs it does not touch. The renderer paints nothing if
-  the overlay targets no LED, so that is a build error.
-
-  Each half reads its own charge in the renderer, which runs on that half, so it
-  shows its own charge without `local;` -- that flag only moves where the
-  `condition` is evaluated.
+  Each half reads its own charge in the renderer, which runs on that half.
 
 compatible: "keypaw,rgb-overlay-battery"
 
@@ -35,6 +25,12 @@ properties:
     required: false
     default: 0x00FF00
     description: 24-bit 0xRRGGBB colour of the lit portion of the bar.
+
+  background-color:
+    type: int
+    required: false
+    default: 0x000000
+    description: 24-bit 0xRRGGBB colour of the unlit portion of the bar.
 
   reverse:
     type: boolean

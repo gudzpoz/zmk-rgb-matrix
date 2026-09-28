@@ -8,17 +8,7 @@
  * `soc` percent of them, blending the rest toward black so the bar keeps a
  * defined empty track.
  *
- * It is a custom overlay kind rather than a composited effect: a gauge is a
- * view, not an animation, and it wants to replace its pixels outright.
- * `all-leds;` targets every LED on the half, which at `opacity` 100 lets the
- * kind claim the engine's cover skip, hiding the active effect and everything
- * below it; `keys`/`leds` instead target a subset (a row, a column, ...) and
- * forgo the skip -- the effect stays visible on the LEDs the bar does not
- * touch, and is only hidden on the bar's own LEDs.
- *
- * The charge is read here, per half, so each half shows its own battery
- * regardless of `local`; that flag only moves where the `condition` is
- * evaluated.
+ * The charge is read per half, so each half shows its own battery.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_overlay_battery
@@ -38,6 +28,7 @@ struct kp_ovl_battery_config {
   struct kp_rgb_overlay_common_config common; /* must be first */
   const struct device *condition;             /* NULL = always active */
   uint32_t color;                             /* 0xRRGGBB */
+  uint32_t background_color;                  /* 0xRRGGBB */
   bool reverse;
 };
 struct kp_ovl_battery_data {
@@ -57,10 +48,7 @@ static bool kp_ovl_battery_active(const struct device *dev) {
 
 /* Reading order: find the target set's extents, sort along the longer axis
  * first, then along the other; `reverse` flips the whole order so the bar can
- * fill from either end. `idx[0..count)` holds the LED indices to order (filled
- * by the caller) and is sorted in place; the extents come from those LEDs, not
- * the whole board, so a row or column sorts along its own length. A pure
- * function of the frame geometry. */
+ * fill from either end. `idx[0..count)` is sorted in place. */
 static bool kp_ovl_battery_before(const struct kp_rgb_frame *frame, size_t a,
                                   size_t b, bool x_primary, bool reverse) {
   const struct kp_rgb_coord *ca = &frame->coords[a];
@@ -117,8 +105,6 @@ static void kp_ovl_battery_render(const struct device *dev,
   const struct kp_ovl_battery_data *data = dev->data;
   const bool all = cfg->common.all_leds;
 
-  /* `all-leds` orders the whole frame; otherwise order just the resolved
-   * targets (a row, a column, ...). An empty target list stays dark. */
   const size_t count = all ? frame->count : data->common.led_count;
   if (count == 0) {
     return;
@@ -138,7 +124,8 @@ static void kp_ovl_battery_render(const struct device *dev,
 
   const struct led_rgb on =
       kp_rgb_rgb_scale(kp_hex_to_rgb(cfg->color), kp_rgb_brightness_pct(frame));
-  const struct led_rgb off = {.r = 0, .g = 0, .b = 0};
+  const struct led_rgb off = kp_rgb_rgb_scale(
+      kp_hex_to_rgb(cfg->background_color), kp_rgb_brightness_pct(frame));
 
   /* Blend the lit bar over the targets and the empty track toward black. At
    * `opacity` 100 this replaces them -- which is what makes an `all-leds`
@@ -161,6 +148,8 @@ static void kp_ovl_battery_render(const struct device *dev,
           KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_battery_##inst),     \
       .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .color = DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00),                 \
+      .background_color =                                                      \
+          DT_PROP_OR(DT_DRV_INST(inst), background_color, 0x000000),           \
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
   static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
