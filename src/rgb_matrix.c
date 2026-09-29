@@ -304,8 +304,16 @@ static void kp_rgb_matrix_off_handler(struct k_work *work) {
   if (!kp_rgb_has_leds()) {
     return;
   }
-  memset(pixels, 0, sizeof(pixels));
-  led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+  /* Decide and emit under the lock: an "on" that lands between the check and
+   * the strip write would otherwise be clobbered by this stale black frame.
+   * Holding the lock across the one-shot SPI write is a deliberate exception to
+   * the usual "no strip I/O under the lock" rule -- it is rare and bounded. */
+  kp_rgb_matrix_lock();
+  if (!kp_any_on_locked()) {
+    memset(pixels, 0, sizeof(pixels));
+    led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+  }
+  kp_rgb_matrix_unlock();
 }
 K_WORK_DEFINE(kp_off_work, kp_rgb_matrix_off_handler);
 K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
