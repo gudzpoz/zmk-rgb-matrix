@@ -6,6 +6,8 @@
  * Split RGB state sync: pushes the selected effect (index, colour, period) and
  * the user on/off intent to a peripheral when it newly appears, so a peripheral
  * that was off during a settings change does not keep its stale flash defaults.
+ * A send that fails is retried with bounded backoff while the peripheral stays
+ * present.
  *
  * Central only; the trigger is a poll, as there is no central-side "peripheral
  * connected" event. See docs/development.md.
@@ -34,6 +36,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_SYNC_SOURCES MAX(ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT, 1)
 #define KP_RGB_SYNC_STEP_DELAY_MS 50
+#define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
+#define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
 
 enum kp_rgb_sync_phase {
   KP_RGB_SYNC_SELECT,   /* RGB_EFS_CMD: must precede colour/period */
@@ -42,10 +46,17 @@ enum kp_rgb_sync_phase {
   KP_RGB_SYNC_POWER,    /* RGB_ON_CMD / RGB_OFF_CMD, last */
 };
 
+enum kp_rgb_sync_emit {
+  KP_RGB_SYNC_EMIT_SENT,  /* one command sent; the phase already advanced */
+  KP_RGB_SYNC_EMIT_RETRY, /* transient failure; the same command stays armed */
+  KP_RGB_SYNC_EMIT_DONE,  /* nothing left to send for this source */
+};
+
 struct kp_rgb_sync_source {
-  bool seen;          /* present at the last sample */
-  bool pending;       /* a sync is in flight for this source */
-  uint16_t mask_word; /* next overlay word to push this time round */
+  bool seen;           /* present at the last sample */
+  bool pending;        /* a sync is in flight for this source */
+  uint8_t retry_count; /* consecutive failed sends for the in-flight command */
+  uint16_t mask_word;  /* next overlay word to push this time round */
   int64_t ready_at;
   size_t ctx_index;
   enum kp_rgb_sync_phase phase;
@@ -90,6 +101,7 @@ static void kp_rgb_sync_refresh(void) {
     for (size_t i = 0; i < ARRAY_SIZE(kp_rgb_sync_sources); i++) {
       kp_rgb_sync_sources[i].seen = false;
       kp_rgb_sync_sources[i].pending = false;
+      kp_rgb_sync_sources[i].retry_count = 0;
     }
   }
 
@@ -114,6 +126,7 @@ static void kp_rgb_sync_refresh(void) {
     if (present[s] && !st->seen) {
       st->seen = true;
       st->pending = true;
+      st->retry_count = 0;
       st->ctx_index = 0;
       st->phase = KP_RGB_SYNC_SELECT;
       st->mask_word = 0;
@@ -156,8 +169,9 @@ static bool kp_rgb_sync_send(uint8_t source, const struct device *dev, uint32_t 
   return true;
 }
 
-/* Emits at most one wire command. Returns true if one was sent. */
-static bool kp_rgb_sync_emit_one(uint8_t source, struct kp_rgb_sync_source *st) {
+/* Emits at most one wire command. */
+static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
+                                                  struct kp_rgb_sync_source *st) {
   while (st->ctx_index < kp_rgb_behavior_count()) {
     struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(st->ctx_index);
     if (ctx == NULL) {
@@ -207,11 +221,11 @@ static bool kp_rgb_sync_emit_one(uint8_t source, struct kp_rgb_sync_source *st) 
       arg = 0;
       break;
     default:
-      return false;
+      return KP_RGB_SYNC_EMIT_DONE;
     }
 
     if (!kp_rgb_sync_send(source, ctx->dev, cmd, arg)) {
-      return false; /* caller clears pending: no half-applied retry */
+      return KP_RGB_SYNC_EMIT_RETRY; /* the phase does not advance */
     }
 
     if (st->phase == KP_RGB_SYNC_POWER) {
@@ -220,7 +234,7 @@ static bool kp_rgb_sync_emit_one(uint8_t source, struct kp_rgb_sync_source *st) 
     } else {
       st->phase++;
     }
-    return true;
+    return KP_RGB_SYNC_EMIT_SENT;
   }
 
   /* The overlay state is not per-context, so it goes after them, one word per
@@ -237,15 +251,15 @@ static bool kp_rgb_sync_emit_one(uint8_t source, struct kp_rgb_sync_source *st) 
       if (!kp_rgb_sync_send(
               source, first->dev, RGB_OVL_STATE_CMD,
               RGB_OVL_STATE_VAL(word, kp_rgb_overlay_get_word(word)))) {
-        return false; /* no half-applied retry; a reconnect re-syncs */
+        return KP_RGB_SYNC_EMIT_RETRY; /* the word does not advance */
       }
       st->mask_word++;
-      return true;
+      return KP_RGB_SYNC_EMIT_SENT;
     }
   }
 
   LOG_INF("Complete for source %u", source);
-  return false;
+  return KP_RGB_SYNC_EMIT_DONE;
 }
 
 static void kp_rgb_sync_step_handler(struct k_work *work) {
@@ -267,9 +281,22 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
       }
       continue;
     }
-    if (kp_rgb_sync_emit_one((uint8_t)s, st)) {
+    enum kp_rgb_sync_emit r = kp_rgb_sync_emit_one((uint8_t)s, st);
+    if (r == KP_RGB_SYNC_EMIT_SENT) {
+      st->retry_count = 0;
       next_ms = KP_RGB_SYNC_STEP_DELAY_MS;
       break; /* one command per work item, then yield */
+    }
+    if (r == KP_RGB_SYNC_EMIT_RETRY) {
+      uint8_t shift = MIN(st->retry_count, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
+      int64_t backoff = MIN((int64_t)(KP_RGB_SYNC_STEP_DELAY_MS << shift),
+                            (int64_t)KP_RGB_SYNC_MAX_BACKOFF_MS);
+      st->retry_count = MIN(st->retry_count + 1, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
+      st->ready_at = now + backoff;
+      if (next_ms < 0 || backoff < next_ms) {
+        next_ms = backoff;
+      }
+      continue; /* other sources still make progress */
     }
     st->pending = false;
   }

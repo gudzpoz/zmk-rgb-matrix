@@ -246,7 +246,9 @@ void kp_rgb_overlay_dispatch(void) {
         .param2 = RGB_OVL_STATE_VAL(w, bits),
     };
     zmk_behavior_invoke_binding(&binding, event, true);
-    /* Best effort: a split drop is silent, so this records the attempt. */
+    /* GLOBAL locality reports no per-peripheral result, so a split drop is
+     * invisible here: this records the local attempt, and the connect-time sync
+     * is what repairs a peripheral that missed it. */
     kp_overlay_sent[w] = bits;
   }
 #endif

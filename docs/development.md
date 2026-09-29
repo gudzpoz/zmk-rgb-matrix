@@ -423,8 +423,10 @@ needed.
 - By default, `CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=60000` (see `app/Kconfig` in
   ZMK), so a peripheral power-cycled within 60 s of a sync may not have written
   the pushed state.
-- No periodic re-assert, so a command lost to a queue overflow is only healed by
-  the next reconnect.
+- A send that **reports** failure is retried with bounded backoff (50 ms doubling
+  to 1 s) while the peripheral stays present. A command the transport accepts but
+  then silently drops (run-queue overflow, the GATT discovery window) cannot be
+  detected, so it is still only healed by the next reconnect.
 
 ## Trigger table internals
 
