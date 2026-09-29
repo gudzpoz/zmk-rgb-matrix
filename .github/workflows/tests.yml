@@ -1,0 +1,88 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+#
+# Unit tests (host ztest for the pure helpers) and the native_sim smoke tests.
+# The module is not a ZMK user config, so this job fetches ZMK itself and points
+# the harnesses at it; the module is passed in via ZMK_EXTRA_MODULES.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/tests.yml"
+      - "Kconfig"
+      - "dts/**"
+      - "include/**"
+      - "src/**"
+      - "tests/**"
+  pull_request:
+    paths:
+      - ".github/workflows/tests.yml"
+      - "Kconfig"
+      - "dts/**"
+      - "include/**"
+      - "src/**"
+      - "tests/**"
+  workflow_dispatch:
+    inputs:
+      zmk_ref:
+        description: ZMK branch or tag to build against
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Unit and smoke tests
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/zmkfirmware/zmk-build-arm:4.1
+    steps:
+      - uses: actions/checkout@v7
+
+      # No config/west.yml dependency: the harnesses only need a ZMK checkout
+      # to build against.
+      - name: Fetch ZMK
+        env:
+          ZMK_REF: ${{ github.event.inputs.zmk_ref || 'main' }}
+        run: |
+          git clone --quiet --depth 1 --branch "$ZMK_REF" \
+            https://github.com/zmkfirmware/zmk.git "$GITHUB_WORKSPACE/zmk-ws"
+
+      # Keyed on the manifest, so it is only refetched when ZMK's project list
+      # actually changes. Best effort: a cache miss just costs time.
+      - name: Cache west modules
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: |
+            zmk-ws/bootloader
+            zmk-ws/modules
+            zmk-ws/tools
+            zmk-ws/zephyr
+          key: zmk-${{ github.event.inputs.zmk_ref || 'main' }}-${{ hashFiles('zmk-ws/app/west.yml') }}
+          restore-keys: |
+            zmk-${{ github.event.inputs.zmk_ref || 'main' }}-
+
+      - name: Initialise the west workspace
+        working-directory: zmk-ws
+        run: |
+          west init -l app
+          west update --fetch-opt=--filter=tree:0
+
+      - name: Unit tests
+        working-directory: zmk-ws
+        run: |
+          west build -s "$GITHUB_WORKSPACE/tests/unit" -b native_sim/native/64 \
+            -d "$GITHUB_WORKSPACE/build/unit" -p
+          west build -d "$GITHUB_WORKSPACE/build/unit" -t run
+
+      - name: Smoke tests
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        # Invoked through bash so the executable bit is not load-bearing.
+        run: bash tests/sim/run-smoke.sh

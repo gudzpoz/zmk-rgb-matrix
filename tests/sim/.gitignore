@@ -4,7 +4,9 @@
 # Build output and generated previews. Previews worth keeping should be copied
 # into docs/ rather than committed from here.
 build/
+build-smoke/
 out/
+out-smoke/
 site/
 *.bin
 *.gif

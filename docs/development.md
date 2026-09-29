@@ -523,10 +523,45 @@ ms, ~8% of idle time). Confirmed on hardware: the jitter is gone.
 If a similar latency question comes up, **measure before hypothesising** —
 stamp `flush->paint` on both halves again. Guessing got it wrong twice.
 
-## Testing and previews
+## Testing
 
-`tests/sim/` builds the module for `native_sim//zmk_test_mock` and renders one
-GIF per devicetree effect node.
+Three layers, cheapest first.
+
+### Unit tests (`tests/unit/`)
+
+Host ztest for the pure helpers (the colour math and `rgb_matrix_math.h`). No
+ZMK app and no devicetree: only `src/rgb_color.c` is linked. `rgb_color.h`
+exposes Zephyr's `struct led_rgb`, so the minimal `unit_testing` board (no
+syscall/devicetree headers) cannot build it; it targets `native_sim/native/64`.
+
+```sh
+cd zmk
+west build -s ../modules/zmk-rgb-matrix/tests/unit -b native_sim/native/64 \
+    -d ../modules/zmk-rgb-matrix/tests/unit/build -p
+west build -d ../modules/zmk-rgb-matrix/tests/unit/build -t run
+```
+
+### Smoke tests (`tests/sim/run-smoke.sh`)
+
+Builds `tests/sim/config-smoke/` — the preview fixture plus a visible layer
+overlay and a scripted key sequence — and asserts pixel invariants on the
+captured frames (`tests/sim/check_capture.py`): boot is solid red, `RGB_OFF`
+blanks the strip, `RGB_ON` restores it, selecting reactive idles at its floor, a
+key press flashes that LED and decays, and holding layer 1 covers green. It also
+checks that an unwritable `--capture` path (a missing directory, `/dev/full`)
+fails the run instead of leaving a silent empty artifact.
+
+```sh
+tests/sim/run-smoke.sh
+```
+
+The checks are ordered, not time-windowed, so they do not depend on the
+simulated clock.
+
+### Previews (`tests/sim/run-preview.sh`)
+
+Builds the module for `native_sim//zmk_test_mock` and renders one GIF per
+devicetree effect node.
 
 ```sh
 tests/sim/run-preview.sh            # every effect
@@ -552,6 +587,12 @@ GIFs land in `tests/sim/out/`, captures and logs in `tests/sim/out/.work/`. The
 gallery page lives in `tests/sim/site/`; `make_index.py` rebuilds it. Useful
 environment overrides: `DURATION`, `TILE`, `MIN_DISTINCT`, `OUT_DIR`, `ZMK_WS`,
 `WEST`.
+
+### Not covered
+
+Split sync (a single native_sim half), settings persistence round-trips
+(`CONFIG_SETTINGS=n` in the sim), lock-contention timing, and exact per-effect
+colours — the previews cover the visuals, the smoke test asserts invariants.
 
 ## Devicetree traps
 

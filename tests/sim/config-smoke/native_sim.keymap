@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2026 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Smoke-test keymap: drives the module through its real behavior path. 4x12 to
+ * match the shared fixture's transform; only the scripted positions do anything
+ * (see tests/sim/config-smoke/native_sim.overlay).
+ */
+
+#include <behaviors.dtsi>
+#include <dt-bindings/keypaw/rgb_matrix.h>
+#include <dt-bindings/zmk/keys.h>
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <
+                &kprgb RGB_OFF &none &none &none &none &none &none &none &none &none &none &none
+                &kprgb RGB_ON &fx_reactive &none &none &none &none &none &none &none &none &none &none
+                &kp A &none &none &none &none &none &none &none &none &none &none &none
+                &mo 1 &none &none &none &none &none &none &none &none &none &none &none
+            >;
+        };
+
+        layer1 {
+            bindings = <
+                &none &none &none &none &none &none &none &none &none &none &none &none
+                &none &none &none &none &none &none &none &none &none &none &none &none
+                &none &none &none &none &none &none &none &none &none &none &none &none
+                &none &none &none &none &none &none &none &none &none &none &none &none
+            >;
+        };
+    };
+};

@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ *
+ * Smoke-test fixture: reuses the preview devicetree and overrides only what the
+ * scenario needs -- a visible layer overlay and the scripted key events. Run
+ * with tests/sim/run-smoke.sh; the assertions live in check_capture.py.
+ */
+
+#include "../config/native_sim.overlay"
+
+/* Drop the preview typing cadence; the scenario below scripts its own. */
+&kscan {
+    /delete-property/ events;
+};
+
+/* The preview fixture_overlay names no targets, so it paints nothing. This one
+ * is `all-leds` at full opacity, so holding layer 1 covers every LED. */
+&rgb_overlays {
+    smoke_layer: smoke_layer {
+        compatible = "keypaw,rgb-overlay";
+        condition = <&fixture_layer>;
+        all-leds;
+        opacity = <100>;
+
+        smoke_solid: smoke_solid {
+            compatible = "keypaw,rgb-matrix-solid";
+            #binding-cells = <0>;
+            color = <0x00FF00>;
+        };
+    };
+};
+
+/* Scenario, ms since the previous event (positions from the identity transform
+ * are row * 12 + col):
+ *    400  RC(0,0)=0  RGB_OFF  -> strip blanks
+ *   1000  RC(1,0)=12 RGB_ON   -> solid red again
+ *   1500  RC(1,1)=13 reactive -> idles at its background floor
+ *   2600  RC(2,0)=24 key press-> reactive flash on that key's LED
+ *   3400  RC(3,0)=36 &mo 1    -> layer overlay covers green (held to the end)
+ */
+&kscan {
+    events = <
+        ZMK_MOCK_PRESS(0, 0, 400) ZMK_MOCK_RELEASE(0, 0, 60)
+        ZMK_MOCK_PRESS(1, 0, 540) ZMK_MOCK_RELEASE(1, 0, 60)
+        ZMK_MOCK_PRESS(1, 1, 440) ZMK_MOCK_RELEASE(1, 1, 60)
+        ZMK_MOCK_PRESS(2, 0, 1040) ZMK_MOCK_RELEASE(2, 0, 60)
+        ZMK_MOCK_PRESS(3, 0, 740) ZMK_MOCK_RELEASE(3, 0, 500)
+    >;
+};
