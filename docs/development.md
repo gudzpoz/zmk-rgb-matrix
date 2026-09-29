@@ -544,8 +544,9 @@ The harness:
   two effects slugify to the same name;
 - writes a `previews.tsv` manifest (`slug<TAB>display-name`) so consumers such
   as the gallery page do not re-derive the slug rule;
-- warns (`MIN_DISTINCT`, default 3) when a preview never changes — a static
-  capture is nearly always a bug, though `solid` and `static` legitimately warn.
+- fails (`MIN_DISTINCT`, default 3) when a preview never changes — a static
+  capture is nearly always a bug. `solid` and `static` are the only effects
+  allowlisted to 0.
 
 GIFs land in `tests/sim/out/`, captures and logs in `tests/sim/out/.work/`. The
 gallery page lives in `tests/sim/site/`; `make_index.py` rebuilds it. Useful

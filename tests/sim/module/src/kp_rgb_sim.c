@@ -63,30 +63,42 @@ static bool capture_header_written;
 /* 1. the capture led_strip device                                           */
 /* ------------------------------------------------------------------------- */
 
+static void capture_fail(const char *what) {
+  printk("keypaw-rgb-sim: %s failed, aborting capture\n", what);
+  capture_enabled = false;
+  if (capture_fp != NULL) {
+    fclose(capture_fp);
+    capture_fp = NULL;
+  }
+  /* A partial capture is worse than none: fail the run so the harness sees it. */
+  exit(1);
+}
+
+static void capture_write(const void *buf, size_t len) {
+  if (capture_fp == NULL || fwrite(buf, 1, len, capture_fp) != len) {
+    capture_fail("capture write");
+  }
+}
+
 static void capture_write_header(void) {
   const uint8_t magic[4] = {'K', 'P', 'R', 'C'};
   const uint16_t version = KP_SIM_VERSION;
   const uint16_t led_count = KP_SIM_LED_COUNT;
 
-  fwrite(magic, 1, sizeof(magic), capture_fp);
-  fwrite(&version, sizeof(version), 1, capture_fp);
-  fwrite(&led_count, sizeof(led_count), 1, capture_fp);
+  capture_write(magic, sizeof(magic));
+  capture_write(&version, sizeof(version));
+  capture_write(&led_count, sizeof(led_count));
 
   for (size_t led = 0; led < KP_SIM_LED_COUNT; led++) {
     const struct kp_rgb_coord *coord = kp_rgb_led_coord(led);
     const uint16_t x = coord != NULL ? coord->x : 0;
     const uint16_t y = coord != NULL ? coord->y : 0;
 
-    fwrite(&x, sizeof(x), 1, capture_fp);
-    fwrite(&y, sizeof(y), 1, capture_fp);
+    capture_write(&x, sizeof(x));
+    capture_write(&y, sizeof(y));
   }
 
   capture_header_written = true;
-}
-
-static void capture_fail(void) {
-  printk("keypaw-rgb-sim: capture write failed, stopping\n");
-  capture_enabled = false;
 }
 
 static int capture_update_rgb(const struct device *dev, struct led_rgb *pixels,
@@ -102,17 +114,13 @@ static int capture_update_rgb(const struct device *dev, struct led_rgb *pixels,
   }
 
   const uint32_t timestamp = (uint32_t)k_uptime_get();
-  fwrite(&timestamp, sizeof(timestamp), 1, capture_fp);
+  capture_write(&timestamp, sizeof(timestamp));
 
   for (size_t led = 0; led < num_pixels; led++) {
     /* Written field by field on purpose: struct led_rgb may carry a scratch
      * byte under CONFIG_LED_STRIP_RGB_SCRATCH, which is not pixel data. */
     const uint8_t rgb[3] = {pixels[led].r, pixels[led].g, pixels[led].b};
-    fwrite(rgb, 1, sizeof(rgb), capture_fp);
-  }
-
-  if (ferror(capture_fp)) {
-    capture_fail();
+    capture_write(rgb, sizeof(rgb));
   }
 
   return 0;
@@ -220,8 +228,11 @@ static int kp_sim_apply(void) {
     capture_fp = fopen(capture_path, "wb");
     if (capture_fp == NULL) {
       printk("keypaw-rgb-sim: cannot open %s for writing\n", capture_path);
-      return 0;
+      exit(1);
     }
+    /* Unbuffered, so a write error surfaces at the failing write rather than
+     * being deferred to fclose. */
+    setvbuf(capture_fp, NULL, _IONBF, 0);
   }
 
   if (requested_effect != UINT32_MAX) {

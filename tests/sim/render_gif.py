@@ -188,9 +188,9 @@ def main():
         type=int,
         default=0,
         metavar="N",
-        help="warn when the capture holds fewer than N distinct frames "
+        help="fail when the capture holds fewer than N distinct frames "
         "(0 disables the check). A preview that never changes is usually a "
-        "bug, though `solid` and `static` are static by design.",
+        "bug, though `solid` and `static` are static by design and need 0.",
     )
     parser.add_argument(
         "--fps",
@@ -226,10 +226,10 @@ def main():
     )
 
     if 0 < args.min_distinct and distinct < args.min_distinct:
-        print(
-            f"warning: {args.output} has only {distinct} distinct frame(s) of "
-            f"{len(frames)}; the effect may be static (expected for solid/static)",
-            file=sys.stderr,
+        sys.exit(
+            f"error: {args.output} has only {distinct} distinct frame(s) of "
+            f"{len(frames)} (min {args.min_distinct}); the effect may be static "
+            f"(pass a lower --min-distinct for solid/static effects)"
         )
 
 

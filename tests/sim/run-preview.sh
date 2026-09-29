@@ -23,7 +23,7 @@
 #   WEST      west executable           (default: <repo>/.venv/bin/west, else $PATH)
 #   DURATION  simulated seconds per run (default: 4)
 #   TILE      pixels per LED            (default: 32)
-#   MIN_DISTINCT  warn below this many distinct frames (default: 3)
+#   MIN_DISTINCT  fail below this many distinct frames (default: 3)
 #   OUT_DIR   where previews are written
 
 set -euo pipefail
@@ -45,8 +45,8 @@ BUILD_DIR=$SIM_DIR/build
 OUT_DIR=${OUT_DIR:-$SIM_DIR/out}
 DURATION=${DURATION:-4}
 TILE=${TILE:-32}
-# Warn when a preview never changes; a static capture is nearly always a bug.
-# `solid` and `static` are legitimately static and will warn.
+# Fail when a preview never changes; a static capture is nearly always a bug.
+# The legitimately-static effects (solid/static) pass 0 below.
 MIN_DISTINCT=${MIN_DISTINCT:-3}
 filters=("$@")
 
@@ -164,9 +164,14 @@ for i in "${!indices[@]}"; do
         exit 1
     fi
 
+    # solid/static are static by design; every other effect must animate.
+    case "$slug" in
+        solid|solid-horizontal|solid-vertical|static) min=0 ;;
+        *) min=$MIN_DISTINCT ;;
+    esac
     python3 "$SIM_DIR/render_gif.py" "$work_dir/capture.bin" \
         -o "$OUT_DIR/$slug.gif" --tile "$TILE" \
-        --min-distinct "$MIN_DISTINCT" 2>>"$warn_log"
+        --min-distinct "$min" 2>>"$warn_log"
     printf '%s\t%s\n' "$slug" "$name" >>"$manifest"
     rendered=$((rendered + 1))
 done
