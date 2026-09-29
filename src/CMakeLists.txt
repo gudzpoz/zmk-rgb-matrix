@@ -10,6 +10,8 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   # Engine
   rgb_matrix.c
   rgb_utils.c
+  # Pure colour math
+  rgb_color.c
 
   # Built-in stuff: zero cost when there's no DTS definitions
   conditions/layer.c
