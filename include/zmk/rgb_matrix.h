@@ -392,7 +392,8 @@ void kp_rgb_overlay_register(const struct device *dev);
 
 /* Resolve an overlay's `keys`/`leds` devicetree spec into LED indices.
  * Returns the number written (never more than out_max, and always <=
- * KP_LED_COUNT); 0 when both lists are empty. */
+ * KP_LED_COUNT); 0 when both lists are empty. Duplicate indices are dropped, so
+ * each LED is painted once regardless of how the spec names it. */
 size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
                               const uint32_t *leds, size_t leds_len,
                               size_t *out, size_t out_max);

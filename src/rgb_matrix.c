@@ -40,6 +40,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 BUILD_ASSERT(
     DT_PROP_LEN(KP_RGB_NODE, mapping) == KP_LED_COUNT,
     "keypaw,rgb-matrix: 'mapping' must hold exactly one entry per LED");
+BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS <=
+                 CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS,
+             "KEYPAW_RGB_MATRIX_DURATION_MIN_MS must not exceed "
+             "KEYPAW_RGB_MATRIX_DURATION_MAX_MS");
 
 #define KP_MAP_ENTRY_ASSERT(node_id, prop, idx)                                \
   BUILD_ASSERT((DT_PROP_BY_IDX(node_id, prop, idx) & KP_RGB_NO_KEY_XY_FLAG) || \
@@ -245,12 +249,16 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
           ctx->state.active_fx == NULL) {
         continue;
       }
-      memset(scratch, 0, sizeof(scratch));
+      /* `pixels` direct write when ctx->all_leds. */
+      struct led_rgb *buf = ctx->all_leds ? pixels : scratch;
+      if (!ctx->all_leds) {
+        memset(scratch, 0, sizeof(scratch));
+      }
       struct kp_rgb_frame frame = {
           .tune = &ctx->tuning,
           .count = KP_LED_COUNT,
           .coords = kp_led_coords,
-          .pixels = scratch,
+          .pixels = buf,
           .elapsed = elapsed,
           .board_length = kp_rgb_board_length,
           .board_height = kp_rgb_board_height,
@@ -268,9 +276,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
         first = 0;
       }
       kp_render_overlays(&frame, overlays, overlay_count, first);
-      if (ctx->all_leds) {
-        memcpy(pixels, scratch, sizeof(pixels));
-      } else {
+      if (!ctx->all_leds) {
         for (size_t led = 0; led < ctx->leds_len; led++) {
           if (ctx->leds[led] < KP_LED_COUNT) {
             pixels[ctx->leds[led]] = scratch[ctx->leds[led]];

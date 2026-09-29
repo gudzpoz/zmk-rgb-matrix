@@ -14,6 +14,7 @@ if KEYPAW_RGB_MATRIX
 config KEYPAW_RGB_MATRIX_TICK_MS
     int "Animation tick period (ms)"
     default 32
+    range 1 1000
     help
       Upstream underglow uses 50 ms; 32 ms is noticeably smoother for the
       reactive and ripple effects. One update costs ~1.5 ms of blocking SPI.
@@ -43,10 +44,12 @@ config KEYPAW_RGB_MATRIX_DURATION_STEP
 config KEYPAW_RGB_MATRIX_DURATION_MIN_MS
     int "Fastest animation period (ms)"
     default 100
+    range 1 60000
 
 config KEYPAW_RGB_MATRIX_DURATION_MAX_MS
     int "Slowest animation period (ms)"
     default 10000
+    range 1 60000
 
 
 config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
@@ -113,6 +116,7 @@ if KEYPAW_RGB_SPLIT_SYNC
 config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
     int "Peripheral connection poll period (ms)"
     default 1000
+    range 1 60000
     help
       How often the connected-source set is sampled. The sample is an in-RAM
       array read with no radio traffic, and a peripheral reboot cannot finish
@@ -122,6 +126,7 @@ config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
 config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
     int "Delay before pushing to a newly connected peripheral (ms)"
     default 1000
+    range 1 60000
     help
       A peripheral is marked connected before its GATT characteristics have been
       discovered, and the split worker drops a command sent in that window with
