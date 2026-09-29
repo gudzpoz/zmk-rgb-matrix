@@ -107,6 +107,7 @@ static struct led_rgb scratch[KP_LED_COUNT];
 static uint32_t last_tick;
 static K_MUTEX_DEFINE(kp_rgb_lock);
 static bool kp_rgb_matrix_valid;
+static atomic_t kp_rgb_any_on;
 
 /* A half with no strip renders nothing, but the central-only overlay and split
  * machinery still runs. */
@@ -140,7 +141,12 @@ static bool kp_any_on_locked(void) {
   return false;
 }
 
-bool kp_rgb_behavior_any_on(void) { return kp_any_on_locked(); }
+/* Caller should hold kp_rgb_lock and has just changed a ctx->state.on.
+ * Republish the lock-free mirror the timer ISR and zmk_rgb_matrix_flush()
+ * read. */
+static void kp_rgb_publish_any_on_locked(void) {
+  atomic_set(&kp_rgb_any_on, kp_any_on_locked() ? 1 : 0);
+}
 #define KP_TRY_LOCK()                                                          \
   k_mutex_lock(&kp_rgb_lock, K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS))
 
@@ -166,11 +172,11 @@ static bool kp_rgb_matrix_lock_patiently(void) {
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
 /* Runs in the system timer ISR, so it must not take kp_rgb_lock (a mutex is
- * illegal in ISR context). The unlocked read only decides whether a frame is
- * worth scheduling; the work handler re-checks under the lock. */
+ * illegal in ISR context). It reads the atomic mirror; the work handler
+ * re-checks the contexts authoritatively under the lock. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
-  if (kp_any_on_locked()) {
+  if (atomic_get(&kp_rgb_any_on)) {
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
   }
 }
@@ -322,10 +328,7 @@ void zmk_rgb_matrix_flush(void) {
   if (!kp_rgb_matrix_valid) {
     return;
   }
-  /* No lock on purpose: a racy read costs at most one redundant frame, and this
-   * runs from contexts where blocking would be worse. Concurrent callers need
-   * no dedup -- k_work_submit_to_queue() drops a duplicate queued work. */
-  if (!kp_any_on_locked()) {
+  if (!atomic_get(&kp_rgb_any_on)) {
     return;
   }
   k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
@@ -496,6 +499,7 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
         ctx->state.on = wakening ? ctx->state.user_on : false;
       }
     }
+    kp_rgb_publish_any_on_locked();
     bool any_on = kp_any_on_locked();
     if (any_on) {
       kp_start_timer();
@@ -527,6 +531,7 @@ int zmk_rgb_matrix_on(const struct device *behavior) {
     return ret;
   bool was_on = kp_any_on_locked();
   ctx->state.on = true;
+  kp_rgb_publish_any_on_locked();
   if (!was_on)
     kp_start_timer();
   kp_rgb_matrix_unlock();
@@ -542,6 +547,7 @@ int zmk_rgb_matrix_off(const struct device *behavior) {
   if (ret < 0)
     return ret;
   ctx->state.on = false;
+  kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
   if (!any_on)
     k_timer_stop(&kp_tick_timer);
@@ -657,7 +663,9 @@ static int kp_rgb_matrix_init(void) {
     LOG_ERR("RGB matrix disabled because LED zones are invalid");
     return -EINVAL;
   }
+  /* Behavior init set ctx->state.on before this ran; publish it for the ISR. */
   kp_rgb_matrix_lock();
+  kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
   kp_rgb_matrix_unlock();
   if (any_on)

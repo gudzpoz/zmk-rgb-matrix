@@ -86,9 +86,15 @@ a layer change used to lag visibly while `RGB_EFF` felt instant.
 
 One mutex (`kp_rgb_lock`) guards the frame buffers, every behavior's state and
 the effect data; flash I/O and split sends are deliberately kept outside it so
-that no holder can block. The work-queue paths take it with a bounded wait
+that no holder can block — the one exception is the power-off blank, whose check
+and strip write are held together so a late `on` cannot be clobbered by a stale
+black frame. The work-queue paths take it with a bounded wait
 (`kp_rgb_matrix_lock_patiently`, 8 × 1 ms) so a stuck holder warns instead of
 hanging the low-priority queue.
+
+A lock-free `atomic_t` mirror of "any behavior on", republished under the lock by
+every writer, lets the timer ISR and `zmk_rgb_matrix_flush()` avoid touching that
+state at all.
 
 `zmk_position_state_changed` listeners run **inline in the raising thread**
 (`zmk/app/src/event_manager.c`), which for a key press is the physical-layouts
