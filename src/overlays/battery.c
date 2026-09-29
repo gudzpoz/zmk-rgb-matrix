@@ -44,6 +44,7 @@ static bool kp_ovl_battery_active(const struct device *dev) {
   return cond->active(cfg->condition);
 }
 
+#if KP_LED_COUNT > 0
 /* Reading order: the longer board axis first, then the other; `reverse` flips it
  * so the bar can fill from either end. */
 static bool kp_ovl_battery_before(const struct kp_rgb_frame *frame, size_t a,
@@ -94,9 +95,14 @@ static void kp_ovl_battery_order(const struct kp_rgb_frame *frame, size_t *idx,
 /* Overlay renderers run one at a time under the matrix lock, so one shared
  * scratch order (like the compositor's shared layer buffer) is enough. */
 static size_t kp_ovl_battery_order_buf[KP_LED_COUNT];
+#endif /* KP_LED_COUNT > 0 */
 
 static void kp_ovl_battery_render(const struct device *dev,
                                   struct kp_rgb_frame *frame) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(frame);
+#else
   const struct kp_ovl_battery_config *cfg = dev->config;
   const struct kp_ovl_battery_data *data = dev->data;
   const bool all = cfg->common.all_leds;
@@ -128,6 +134,7 @@ static void kp_ovl_battery_render(const struct device *dev,
     frame->pixels[order[i]] = kp_rgb_rgb_mix(
         frame->pixels[order[i]], i < lit ? on : off, cfg->common.opacity);
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_OVL_BATTERY_DEFINE(inst)                                            \

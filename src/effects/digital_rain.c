@@ -48,11 +48,14 @@ struct kp_eff_digital_rain_data {
   uint16_t max_x;
   uint16_t min_y;
   uint16_t max_y;
+#if KP_LED_COUNT > 0
   uint8_t col_of_led[KP_LED_COUNT]; /* column index per LED */
+#endif
   int32_t head_q8[KP_DIGITAL_COLS];  /* falling head y, 1/256 layout units */
   int32_t speed_q8[KP_DIGITAL_COLS]; /* fall speed, 1/256 units per ms */
 };
 
+#if KP_LED_COUNT > 0
 /* Where a recycled head restarts: somewhere above the top edge, so the columns
  * do not drop in unison. */
 static int32_t kp_eff_digital_rain_start_q8(uint16_t min_y, uint16_t range_y) {
@@ -108,9 +111,14 @@ static void kp_eff_digital_rain_seed(const struct device *dev,
     data->speed_q8[c] = kp_eff_digital_rain_speed_q8((uint16_t)range_y, duration);
   }
 }
+#endif /* KP_LED_COUNT > 0 */
 
 static void kp_eff_digital_rain_render(const struct device *dev,
                                        struct kp_rgb_frame *f) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(f);
+#else
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t pct = kp_rgb_brightness_pct(f);
@@ -153,6 +161,7 @@ static void kp_eff_digital_rain_render(const struct device *dev,
     hsb.b = (uint8_t)((uint32_t)base.b * b / 255u);
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                       \

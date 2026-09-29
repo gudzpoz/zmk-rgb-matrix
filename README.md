@@ -98,6 +98,10 @@ entry). The mapping length must match the strip's `chain-length`.
 > coordinates use the layout's units (`100` is one key width, similar to
 > `&key_physical_attrs`).
 
+> A split central with no local LEDs (a USB dongle) should omit `strip` and then
+> explicitly set `mapping = <>;`. It renders nothing, but still drives the
+> peripherals' effects, overlays and split sync.
+
 Confused? Let's break it down. First, I recommend using [ZMK physical layout
 converter](https://zmk-physical-layout-converter.streamlit.app/) to visualize
 your actual key ordering: open the page, paste in your ZMK layout in the "ZMK

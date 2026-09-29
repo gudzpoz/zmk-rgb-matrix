@@ -31,11 +31,17 @@ struct kp_eff_heatmap_config {
 
 struct kp_eff_heatmap_data {
   struct kp_rgb_effect_common_data common;
+#if KP_LED_COUNT > 0
   uint8_t temp[KP_LED_COUNT]; /* 0..255 heat per LED */
+#endif
 };
 
 
 static void kp_eff_heatmap_render(const struct device *dev, struct kp_rgb_frame *f) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(f);
+#else
   struct kp_eff_heatmap_data *data = dev->data;
   const struct kp_eff_heatmap_config *cfg = dev->config;
   uint8_t pct = kp_rgb_brightness_pct(f);
@@ -60,10 +66,15 @@ static void kp_eff_heatmap_render(const struct device *dev, struct kp_rgb_frame 
     };
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 static void kp_eff_heatmap_event(const struct device *dev,
                                  const struct zmk_position_state_changed *ev) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(ev);
+#else
   if (!ev->state) {
     return; /* only a press adds heat */
   }
@@ -99,6 +110,7 @@ static void kp_eff_heatmap_event(const struct device *dev,
     contrib = MIN(contrib, cfg->area_limit);
     data->temp[i] = MIN(255u, (uint32_t)data->temp[i] + contrib);
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_EFF_HEATMAP_DEFINE(inst)                                            \

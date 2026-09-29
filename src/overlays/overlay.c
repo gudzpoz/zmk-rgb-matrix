@@ -36,8 +36,10 @@ struct kp_ovl_data {
   struct kp_rgb_overlay_common_data common;
 };
 
+#if KP_LED_COUNT > 0
 /* Indexed like frame->pixels; sized to this half's LED count. */
 static struct led_rgb kp_ovl_layer[KP_LED_COUNT];
+#endif
 
 static bool kp_ovl_active(const struct device *dev) {
   const struct kp_ovl_config *cfg = dev->config;
@@ -58,6 +60,10 @@ static const struct device *kp_ovl_event_target(const struct device *dev) {
 }
 
 static void kp_ovl_render(const struct device *dev, struct kp_rgb_frame *frame) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(frame);
+#else
   const struct kp_ovl_config *cfg = dev->config;
   const struct kp_ovl_data *data = dev->data;
   const struct kp_rgb_effect_api *fx =
@@ -82,6 +88,7 @@ static void kp_ovl_render(const struct device *dev, struct kp_rgb_frame *frame) 
 
   kp_rgb_overlay_paint_pixels(frame, data->common.leds, data->common.led_count,
                               kp_ovl_layer, cfg->common.opacity);
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_OVL_DEFINE(inst)                                                    \

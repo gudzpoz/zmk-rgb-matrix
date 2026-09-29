@@ -41,14 +41,17 @@ struct kp_eff_rain_config {
 
 struct kp_eff_rain_data {
   struct kp_rgb_effect_common_data common;
+#if KP_LED_COUNT > 0
   uint8_t val[KP_LED_COUNT];  /* current brightness 0..255 */
   uint16_t hue[KP_LED_COUNT]; /* per-LED hue, 0..KP_RGB_HUE_MAX */
   uint8_t sat[KP_LED_COUNT];  /* per-LED saturation while lit */
+#endif
   uint32_t flow_idx;
   uint32_t phase_ms; /* fractal / drops phase */
   bool drops_seeded;
 };
 
+#if KP_LED_COUNT > 0
 /* One QMK RAINDROPS nudge: a fresh hue for a single key, derived from the
  * preset. Saturation is deliberately left to the preset, so an unsaturated
  * colour renders every nudge as the same washed-out white. */
@@ -61,8 +64,13 @@ static uint16_t kp_rain_drops_hue(uint16_t base_hue) {
   }
   return (uint16_t)hue;
 }
+#endif /* KP_LED_COUNT > 0 */
 
 static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(f);
+#else
   struct kp_eff_rain_data *data = dev->data;
   const struct kp_eff_rain_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
@@ -161,6 +169,7 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
       f->pixels[i] = (struct led_rgb){0, 0, 0};
     }
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_EFF_RAIN_DEFINE(inst)                                               \

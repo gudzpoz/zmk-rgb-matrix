@@ -20,11 +20,12 @@ properties:
 
   strip:
     type: phandle
-    required: true
+    required: false
     description: |
-      The LED strip device driving these LEDs. Its chain-length is the single
-      source of truth for the LED count; the "mapping" length must agree with
-      it.
+      The LED strip device driving this half's LEDs. Omit it when the half has
+      no local LEDs (a USB-dongle central): nothing is rendered and "mapping"
+      must then be empty. When present, its chain-length is the single source of
+      truth for the LED count and the "mapping" length must agree with it.
 
   physical-layout:
     type: phandle
@@ -45,5 +46,6 @@ properties:
       its centre is derived from "physical-layout" -- or KP_RGB_NO_KEY(x, y)
       for an LED not under a key (an edge/underglow LED) carrying explicit (x,
       y) coordinates in physical-layout units (100 = one key width). Length
-      must equal the chain-length of "strip".
+      must equal the chain-length of "strip", and is empty when "strip" is
+      omitted.
 

@@ -29,13 +29,19 @@ struct kp_eff_starlight_config {
 
 struct kp_eff_starlight_data {
   struct kp_rgb_effect_common_data common;
+#if KP_LED_COUNT > 0
   uint8_t cur[KP_LED_COUNT];  /* current brightness 0..255 */
   uint8_t target[KP_LED_COUNT]; /* target brightness */
   int8_t hue_off[KP_LED_COUNT]; /* -30..30 */
   int8_t sat_off[KP_LED_COUNT]; /* -30..30 */
+#endif
 };
 
 static void kp_eff_starlight_render(const struct device *dev, struct kp_rgb_frame *f) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(f);
+#else
   struct kp_eff_starlight_data *data = dev->data;
   const struct kp_eff_starlight_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
@@ -92,6 +98,7 @@ static void kp_eff_starlight_render(const struct device *dev, struct kp_rgb_fram
       f->pixels[i] = (struct led_rgb){0, 0, 0};
     }
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_EFF_STARLIGHT_DEFINE(inst)                                          \

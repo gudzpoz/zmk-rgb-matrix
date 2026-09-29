@@ -138,7 +138,9 @@ struct kp_eff_mything_data {
 ### 3. Renderer
 
 `render(dev, frame)` is called once per animation tick while the effect is
-active. Fill `frame->pixels[0 .. frame->count-1]`.
+active. Fill `frame->pixels[0 .. frame->count-1]`. `frame->count` is 0 on a half
+with no local LEDs (a strip-less central), and `render` is not called in that
+case, so no empty-frame guard is needed.
 
 ```c
 static void kp_eff_mything_render(const struct device *dev,

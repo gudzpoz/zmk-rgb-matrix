@@ -45,10 +45,13 @@ struct kp_eff_reactive_config {
 
 struct kp_eff_reactive_data {
   struct kp_rgb_effect_common_data common;
+#if KP_LED_COUNT > 0
   uint8_t levels[KP_LED_COUNT];
+#endif
 };
 
 
+#if KP_LED_COUNT > 0
 /* Contribution (0..255) of a key hit at (px, py) onto an LED at (x, y). */
 static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
                                  uint16_t px, uint16_t py, uint16_t x, uint16_t y) {
@@ -88,8 +91,13 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
     return (dx == 0 && dy == 0) ? 255 : 0;
   }
 }
+#endif /* KP_LED_COUNT > 0 */
 
 static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame *f) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(f);
+#else
   struct kp_eff_reactive_data *data = dev->data;
   const struct kp_eff_reactive_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
@@ -117,10 +125,15 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
     /* Decay after rendering so a fresh hit shows at full brightness. */
     data->levels[i] = level > decay ? (uint8_t)(level - decay) : 0;
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 static void kp_eff_reactive_event(const struct device *dev,
                                   const struct zmk_position_state_changed *ev) {
+#if KP_LED_COUNT == 0
+  ARG_UNUSED(dev);
+  ARG_UNUSED(ev);
+#else
   if (!ev->state) {
     return; /* only a press starts a fade */
   }
@@ -153,6 +166,7 @@ static void kp_eff_reactive_event(const struct device *dev,
       data->levels[i] = contrib;
     }
   }
+#endif /* KP_LED_COUNT > 0 */
 }
 
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \

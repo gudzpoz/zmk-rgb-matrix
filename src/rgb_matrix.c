@@ -96,12 +96,17 @@ const struct kp_rgb_coord *kp_rgb_led_coord(size_t led) {
   return led < KP_LED_COUNT ? &kp_led_coords[led] : NULL;
 }
 
-static const struct device *const strip = DEVICE_DT_GET(KP_RGB_STRIP);
+static const struct device *const strip =
+    COND_CODE_1(KP_RGB_HAS_STRIP, (DEVICE_DT_GET(KP_RGB_STRIP)), (NULL));
 static struct led_rgb pixels[KP_LED_COUNT];
 static struct led_rgb scratch[KP_LED_COUNT];
 static uint32_t last_tick;
 static struct k_mutex kp_rgb_lock;
 static bool kp_rgb_matrix_valid;
+
+/* A half with no strip renders nothing, but the central-only overlay and split
+ * machinery still runs. */
+static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
 const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
@@ -217,6 +222,12 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t elapsed = now - last_tick;
   last_tick = now;
   bool ovl_changed = kp_rgb_overlay_refresh();
+  if (!kp_rgb_has_leds()) {
+    if (ovl_changed) {
+      kp_rgb_overlay_dispatch();
+    }
+    return;
+  }
   bool any_on;
   if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
@@ -284,6 +295,9 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
 
 static void kp_rgb_matrix_off_handler(struct k_work *work) {
   ARG_UNUSED(work);
+  if (!kp_rgb_has_leds()) {
+    return;
+  }
   memset(pixels, 0, sizeof(pixels));
   led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
 }
@@ -487,6 +501,11 @@ SYS_INIT(kp_rgb_matrix_layout_init, POST_KERNEL,
 
 static int kp_rgb_validate_zones(void) {
   kp_rgb_matrix_valid = true;
+  /* With no LEDs there are no zones to partition; accepting every behavior
+   * keeps the central-only machinery enabled on a strip-less half. */
+  if (!kp_rgb_has_leds()) {
+    return 0;
+  }
   for (size_t i = 0; i < kp_rgb_behavior_count(); i++) {
     struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(i);
     if (ctx == NULL)
@@ -543,7 +562,7 @@ static int kp_rgb_validate_zones(void) {
 }
 
 static int kp_rgb_matrix_init(void) {
-  if (!device_is_ready(strip)) {
+  if (kp_rgb_has_leds() && !device_is_ready(strip)) {
     LOG_ERR("LED strip \"%s\" is not ready", strip->name);
     return -ENODEV;
   }

@@ -27,8 +27,13 @@
  * from the real LED count: DT_DRV_INST() would resolve to the effect's node. */
 #if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_matrix)
 #define KP_RGB_NODE DT_INST(0, keypaw_rgb_matrix)
+#define KP_RGB_HAS_STRIP DT_NODE_HAS_PROP(KP_RGB_NODE, strip)
+#if KP_RGB_HAS_STRIP
 #define KP_RGB_STRIP DT_PHANDLE(KP_RGB_NODE, strip)
 #define KP_LED_COUNT DT_PROP(KP_RGB_STRIP, chain_length)
+#else
+#define KP_LED_COUNT 0
+#endif
 #endif
 
 #define KP_RGB_HUE_MAX 360
