@@ -8,9 +8,11 @@
  */
 
 #include <zephyr/ztest.h>
+#include <zephyr/sys/util.h>
 
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_matrix_math.h>
+#include <zmk/rgb_persist.h>
 
 static void assert_rgb(struct led_rgb got, uint8_t r, uint8_t g, uint8_t b) {
   zassert_equal(got.r, r, "r: got %u want %u", got.r, r);
@@ -157,5 +159,64 @@ ZTEST(kp_rgb_math, arm_phase) {
   zassert_equal(kp_rgb_arm_phase(100, 4), 25);
 }
 
+ZTEST(kp_rgb_persist, rejects_wrong_size) {
+  zassert_true(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob)));
+  zassert_false(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob) - 1));
+  zassert_false(kp_rgb_persist_size_ok(0));
+}
+
+ZTEST(kp_rgb_persist, rejects_wrong_version) {
+  zassert_true(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION));
+  zassert_false(kp_rgb_persist_version_ok(0));
+  zassert_false(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION + 1));
+}
+
+ZTEST(kp_rgb_persist, effect_range_check) {
+  zassert_true(kp_rgb_persist_effect_valid(
+      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX,
+                                      .s = KP_RGB_SAT_MAX,
+                                      .b = KP_RGB_BRT_MAX}));
+  zassert_false(kp_rgb_persist_effect_valid(
+      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX + 1}));
+  zassert_false(kp_rgb_persist_effect_valid(
+      &(struct kp_rgb_persist_effect){.s = KP_RGB_SAT_MAX + 1}));
+  zassert_false(kp_rgb_persist_effect_valid(
+      &(struct kp_rgb_persist_effect){.b = KP_RGB_BRT_MAX + 1}));
+}
+
+ZTEST(kp_rgb_persist, duration_clamp) {
+  zassert_equal(kp_rgb_persist_clamp_duration(50, 100, 10000), 100);
+  zassert_equal(kp_rgb_persist_clamp_duration(20000, 100, 10000), 10000);
+  zassert_equal(kp_rgb_persist_clamp_duration(500, 100, 10000), 500);
+}
+
+ZTEST(kp_rgb_persist, pack_round_trip) {
+  const struct kp_rgb_persist_effect in[2] = {
+      {.duration_ms = 500, .h = 10, .s = 20, .b = 30},
+      {.duration_ms = 1000, .h = 40, .s = 50, .b = 60},
+  };
+  struct kp_rgb_persist_blob blob;
+
+  kp_rgb_persist_pack(7, true, in, 2, &blob);
+  zassert_equal(blob.version, KP_RGB_PERSIST_VERSION);
+  zassert_equal(blob.selected_index, 7);
+  zassert_equal(blob.user_on, 1);
+  zassert_equal(blob.effect_count, 2);
+  zassert_true(kp_rgb_persist_size_ok(sizeof(blob)));
+  zassert_true(kp_rgb_persist_version_ok(blob.version));
+  zassert_mem_equal(&blob.effects[0], &in[0], sizeof(in[0]));
+  zassert_mem_equal(&blob.effects[1], &in[1], sizeof(in[1]));
+  /* Unused slots stay zeroed. */
+  zassert_equal(blob.effects[2].duration_ms, 0);
+  zassert_equal(blob.effects[2].h, 0);
+
+  /* Over-long input is truncated to the registry cap, never overflowing. */
+  struct kp_rgb_persist_effect many[KP_RGB_PERSIST_MAX_EFFECTS + 4] = {0};
+  kp_rgb_persist_pack(0, false, many, ARRAY_SIZE(many), &blob);
+  zassert_equal(blob.effect_count, KP_RGB_PERSIST_MAX_EFFECTS);
+  zassert_equal(blob.user_on, 0);
+}
+
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(kp_rgb_math, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(kp_rgb_persist, NULL, NULL, NULL, NULL, NULL);

@@ -9,9 +9,13 @@ what the code does and why it is shaped that way, including the dead ends.
 ```
 include/zmk/rgb_matrix.h          public API: effects, conditions, overlays, triggers
 include/zmk/rgb_matrix_math.h     public math helpers (sin8, atan2_8, isqrt)
+include/zmk/rgb_color.h           HSB/RGB colour helpers, struct and limits
+include/zmk/rgb_persist.h         persisted-record layout and codec API
 include/dt-bindings/keypaw/       RGB command constants for devicetree
 src/rgb_matrix.c                  engine: tick, geometry, pixel output
-src/rgb_utils.c                   colour math, overlay registry + state words
+src/rgb_utils.c                   overlay registry, target resolution, state words
+src/rgb_color.c                   colour math (host-tested)
+src/rgb_persist.c                 persisted-record codec (host-tested)
 src/behavior_rgb_matrix.c         &kprgb command dispatch, effect registry
 src/rgb_settings.c                persistence (CONFIG_SETTINGS)
 src/rgb_split_sync.c              central-only connect-time state push
@@ -24,7 +28,8 @@ src/effects/                      built-in effects
 src/conditions/rgb_latch.h        state shared by the latch + its toggle
 src/rgb_matrix_internal.h         private; never included by third-party code
 dts/bindings/                     one binding per compatible
-tests/sim/                        native_sim preview harness
+tests/unit/                       host ztest for the pure helpers
+tests/sim/                        native_sim smoke + preview harness
 ```
 
 ## Engine architecture
@@ -546,10 +551,13 @@ Three layers, cheapest first.
 
 ### Unit tests (`tests/unit/`)
 
-Host ztest for the pure helpers (the colour math and `rgb_matrix_math.h`). No
-ZMK app and no devicetree: only `src/rgb_color.c` is linked. `rgb_color.h`
-exposes Zephyr's `struct led_rgb`, so the minimal `unit_testing` board (no
-syscall/devicetree headers) cannot build it; it targets `native_sim/native/64`.
+Host ztest for the pure helpers: the colour math (`rgb_color.c`), the math
+header, and the persisted-record codec (`rgb_persist.c` — frame size/version
+rejection, per-effect range checks, duration clamping, and pack/round-trip). No
+ZMK app and no devicetree: only those two source files are linked. They expose
+Zephyr's `struct led_rgb`, so the minimal `unit_testing` board (no
+syscall/devicetree headers) cannot build them; the target is
+`native_sim/native/64`.
 
 ```sh
 cd zmk
@@ -607,9 +615,11 @@ environment overrides: `DURATION`, `TILE`, `MIN_DISTINCT`, `OUT_DIR`, `ZMK_WS`,
 
 ### Not covered
 
-Split sync (a single native_sim half), settings persistence round-trips
-(`CONFIG_SETTINGS=n` in the sim), lock-contention timing, and exact per-effect
-colours — the previews cover the visuals, the smoke test asserts invariants.
+Split sync (a single native_sim half), the settings *storage* round-trip — the
+sim has no persistent backend (`CONFIG_SETTINGS_FILE` needs a mounted
+filesystem, NVS needs a flash simulator that does not survive a run), so only
+the record codec is unit-tested — lock-contention timing, and exact per-effect
+colours; the previews cover the visuals and the smoke test asserts invariants.
 
 ## Devicetree traps
 

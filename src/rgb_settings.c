@@ -22,6 +22,7 @@
 
 #include <zmk/activity.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_persist.h>
 #include <zmk/workqueue.h>
 
 #include "rgb_matrix_internal.h"
@@ -32,49 +33,26 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_SETTINGS)
 
-#define KP_RGB_PERSIST_VERSION 1
 #define KP_RGB_PERSIST_SUBTREE "keypaw/rgb_matrix"
 #define KP_RGB_PERSIST_PATH_MAX 64
 
-struct kp_rgb_persist_effect {
-  uint16_t duration_ms;
-  uint16_t h;
-  uint8_t s;
-  uint8_t b;
-};
-
-struct kp_rgb_persist_blob {
-  uint16_t selected_index;
-  uint8_t version;
-  uint8_t user_on;
-  uint8_t effect_count;
-  uint8_t reserved;
-  struct kp_rgb_persist_effect effects[KP_RGB_PERSIST_MAX_EFFECTS];
-};
-
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_effect) == 6,
-             "the persisted effect gained padding");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_blob) ==
-                 6 + KP_RGB_PERSIST_MAX_EFFECTS *
-                         sizeof(struct kp_rgb_persist_effect),
-             "the persisted blob gained padding");
-
 static void kp_rgb_encode(struct kp_rgb_behavior_context *ctx,
                           struct kp_rgb_persist_blob *blob) {
-  memset(blob, 0, sizeof(*blob));
+  struct kp_rgb_persist_effect effects[KP_RGB_PERSIST_MAX_EFFECTS] = {0};
+  size_t count;
+  uint16_t selected;
+  bool user_on;
+
   kp_rgb_matrix_lock();
-  blob->version = KP_RGB_PERSIST_VERSION;
-  blob->user_on = ctx->state.user_on;
-  size_t count =
-      MIN(kp_rgb_effect_count(ctx), (size_t)KP_RGB_PERSIST_MAX_EFFECTS);
-  blob->effect_count = (uint8_t)count;
-  blob->selected_index = (uint16_t)kp_rgb_selected_effect(ctx);
+  user_on = ctx->state.user_on;
+  selected = (uint16_t)kp_rgb_selected_effect(ctx);
+  count = MIN(kp_rgb_effect_count(ctx), (size_t)KP_RGB_PERSIST_MAX_EFFECTS);
   for (size_t i = 0; i < count; i++) {
     const struct device *dev = kp_rgb_effect_at(ctx, i);
     if (dev == NULL)
       continue;
     const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(dev);
-    blob->effects[i] = (struct kp_rgb_persist_effect){
+    effects[i] = (struct kp_rgb_persist_effect){
         .duration_ms = data->duration_ms,
         .h = data->color.h,
         .s = data->color.s,
@@ -82,6 +60,8 @@ static void kp_rgb_encode(struct kp_rgb_behavior_context *ctx,
     };
   }
   kp_rgb_matrix_unlock();
+
+  kp_rgb_persist_pack(selected, user_on, effects, count, blob);
 }
 
 static void kp_rgb_save_work_handler(struct k_work *work) {
@@ -112,7 +92,7 @@ static struct kp_rgb_behavior_context *kp_rgb_context_named(const char *name,
 
 static int kp_rgb_load_context(struct kp_rgb_behavior_context *ctx, size_t len,
                                settings_read_cb read_cb, void *cb_arg) {
-  if (len != sizeof(struct kp_rgb_persist_blob)) {
+  if (!kp_rgb_persist_size_ok(len)) {
     LOG_INF("Discarding RGB state for %s of unexpected size %u", ctx->dev->name,
             (uint32_t)len);
     return -EINVAL;
@@ -121,7 +101,7 @@ static int kp_rgb_load_context(struct kp_rgb_behavior_context *ctx, size_t len,
   int rc = read_cb(cb_arg, &blob, sizeof(blob));
   if (rc < 0)
     return rc;
-  if (blob.version != KP_RGB_PERSIST_VERSION) {
+  if (!kp_rgb_persist_version_ok(blob.version)) {
     LOG_WRN("Discarding RGB state for %s of version %u", ctx->dev->name,
             blob.version);
     return -EINVAL;
@@ -135,8 +115,7 @@ static int kp_rgb_load_context(struct kp_rgb_behavior_context *ctx, size_t len,
     if (dev == NULL)
       continue;
     const struct kp_rgb_persist_effect *stored = &blob.effects[i];
-    if (stored->h > KP_RGB_HUE_MAX || stored->s > KP_RGB_SAT_MAX ||
-        stored->b > KP_RGB_BRT_MAX) {
+    if (!kp_rgb_persist_effect_valid(stored)) {
       LOG_WRN("Skipping out-of-range persisted effect %u for %s", (uint32_t)i,
               ctx->dev->name);
       continue;
@@ -144,8 +123,8 @@ static int kp_rgb_load_context(struct kp_rgb_behavior_context *ctx, size_t len,
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(dev);
     data->color =
         (struct kp_rgb_hsb){.h = stored->h, .s = stored->s, .b = stored->b};
-    data->duration_ms = (uint16_t)CLAMP(
-        (int32_t)stored->duration_ms, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+    data->duration_ms = kp_rgb_persist_clamp_duration(
+        stored->duration_ms, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
         CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   }
   kp_rgb_matrix_unlock();

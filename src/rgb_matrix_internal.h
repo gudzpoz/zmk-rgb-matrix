@@ -17,6 +17,7 @@
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_persist.h>
 
 /* State is owned by one keypaw,behavior-rgb-matrix device. The physical matrix
  * engine is shared, but these values are deliberately not global. */
@@ -73,7 +74,6 @@ int kp_rgb_resolve_active(struct kp_rgb_behavior_context *ctx);
 uint16_t kp_rgb_calc_effect_index(const struct kp_rgb_behavior_context *ctx,
                                   uint16_t current, int16_t delta);
 int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index);
-bool kp_rgb_behavior_any_on(void);
 
 /* Overlay registry and the split-pushed on/off state (see rgb_utils.c).
  * refresh()/dispatch() are central-only; on a peripheral they are no-ops. */
@@ -97,8 +97,6 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word);
   (((uint32_t)(word) << 16) | ((uint32_t)(value) & 0xFFFFu))
 #define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
 #define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
-
-#define KP_RGB_PERSIST_MAX_EFFECTS 16
 
 /* Largest effect registry the engine accepts: the persisted blob holds one fixed
  * entry per effect. Without persistence the effect index byte is the limit. */
