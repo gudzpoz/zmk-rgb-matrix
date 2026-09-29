@@ -77,6 +77,23 @@ The tick paints locally *before* dispatching overlay state (see below), so a
 blocking split send does not delay the central's own LEDs — that ordering is why
 a layer change used to lag visibly while `RGB_EFF` felt instant.
 
+### The matrix lock and deferred key events
+
+One mutex (`kp_rgb_lock`) guards the frame buffers, every behavior's state and
+the effect data; flash I/O and split sends are deliberately kept outside it so
+that no holder can block. The work-queue paths take it with a bounded wait
+(`kp_rgb_matrix_lock_patiently`, 8 × 1 ms) so a stuck holder warns instead of
+hanging the low-priority queue.
+
+`zmk_position_state_changed` listeners run **inline in the raising thread**
+(`zmk/app/src/event_manager.c`), which for a key press is the physical-layouts
+work item — the input path. RGB feedback is less important than key handling, so
+the listener never touches the matrix lock at all: it copies the event into a
+small ring and submits the low-priority work item that delivers it under the
+lock. Delivery therefore lags by up to one work-queue pass, and a full ring
+drops events — counted, and reported at warning level when the queue next
+drains — rather than ever delaying a key.
+
 ### Effect registry
 
 Effects are the children of a behavior; an effect's slot is its child index
