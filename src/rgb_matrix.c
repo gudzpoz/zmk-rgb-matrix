@@ -101,7 +101,7 @@ static const struct device *const strip =
 static struct led_rgb pixels[KP_LED_COUNT];
 static struct led_rgb scratch[KP_LED_COUNT];
 static uint32_t last_tick;
-static struct k_mutex kp_rgb_lock;
+static K_MUTEX_DEFINE(kp_rgb_lock);
 static bool kp_rgb_matrix_valid;
 
 /* A half with no strip renders nothing, but the central-only overlay and split
@@ -353,9 +353,7 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
   const struct zmk_position_state_changed *pos_ev =
       as_zmk_position_state_changed(eh);
   if (pos_ev != NULL) {
-    if (KP_TRY_LOCK() < 0) {
-      return ZMK_EV_EVENT_BUBBLE;
-    }
+    kp_rgb_matrix_lock();
     size_t led = kp_rgb_led_for_position(pos_ev->position);
     const struct device *seen[KP_RGB_EVENT_TARGETS_MAX];
     size_t seen_len = 0;
