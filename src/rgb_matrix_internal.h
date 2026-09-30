@@ -91,6 +91,16 @@ uint16_t kp_rgb_overlay_word_count(void);
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
+/* Central-only. A trigger's condition may read keymap state, which does not
+ * exist on a peripheral; the engine samples the table every render tick so a
+ * condition with no event (Caps Lock, a latch) stays live between layer
+ * changes. No-op without a trigger table. */
+#if IS_ENABLED(CONFIG_KEYPAW_RGB_TRIGGERS)
+void kp_rgb_triggers_poll(void);
+#else
+static inline void kp_rgb_triggers_poll(void) {}
+#endif
+
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word as
  * (word << 16) | bits. */
 #define RGB_OVL_STATE_VAL(word, value)                                         \

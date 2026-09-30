@@ -54,13 +54,8 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
 
 # Trigger table: central-only, because a trigger's condition may read keymap
 # state, which does not exist on a peripheral.
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_TRIGGERS
-  rgb_triggers.c
-  triggers/trigger.c
-)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_TRIGGERS rgb_triggers.c)
 
 # Split state sync: central-only, because it needs the transport's connected
 # source list, which only exists on the central.
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_SPLIT_SYNC
-  rgb_split_sync.c
-)
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_SPLIT_SYNC rgb_split_sync.c)

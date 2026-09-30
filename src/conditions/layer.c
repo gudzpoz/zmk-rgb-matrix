@@ -5,8 +5,8 @@
  *
  * Built-in "layer" condition: active while a given keymap layer is active.
  * Declare one node per layer that a consumer should react to. The predicate is
- * sampled, never cached: an overlay's gate re-evaluates it every tick and a
- * trigger re-evaluates it on every layer event, so there is nothing to sync.
+ * sampled, never cached: an overlay's gate and the trigger table both re-evaluate
+ * it every tick, so there is nothing to sync.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_layer

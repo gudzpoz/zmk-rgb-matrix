@@ -1,7 +1,7 @@
 # Extending the RGB matrix
 
 This guide is for authors of third-party modules that wish to add RGB matrix
-effects, overlays, or triggers. Everything here uses only the public API in
+effects, overlays, or conditions. Everything here uses only the public API in
 [`<zmk/rgb_matrix.h>`](../include/zmk/rgb_matrix.h).
 
 Some example modules are available:
@@ -10,7 +10,6 @@ Some example modules are available:
 |---|---|
 | Effect | [`modules/zmk-rgb-effect-example@keypaw48-zmk`](https://github.com/gudzpoz/keypaw48-zmk/tree/main/modules/zmk-rgb-effect-example) (comet sweep, own binding + renderer) |
 | Condition | [`modules/zmk-behavior-dynamic-macro@keypaw48-zmk`](https://github.com/gudzpoz/keypaw48-zmk/tree/main/modules/zmk-behavior-dynamic-macro/src/condition_dynamic_macro.c) (`dm_rec`, recorder-lit overlay) |
-| Trigger | [`src/triggers/trigger.c`](../src/triggers/trigger.c) in this module |
 
 ## The extension points
 
@@ -407,11 +406,12 @@ ZMK_SUBSCRIPTION(my_cond, zmk_some_event);
 
 `zmk_rgb_matrix_flush()` is public, submit-only, non-blocking, and does not
 reset the animation clock, so the extra frame does not restart an effect.
-Concurrent calls coalesce.
+Concurrent calls coalesce. It also re-samples the trigger table, so the same
+call shortens a trigger's latency as well as an overlay's.
 
-A listener is never needed for correctness as the engine repaints every tick.
-But still, it buys you a bit of **latency**, and where it helps depends on how
-the condition is evaluated:
+A listener is never needed for correctness as the engine repaints every tick and
+samples the trigger table on the same tick. But still, it buys you a bit of
+**latency**, and where it helps depends on how the condition is evaluated:
 
 - **Central-evaluated (default).** Subscribe on the central: the flush submits
   the same tick work that evaluates the conditions and dispatches the push, so
@@ -426,9 +426,10 @@ See [`layer.c`](../src/conditions/layer.c) for an example.
 ## Writing a trigger
 
 A trigger maps a condition to a list of `&kprgb` commands. Triggers are the
-children of a `keypaw,rgb-trigger-table` node, and **their declaration order is
-their precedence**: the first trigger whose condition is active wins, and its
-`bindings` run only when the winner changes.
+children of a `keypaw,rgb-trigger-table` node. Each one fires independently: its
+`bindings` run on the condition's rising edge (false -> true) and its optional
+`on-exit` on the falling edge (true -> false). **Declaration order is the firing
+order** — it matters only when several edges land on the same evaluation.
 
 ```dts
 / {
@@ -438,9 +439,6 @@ their precedence**: the first trigger whose condition is active wins, and its
             compatible = "keypaw,rgb-condition-layer";
             layer = <1>;
         };
-        cond_always: cond_always {
-            compatible = "keypaw,rgb-condition-always";
-        };
     };
 
     rgb_triggers: rgb_triggers {
@@ -449,40 +447,41 @@ their precedence**: the first trigger whose condition is active wins, and its
 };
 
 &rgb_triggers {
+    /* Entering layer 1 selects effect 1; leaving it restores effect 0. */
     trig_fn: trig_fn {
-        compatible = "keypaw,rgb-trigger";
         condition = <&cond_layer1>;
         bindings = <&kprgb RGB_EFS_CMD 1>;
-    };
-    fallback: fallback {                       /* declare the catch-all LAST */
-        compatible = "keypaw,rgb-trigger";
-        condition = <&cond_always>;            /* or omit `condition` entirely */
-        bindings = <&kprgb RGB_EFS_CMD 0>;
+        on-exit = <&kprgb RGB_EFS_CMD 0>;
     };
 };
 ```
+
+A rule with no `condition` is unconditional: it fires once at boot and never
+falls, so it is how you override `initial-effect`.
 
 Semantics worth knowing:
 
 - The evaluator runs on the split **central only** (conditions read keymap
   state), but the emitted commands reach both halves because `&kprgb` is
   `BEHAVIOR_LOCALITY_GLOBAL`.
-- It is **edge-triggered on winner change**, not level-triggered. A manual
-  `RGB_EFF`/`RGB_EFS` therefore survives until the mapping actually changes, and
-  relative commands (`RGB_HUI`, `RGB_BRI`, ...) do not re-fire on unrelated
-  layer events.
-- "No match" emits nothing; an unconditional trigger (no `condition`, or
-  `keypaw,rgb-condition-always`) declared last is the `else`.
-- A trigger asserts on the transition and does not continuously enforce the
-  mapping.
-- Boot evaluates once, after `initial-effect`, so a catch-all can override it.
+- The engine **samples the table every render tick**, like overlay conditions, so
+  a condition with no event of its own — Caps Lock, a latch — still reaches it.
+  The tick is the only evaluator, so a change made while the matrix is off is
+  applied on the next on-tick.
+- Rules are **independent and edge-triggered**: one never shadows another, so a
+  manual `RGB_EFF`/`RGB_EFS` survives between conditions instead of being
+  re-fired on the intervening ticks. `on-exit` is how you undo a change when the
+  condition clears; a falling edge with no `on-exit` does nothing.
+- A relative command (`RGB_HUI`, `RGB_BRI`, ...) re-fires on every rising edge of
+  its condition, so a condition that flickers will act on each toggle.
+- Every trigger true at boot is a rising edge, so an unconditional rule can
+  override `initial-effect`.
 
 > There is deliberately no `triggers = <...>;` phandle list on the table or on
 > `&kprgb`: a parent pointing at its own child is a devicetree cycle, and the
 > failure mode is obscure. See
 > [development.md](development.md#why-there-is-no-triggers-list) for the full
-> story. Ordering footguns (an early broad trigger shadows every later one; the
-> catch-all must be last) are not enforced by anything.
+> story.
 
 ## Writing an overlayed filter
 

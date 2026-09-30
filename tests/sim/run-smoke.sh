@@ -30,7 +30,7 @@ fi
 # different ZMK_CONFIG than the preview harness.
 BUILD_DIR=$SIM_DIR/build-smoke
 OUT_DIR=${OUT_DIR:-$SIM_DIR/out-smoke}
-DURATION=${DURATION:-4}
+DURATION=${DURATION:-7}
 
 if [ ! -d "$ZMK_WS/app" ]; then
     echo "error: no ZMK app at $ZMK_WS/app; set ZMK_WS to a west workspace" >&2
@@ -57,7 +57,8 @@ mkdir -p "$OUT_DIR"
 echo "==> running the smoke scenario (${DURATION}s)"
 (
     cd "$OUT_DIR"
-    "$EXE" --capture=capture.bin "--stop_at=$DURATION" -no-rt >run.log 2>&1
+    "$EXE" --capture=capture.bin "--stop_at=$DURATION" \
+        --caps-on=4200 --caps-off=5500 -no-rt >run.log 2>&1
 )
 python3 "$SIM_DIR/check_capture.py" "$OUT_DIR/capture.bin"
 

@@ -39,6 +39,10 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
+#include <dt-bindings/zmk/hid_indicators.h>
+
+#include <zmk/endpoints.h>
+#include <zmk/hid_indicators.h>
 #include <zmk/rgb_matrix.h>
 
 #include "cmdline.h"
@@ -170,6 +174,29 @@ static uint32_t requested_effect;
 static char *capture_path;
 static char *list_effects_path;
 
+/* Host-scheduled Caps Lock edges (ms since boot); UINT32_MAX = not requested.
+ * The harness cannot press a latch, so Caps Lock is the injectable condition
+ * with no layer event. */
+static uint32_t caps_on_at;
+static uint32_t caps_off_at;
+
+/* Raising zmk_hid_indicators_changed is what the caps-lock condition listens to. */
+static void kp_sim_caps_set(bool on) {
+  zmk_hid_indicators_t flags = on ? HID_INDICATOR_CAPS_LOCK : 0;
+  zmk_hid_indicators_set_profile(flags, zmk_endpoint_get_selected());
+}
+
+static void kp_sim_caps_on_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  kp_sim_caps_set(true);
+}
+static void kp_sim_caps_off_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  kp_sim_caps_set(false);
+}
+static K_WORK_DELAYABLE_DEFINE(kp_sim_caps_on, kp_sim_caps_on_handler);
+static K_WORK_DELAYABLE_DEFINE(kp_sim_caps_off, kp_sim_caps_off_handler);
+
 static void kp_sim_add_options(void) {
   static struct args_struct_t options[] = {
       {.option = "effect",
@@ -188,6 +215,16 @@ static void kp_sim_add_options(void) {
        .dest = (void *)&list_effects_path,
        .descript = "Write 'index<TAB>display-name' for every effect to this "
                    "file, then exit"},
+      {.option = "caps-on",
+       .name = "ms",
+       .type = 'u',
+       .dest = (void *)&caps_on_at,
+       .descript = "Raise the Caps Lock HID indicator this many ms after boot"},
+      {.option = "caps-off",
+       .name = "ms",
+       .type = 'u',
+       .dest = (void *)&caps_off_at,
+       .descript = "Clear the Caps Lock HID indicator this many ms after boot"},
       ARG_TABLE_ENDMARKER};
 
   native_add_command_line_opts(options);
@@ -250,6 +287,14 @@ static int kp_sim_apply(void) {
      * first frame. Safe from any context. */
     zmk_rgb_matrix_flush();
     printk("keypaw-rgb-sim: capturing to %s\n", capture_path);
+  }
+
+  /* The command line parser leaves an unrequested 'u' option at UINT32_MAX. */
+  if (caps_on_at != UINT32_MAX) {
+    k_work_schedule(&kp_sim_caps_on, K_MSEC(caps_on_at));
+  }
+  if (caps_off_at != UINT32_MAX) {
+    k_work_schedule(&kp_sim_caps_off, K_MSEC(caps_off_at));
   }
 
   return 0;

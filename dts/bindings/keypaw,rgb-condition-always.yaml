@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Unconditionally active. Declare it as the final trigger-table rule to express
-  the "else" case, so something is asserting when no conditional rule matched.
+  Unconditionally active: an overlay gated by it always paints, and a trigger
+  using it fires its `bindings` once at boot. It never falls, so a trigger's
+  `on-exit` never runs.
 
 compatible: "keypaw,rgb-condition-always"

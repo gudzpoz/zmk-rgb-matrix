@@ -2,15 +2,51 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  RGB matrix trigger table: the ordered rules that map a condition (a keymap
-  layer, and later idle/caps-lock) to RGB commands.
+  RGB matrix trigger table: the ordered rules that map a condition edge (a keymap
+  layer, idle, caps-lock, a latch, ...) to RGB commands.
 
-  This is a plain grouping node with no driver. Its children are the triggers,
-  and their DECLARATION ORDER is the precedence order -- the first whose
-  condition is active wins. There is deliberately no `triggers` phandle list:
-  edtlib makes every node depend on its parent (edtlib.py "A Node always depends
-  on its parent"), so a parent pointing at its own child is a 2-cycle, and
-  gen_defines then assigns both nodes an ordinal of -1, which breaks the
-  DEVICE_DT_NAME_GET predeclaration in <zephyr/device.h>.
+  This is a grouping node: its children are the triggers, typed by the
+  `child-binding` below. Their DECLARATION ORDER is the firing order: on one
+  evaluation a later rule runs after an earlier one. There is deliberately no
+  `triggers` phandle list to prevent dependency cycles detected by edtlib.
 
 compatible: "keypaw,rgb-trigger-table"
+
+child-binding:
+  description: |
+    One rule. Its `bindings` run when its condition goes active (false -> true)
+    and its `on-exit` runs when it goes inactive (true -> false); every rule is
+    independent, so one never shadows another.
+
+    A trigger changes RGB *state* (on/off, cycle, colour, ...) rather than
+    compositing a *view* -- use an overlay to show an effect while a condition
+    holds. Its condition is a reusable keypaw,rgb-condition-* node, so one
+    predicate serves both an overlay and a trigger.
+  properties:
+    condition:
+      type: phandle
+      required: false
+      description: |
+        Predicate whose edge fires this rule. Omit it for a rule that acts once
+        at boot: an always-active predicate never falls, so its `on-exit` never
+        runs.
+    bindings:
+      type: phandle-array
+      required: true
+      description: |
+        Commands to invoke, in order, on the rising edge (the condition becomes
+        active). Each element is a full behavior binding, normally targeting
+        &kprgb, e.g. `bindings = <&kprgb RGB_EFS_CMD 7>;`. Relative commands
+        (RGB_HUI, RGB_BRI, ...) are resolved to absolute values on the central
+        before being sent, so both halves converge. Keep the list short: each
+        command is one packet per peripheral half.
+    on-exit:
+      type: phandle-array
+      required: false
+      # `bindings` gets this space implicitly from its trailing 's'; this
+      # property does not, so name it so the targets' #binding-cells are read.
+      specifier-space: binding
+      description: |
+        Commands to invoke, in order, on the falling edge (the condition becomes
+        inactive). Same binding form as `bindings`. Omit it for a rule that has
+        nothing to undo when the condition clears.

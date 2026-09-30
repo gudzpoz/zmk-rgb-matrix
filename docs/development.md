@@ -22,7 +22,7 @@ src/rgb_split_sync.c              central-only connect-time state push
 src/rgb_triggers.c                central-only trigger evaluator
 src/overlays/overlay.c            the generic compositor
 src/overlays/battery.c            the battery-gauge level bar
-src/conditions/, src/triggers/    built-in conditions and the trigger kind
+src/conditions/                   built-in conditions
 src/behaviors/overlay_toggle.c    nested toggle for a latch condition
 src/effects/                      built-in effects
 src/conditions/rgb_latch.h        state shared by the latch + its toggle
@@ -78,6 +78,11 @@ public, so a third-party kind can call it from a listener (see
 because a Zephyr work item can be queued only once, so a burst costs at most one
 extra frame.
 
+The same tick also samples the trigger table (`kp_rgb_triggers_poll()`), exactly
+as it samples overlay conditions, so a trigger whose condition changes without a
+layer event still re-fires. See
+[Trigger table internals](#trigger-table-internals).
+
 The tick paints locally *before* dispatching overlay state (see below), so a
 blocking split send does not delay the central's own LEDs — that ordering is why
 a layer change used to lag visibly while `RGB_EFF` felt instant.
@@ -127,12 +132,6 @@ API:
 - **State** — *change the user's selection.* Edge-triggered, persisted,
   split-synced, and **not idempotent** (`RGB_TOG` twice is a no-op, `RGB_EFF`
   twice advances twice). This is a **trigger**.
-
-Routing "layer 1 → effect 3" through the state mechanism is the obvious first
-instinct, and an earlier design did exactly that. It then needs a winner table
-*and* a global catch-all trigger to restore, because a state change has no
-inverse. An overlay avoids that entirely: it never mutates the base state, so
-removing it restores the view for free. Only the stateful path keeps a catch-all.
 
 ### The parent determines an effect's role
 
@@ -262,14 +261,16 @@ delivered, to every effect whose behavior owns the LED under the key, and the
 payload is the typed `zmk_position_state_changed` — so `ev->state` is the only
 discriminator a callback needs.
 
-### Triggers stay edge-triggered
+### Triggers are independent edge pairs
 
-A trigger is a condition plus the `&kprgb` bindings to run when it **becomes**
-the winner; the table's declaration order is its precedence. It has to be
-edge-triggered: binding a level condition straight to `RGB_TOG` would toggle
-every tick. There is deliberately no `on-exit` list — a state change has no
-inverse anyway, so the `else` case stays an explicit unconditional trigger
-declared last.
+A trigger is a condition plus the `&kprgb` bindings to run on its rising edge,
+and the optional `on-exit` to run on its falling edge. The engine samples the
+table every render tick (a condition has no way to announce a change), so the
+edge pair is what keeps a level condition from repeating: binding it straight to
+`RGB_TOG` would otherwise toggle every tick.
+
+Rules are independent. A rule with no condition is simply unconditional: it
+fires once at boot and never falls, so its `on-exit` never runs.
 
 ### The devicetree trick that makes the phandles safe
 
@@ -460,26 +461,31 @@ needed.
 
 `src/rgb_triggers.c` owns the ordered table declared by a
 `keypaw,rgb-trigger-table` node. It is modelled on
-`zmk/app/src/conditional_layer.c`: a listener on `zmk_layer_state_changed`,
-built only for the split central, enumerating children with
-`DT_INST_FOREACH_CHILD`.
+`zmk/app/src/conditional_layer.c` in shape (built only for the split central,
+enumerating children with `DT_FOREACH_CHILD_STATUS_OKAY`), but is driven by the
+render tick: `kp_rgb_triggers_poll()` is called from `kp_rgb_matrix_tick()`,
+exactly like the overlay-condition sample.
 
-### Edge-triggered on winner change
+### Independent edges
 
-A conditional layer can be activated *and deactivated*; there is no way to
-"deactivate" an effect. So a trigger asserts on the transition into winning and
-is otherwise left alone. That edge behaviour is what lets a manual effect
-selection, or a relative command such as `RGB_HUI`, survive until the mapping
-actually changes instead of being re-fired on every layer event. Consequence:
-triggers do **not** continuously enforce the mapping.
+Each trigger keeps its own previous-active flag and fires `bindings` on the
+rising edge and `on-exit` on the falling edge; nothing is "selected", so one rule
+never shadows another, and declaration order only decides which runs first when
+several change on the same evaluation.
 
 Boot evaluates once at `APPLICATION` init, after the behavior's `POST_KERNEL`
-init applied `initial-effect`, so a catch-all asserts immediately and can
+init applied `initial-effect`. Every condition true at boot is a rising edge
+from the zero-initial flags, so an unconditional rule acts immediately and can
 override `initial-effect`.
+
+The sampling is gated on `kp_rgb_any_on`, and `zmk_rgb_matrix_flush()` early-
+returns when the matrix is off, so any change made while the matrix is dark is
+only applied on the next `RGB_ON` tick. A trigger therefore cannot be what turns
+the matrix on. That matches how the overlay view behaves.
 
 ### Why there is no `triggers` list
 
-Declaration order is the precedence order, and the table holds **no phandle list
+Declaration order is the firing order, and the table holds **no phandle list
 of its own children**. Two devicetree cycles, both found the hard way:
 
 - On `&kprgb`: a trigger's `bindings` reference `&kprgb`, so a list there is
@@ -497,7 +503,8 @@ Rejected syntax: a flat mixed list such as
 condition and a target together: `phandle-array` would demand `#trigger-cells`
 on every node, and cell-encoding the target would lose the relative-command and
 colour payloads. The action property name is not free either:
-`ZMK_KEYMAP_EXTRACT_BINDING` hardcodes `bindings`.
+`ZMK_KEYMAP_EXTRACT_BINDING` hardcodes `bindings`, so `on-exit` needs its own
+extraction macro (`KP_TRIG_EXIT_BINDING` in `src/rgb_triggers.c`).
 
 ### `no-cycle`
 

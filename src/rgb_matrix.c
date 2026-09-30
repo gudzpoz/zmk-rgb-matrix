@@ -231,6 +231,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
+  kp_rgb_triggers_poll();
   bool ovl_changed = kp_rgb_overlay_refresh();
   if (!kp_rgb_has_leds()) {
     if (ovl_changed) {

@@ -298,6 +298,10 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * triggers. It carries no registry identity: a kind samples whatever source it
  * watches and reports whether it is active.
  *
+ * Both consumers sample it -- the engine every render tick -- so a condition
+ * never has to announce a change to be correct. One whose source has an event
+ * may still call zmk_rgb_matrix_flush() to shorten the latency.
+ *
  * A condition whose source exists only on the split central must still compile
  * and link on a peripheral and return false there: gate the read, not the
  * device.
@@ -340,7 +344,8 @@ struct kp_rgb_condition_api {
  * The engine repaints on its own timer. A `local` condition whose source changes
  * on an event may call zmk_rgb_matrix_flush() from that event's listener to
  * repaint immediately; the engine already flushes the central-evaluated path
- * itself.
+ * itself. flush() also re-samples the trigger table, so the same call shortens
+ * a trigger's latency too.
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_overlay_api {
@@ -520,57 +525,6 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
       "an overlay takes either `effect = <&fx>;` or a nested effect, "         \
       "not both");
 
-/* -------------------------------------------------------------------------
- * Triggers
- *
- * A trigger is a non-behavior device holding a condition plus the `&kprgb`
- * bindings to invoke when that condition wins. Their declaration order is
- * their precedence, and the bindings run only when the winner changes.
- *
- * Evaluation needs the keymap, so it runs on the split central only; the
- * emitted commands still reach both halves because &kprgb is
- * BEHAVIOR_LOCALITY_GLOBAL.
- * ------------------------------------------------------------------------- */
-
-struct kp_rgb_trigger_api {
-  bool (*active)(const struct device *dev);
-};
-
-/* Kind-agnostic part of a trigger's config. */
-struct kp_rgb_trigger_common_config {
-  const struct zmk_behavior_binding *bindings;
-  size_t bindings_len;
-};
-
-/* Declare the binding array for one trigger instance. The property must be
- * named `bindings`: ZMK_KEYMAP_EXTRACT_BINDING hardcodes it, and each element
- * carries the target behavior's cells (two, for &kprgb). */
-#define KP_RGB_TRIGGER_BINDING_ARRAY(inst, cfg_inst)                           \
-  static const struct zmk_behavior_binding cfg_inst##_bindings[] = {           \
-      LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), bindings),                        \
-              ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(inst))}
-
-/* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_TRIGGER_COMMON(node_id, cfg_inst)                               \
-  {.bindings = cfg_inst##_bindings,                                            \
-   .bindings_len = DT_PROP_LEN(node_id, bindings)}
-
-/* Declare the device. Triggers carry no mutable state, so they pass no data
- * pointer and need no init function. */
-#define KP_RGB_TRIGGER_DEFINE(inst, active_fn, cfg_inst)                       \
-  BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
-                       sizeof(struct kp_rgb_trigger_common_config) &&          \
-                   (const void *)&cfg_inst##_cfg ==                            \
-                       (const void *)&cfg_inst##_cfg.common,                   \
-               "trigger config must embed "                                    \
-               "struct kp_rgb_trigger_common_config as the first field");      \
-  static const struct kp_rgb_trigger_api cfg_inst##_api = {                    \
-      .active = active_fn,                                                     \
-  };                                                                           \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL, &cfg_inst##_cfg,       \
-                   POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,           \
-                   &cfg_inst##_api)
-
 int zmk_rgb_matrix_toggle(const struct device *behavior);
 int zmk_rgb_matrix_on(const struct device *behavior);
 int zmk_rgb_matrix_off(const struct device *behavior);
@@ -581,5 +535,6 @@ int zmk_rgb_matrix_select_effect(const struct device *behavior,
 int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
                                 int16_t direction);
 
-/* Schedule an immediate repaint. Safe from any context. */
+/* Schedule an immediate repaint and trigger-table re-evaluation. Safe from any
+ * context. */
 void zmk_rgb_matrix_flush(void);

@@ -10,6 +10,33 @@
 
 #include "../config/native_sim.overlay"
 
+#include <dt-bindings/keypaw/rgb_matrix.h>
+
+/* Caps Lock is a condition with no layer event, so it exercises the trigger
+ * table's per-tick sampling. `fixture_caps` is otherwise consumed only by the
+ * inert `fixture_or`, so the trigger is the sole pixel path for Caps Lock: it
+ * recolours solid blue while on and restores red from `on-exit` when it clears. */
+/ {
+    rgb_triggers: rgb_triggers {
+        compatible = "keypaw,rgb-trigger-table";
+
+        smoke_caps: smoke_caps {
+            condition = <&fixture_caps>;
+            bindings = <&kprgb RGB_EFS_CMD 0>,
+                       <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
+            on-exit = <&kprgb RGB_EFS_CMD 0>,
+                      <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+        };
+
+        /* No condition, so it fires once at boot and never again. */
+        smoke_default: smoke_default {
+            condition = <&fixture_always>;
+            bindings = <&kprgb RGB_EFS_CMD 0>,
+                       <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+        };
+    };
+};
+
 /* Drop the preview typing cadence; the scenario below scripts its own. */
 &kscan {
     /delete-property/ events;
@@ -38,8 +65,11 @@
  *   1000  RC(1,0)=12 RGB_ON   -> solid red again
  *   1500  RC(1,1)=13 reactive -> idles at its background floor
  *   2600  RC(2,0)=24 key press-> reactive flash on that key's LED
- *   3400  RC(3,0)=36 &mo 1    -> layer overlay covers green (held to the end)
- */
+ *   3400  RC(3,0)=36 &mo 1    -> layer overlay covers green, released at 3900
+ *
+ * The run also injects Caps Lock from the host (run-smoke.sh --caps-on/--caps-off,
+ * 4200/5500 ms): the trigger table recolours solid blue, then red again. Caps
+ * Lock is not a key event, so this path does not appear in `events` below. */
 &kscan {
     events = <
         ZMK_MOCK_PRESS(0, 0, 400) ZMK_MOCK_RELEASE(0, 0, 60)

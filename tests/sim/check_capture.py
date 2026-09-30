@@ -21,6 +21,7 @@ from render_gif import read_capture
 RED = (255, 0, 0)
 BLACK = (0, 0, 0)
 GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
 # Reactive idles at its 10% background over white: hsb b=10, s=0 -> 10*255/100.
 REACTIVE_IDLE = (25, 25, 25)
 FLASH_LED = 24  # RC(2,0) -> position 24
@@ -98,9 +99,18 @@ def main():
     i_layer = capture.find(i_decay + 1, capture.uniform(GREEN))
     check(i_layer > i_decay, "no green frame while layer 1 is held")
 
+    # Caps Lock is a condition with no layer event, so only the trigger table can
+    # react to it (the engine samples the table every tick). Its rising edge
+    # recolours solid blue and its on-exit restores red when Caps Lock clears.
+    i_blue = capture.find(i_layer + 1, capture.uniform(BLUE))
+    check(i_blue > i_layer, "no blue frame after Caps Lock turned on")
+
+    i_red2 = capture.find(i_blue + 1, capture.uniform(RED))
+    check(i_red2 > i_blue, "no red frame after Caps Lock turned off")
+
     print(
         f"smoke ok: {len(frames)} frames, {capture.n} LEDs; "
-        "off/on/reactive/flash/decay/layer all asserted"
+        "off/on/reactive/flash/decay/layer/caps-lock all asserted"
     )
 
 
