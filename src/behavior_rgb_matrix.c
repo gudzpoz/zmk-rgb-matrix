@@ -91,7 +91,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
   static int kp_rgb_behavior_init_##inst(const struct device *dev) {           \
     struct kp_rgb_behavior_context *ctx = &kp_rgb_context_##inst;              \
     ctx->dev = dev;                                                            \
-    ctx->state.on = ctx->initial_on;                                           \
+    ctx->state.on = kp_rgb_effective_on(                                       \
+        ctx->initial_on, IS_ENABLED(CONFIG_KEYPAW_POWER_FIRST));               \
     if (kp_rgb_apply_defaults(ctx) < 0) {                                      \
       LOG_WRN("Initial RGB effect unavailable for %s", dev->name);             \
     }                                                                          \
@@ -503,8 +504,8 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
   switch (binding->param1) {
   case RGB_TOG_CMD:
     kp_rgb_matrix_lock();
-    ctx->state.user_on = !ctx->state.on;
     bool toggle_on = !ctx->state.on;
+    ctx->state.user_on = toggle_on;
     kp_rgb_matrix_unlock();
     ret =
         toggle_on ? zmk_rgb_matrix_on(ctx->dev) : zmk_rgb_matrix_off(ctx->dev);

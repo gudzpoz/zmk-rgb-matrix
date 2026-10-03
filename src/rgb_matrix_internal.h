@@ -16,8 +16,14 @@
 #include <zephyr/toolchain.h>
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
+#include <zmk/activity.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
+
+static inline bool kp_rgb_effective_on(bool intent, bool apply_idle) {
+  bool active = zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE;
+  return intent && (!apply_idle || active);
+}
 
 /* State is owned by one keypaw,behavior-rgb-matrix device. The physical matrix
  * engine is shared, but these values are deliberately not global. */
