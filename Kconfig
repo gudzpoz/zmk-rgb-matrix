@@ -11,6 +11,17 @@ config KEYPAW_RGB_MATRIX
 
 if KEYPAW_RGB_MATRIX
 
+config KEYPAW_RGB_CONTROL_AUTO_START
+    bool "Start RGB control automatically after source/settings initialization"
+    default y
+    help
+      With settings enabled, start from a commit callback at priority INT_MAX,
+      after all source commits at lower priorities and all settings keys load.
+      Without settings, start at APPLICATION priority 99; the matrix application
+      init priority must be lower. Providers must be ready at this boundary.
+      Disable this if sources become ready later or settings are loaded in
+      subtrees; call zmk_rgb_matrix_start() explicitly after full restoration.
+
 config KEYPAW_RGB_MATRIX_TICK_MS
     int "Animation tick period (ms)"
     default 32
@@ -87,7 +98,7 @@ config KEYPAW_RGB_TRIGGERS
     help
       Edge-triggered condition -> RGB command rules, declared as the children of
       a keypaw,rgb-trigger-table node (their declaration order is the firing
-      order). Each rule runs its `bindings` when its condition becomes active and
+      order). Each rule runs its `on-enter` when its condition becomes active and
       its `on-exit` when it clears; rules are independent, so none shadows
       another. Each trigger references a reusable keypaw,rgb-condition-* node.
 

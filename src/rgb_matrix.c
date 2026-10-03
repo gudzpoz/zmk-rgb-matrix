@@ -217,7 +217,7 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
     if (dev == NULL || !kp_rgb_overlay_covers_all(dev)) {
       continue;
     }
-    if (kp_rgb_overlay_gate(dev, dev->api)) {
+    if (kp_rgb_overlay_gate(dev)) {
       last = i;
     }
   }
@@ -233,7 +233,7 @@ static void kp_render_overlays(struct kp_rgb_frame *frame,
       continue;
     }
     const struct kp_rgb_overlay_api *ovl = dev->api;
-    if (!kp_rgb_overlay_gate(dev, ovl)) {
+    if (!kp_rgb_overlay_gate(dev)) {
       continue;
     }
     ovl->render(dev, frame);
@@ -245,12 +245,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   if (!kp_rgb_matrix_valid || !atomic_get(&kp_rgb_any_on)) {
     return;
   }
-  kp_rgb_triggers_poll();
-  bool ovl_changed = kp_rgb_overlay_refresh();
   if (!kp_rgb_has_leds()) {
-    if (ovl_changed) {
-      kp_rgb_overlay_dispatch();
-    }
     return;
   }
   bool any_on;
@@ -317,9 +312,6 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     }
   }
   kp_rgb_matrix_unlock();
-  if (ovl_changed) {
-    kp_rgb_overlay_dispatch();
-  }
 }
 
 static void kp_rgb_matrix_off_handler(struct k_work *work);
@@ -454,7 +446,7 @@ kp_rgb_deliver_position(const struct zmk_position_state_changed *ev) {
         continue;
       }
       const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
-      if (ovl->event_target == NULL || !kp_rgb_overlay_gate(overlays[i], ovl)) {
+      if (ovl->event_target == NULL || !kp_rgb_overlay_gate(overlays[i])) {
         continue;
       }
       const struct device *target = ovl->event_target(overlays[i]);

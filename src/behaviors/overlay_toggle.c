@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include <zephyr/device.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 #include <drivers/behavior.h>
@@ -60,7 +61,7 @@ static int kp_ovl_toggle_convert(struct zmk_behavior_binding *binding,
     return -ENODEV;
   }
   binding->param1 = KP_RGB_OVL_LATCH_SET;
-  binding->param2 = lat->active ? 0u : 1u;
+  binding->param2 = atomic_get(&lat->active) ? 0u : 1u;
   return 0;
 }
 
@@ -73,14 +74,16 @@ static int kp_ovl_toggle_pressed(struct zmk_behavior_binding *binding,
   if (binding->param1 != KP_RGB_OVL_LATCH_SET) {
     return -EINVAL;
   }
-  struct kp_rgb_latch_data *lat = kp_ovl_toggle_latch(kp_ovl_toggle_cfg(binding));
+  const struct kp_ovl_toggle_config *cfg = kp_ovl_toggle_cfg(binding);
+  struct kp_rgb_latch_data *lat = kp_ovl_toggle_latch(cfg);
   if (lat == NULL) {
     return -ENODEV;
   }
-  lat->active = binding->param2 != 0;
+  bool active = binding->param2 != 0;
+  if (atomic_set(&lat->active, active) != active) {
+    kp_rgb_condition_invalidate(cfg->condition);
+  }
 
-  /* Repaint now instead of waiting up to a tick, so a toggle feels instant. */
-  zmk_rgb_matrix_flush();
   return ZMK_BEHAVIOR_OPAQUE;
 }
 

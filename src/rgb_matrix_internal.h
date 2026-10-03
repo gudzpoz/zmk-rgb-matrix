@@ -81,10 +81,8 @@ uint16_t kp_rgb_calc_effect_index(const struct kp_rgb_behavior_context *ctx,
                                   uint16_t current, int16_t delta);
 int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index);
 
-/* Overlay registry and the split-pushed on/off state (see rgb_utils.c).
- * refresh()/dispatch() are central-only; on a peripheral they are no-ops. */
-bool kp_rgb_overlay_gate(const struct device *dev,
-                         const struct kp_rgb_overlay_api *api);
+/* refresh() runs on the control worker; dispatch() is central-only. */
+bool kp_rgb_overlay_gate(const struct device *dev);
 /* True when the overlay is `all-leds` at full opacity. */
 bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
@@ -97,14 +95,24 @@ uint16_t kp_rgb_overlay_word_count(void);
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
-/* Central-only. A trigger's condition may read keymap state, which does not
- * exist on a peripheral; the engine samples the table every render tick so a
- * condition with no event (Caps Lock, a latch) stays live between layer
- * changes. No-op without a trigger table. */
+bool kp_rgb_condition_require(const struct device *dev);
+bool kp_rgb_condition_valid(const struct device *dev);
+void kp_rgb_conditions_start(void);
+void kp_rgb_overlay_conditions_init(void);
+
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_TRIGGERS)
-void kp_rgb_triggers_poll(void);
+void kp_rgb_triggers_init(void);
+void kp_rgb_triggers_begin(void);
+bool kp_rgb_triggers_evaluate(int64_t now_ms);
+void kp_rgb_triggers_quarantine(void);
 #else
-static inline void kp_rgb_triggers_poll(void) {}
+static inline void kp_rgb_triggers_init(void) {}
+static inline void kp_rgb_triggers_begin(void) {}
+static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  return false;
+}
+static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
 
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word as

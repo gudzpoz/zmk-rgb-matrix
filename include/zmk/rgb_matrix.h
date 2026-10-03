@@ -291,37 +291,58 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                      &cfg_inst##_cfg, POST_KERNEL,                             \
                      CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
 
-/* -------------------------------------------------------------------------
- * Conditions
- *
- * A condition is a reusable predicate device consumed by overlays and
- * triggers. It carries no registry identity: a kind samples whatever source it
- * watches and reports whether it is active.
- *
- * Both consumers sample it -- the engine every render tick -- so a condition
- * never has to announce a change to be correct. One whose source has an event
- * may still call zmk_rgb_matrix_flush() to shorten the latency.
- *
- * A condition whose source exists only on the split central must still compile
- * and link on a peripheral and return false there: gate the read, not the
- * device.
- * ------------------------------------------------------------------------- */
+/* Conditions are sampled on the control worker, never by a renderer. A variable
+ * source must invalidate after a synchronized update; there is no polling fallback.
+ * Deadlines use the supplied monotonic uptime and must be > now_ms or NEVER.
+ * Dependencies are immutable, lifetime-long metadata; samples may only read their
+ * declared children's cached values, and must not execute actions or LED I/O.
+ */
+enum kp_rgb_condition_scope {
+  KP_RGB_CONDITION_ANY_SIDE = 0,
+  KP_RGB_CONDITION_CENTRAL_ONLY,
+};
+#define KP_RGB_CONDITION_NEVER INT64_MAX
 
 struct kp_rgb_condition_api {
-  bool (*active)(const struct device *dev);
+  enum kp_rgb_condition_scope scope;
+  /* Returns current activity. Assign to next_wakeup_ms to set a deadline for
+   * next sample call.
+   */
+  bool (*sample)(const struct device *dev, int64_t now_ms,
+                 int64_t *next_wakeup_ms);
+  const struct device *const *(*dependencies)(const struct device *dev,
+                                              size_t *count);
 };
+/* Start control once defaults, all settings, and all provider sources are ready.
+ * Idempotent, thread-context only. Required when CONTROL_AUTO_START is disabled;
+ * otherwise called by the late settings commit or APPLICATION startup hook.
+ */
+void zmk_rgb_matrix_start(void);
 
-/* Declare the device. Many kinds need no config and no state, so `cfg_expr` and
- * `data_expr` are full expressions (`&my_cfg` / `&my_data`, or NULL) rather than
- * a `cfg_inst` token: pass NULL for both for a stateless condition, or a
- * pointer to static data that active() may read. */
-#define KP_RGB_CONDITION_DEFINE(inst, active_fn, cfg_expr, data_expr)          \
-  static const struct kp_rgb_condition_api kp_rgb_condition_##inst##_api = {   \
-      .active = active_fn,                                                     \
-  };                                                                           \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, data_expr, cfg_expr,         \
-                   POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,           \
-                   &kp_rgb_condition_##inst##_api)
+/* Any-context, non-blocking notification. NULL/unregistered devices are errors.
+ * Notifications coalesce: intermediate source transitions need not be observed.
+ * Early notifications are subsumed by mandatory initial sampling.
+ */
+void kp_rgb_condition_invalidate(const struct device *condition);
+/* Control-worker only. Returns a declared child's cache during sampling, or a
+ * consumer root's cache after evaluation. Never invokes a provider.
+ */
+bool kp_rgb_condition_value(const struct device *condition);
+
+#include <zmk/rgb_matrix_condition_internal.h>
+
+/* Config/data may be NULL. The declaration owns registration and cache storage;
+ * providers must not access the registration or embed engine state in their data.
+ */
+#define KP_RGB_CONDITION_DEFINE(inst, api_expr, cfg_expr, data_expr)           \
+  static struct kp_rgb_condition_registration kp_rgb_condition_##inst##_entry; \
+  static int kp_rgb_condition_##inst##_init(const struct device *dev) {        \
+    kp_rgb_condition_register(dev, &kp_rgb_condition_##inst##_entry);          \
+    return 0;                                                                  \
+  }                                                                            \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), kp_rgb_condition_##inst##_init, NULL,    \
+                   data_expr, cfg_expr, POST_KERNEL,                           \
+                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, api_expr)
 
 /* Resolve a node's `condition` phandle, or NULL when it has none (meaning
  * "unconditionally active"). Shared by the compositor overlay and the trigger. */
@@ -341,15 +362,12 @@ struct kp_rgb_condition_api {
  * an individual effect may override that list with its own `overlays`/
  * `no-overlays`.
  *
- * The engine repaints on its own timer. A `local` condition whose source changes
- * on an event may call zmk_rgb_matrix_flush() from that event's listener to
- * repaint immediately; the engine already flushes the central-evaluated path
- * itself. flush() also re-samples the trigger table, so the same call shortens
- * a trigger's latency too.
+ * Condition providers notify the control engine after source changes. Renderers
+ * consume cached gates and never sample conditions.
  * ------------------------------------------------------------------------- */
 
 struct kp_rgb_overlay_api {
-  bool (*active)(const struct device *dev);
+  const struct device *condition; /* NULL = unconditional */
   void (*render)(const struct device *dev, struct kp_rgb_frame *frame);
   /* The effect this overlay composites, so the engine can deliver input events
    * to it (a composited reactive/ripple effect has no other way to see them).
@@ -376,6 +394,7 @@ struct kp_rgb_overlay_common_data {
   size_t *leds;     /* the overlay's own storage */
   uint16_t index;   /* registry ordinal */
   bool local;       /* True when `local`: each half evaluates the condition */
+  bool gate;        /* worker-published local gate */
 };
 
 /* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
@@ -443,23 +462,22 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * allocates the instance's target storage, so a kind must declare its device
  * here rather than with DEVICE_DT_DEFINE directly. `event_fn` exposes the
  * effect the kind composites, or NULL; the engine delivers input events to it. */
-#define KP_RGB_OVERLAY_DEFINE(inst, active_fn, render_fn, event_fn, cfg_inst)  \
+#define KP_RGB_OVERLAY_DEFINE(inst, render_fn, event_fn, cfg_inst)             \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
                    (const void *)&cfg_inst##_cfg ==                            \
                        (const void *)&cfg_inst##_cfg.common,                   \
                "overlay config must embed "                                    \
                "struct kp_rgb_overlay_common_config as the first field");      \
+  BUILD_ASSERT(sizeof(cfg_inst##_data.common) ==                               \
+                       sizeof(struct kp_rgb_overlay_common_data) &&            \
+                   (const void *)&cfg_inst##_data ==                           \
+                       (const void *)&cfg_inst##_data.common,                  \
+               "overlay data must embed struct kp_rgb_overlay_common_data "    \
+               "as the first field");                                          \
   BUILD_ASSERT(                                                                \
-      sizeof(cfg_inst##_data.common) ==                                        \
-              sizeof(struct kp_rgb_overlay_common_data) &&                     \
-          (const void *)&cfg_inst##_data ==                                    \
-              (const void *)&cfg_inst##_data.common,                           \
-      "overlay data must embed struct kp_rgb_overlay_common_data "             \
-      "as the first field");                                                   \
-  BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                \
-                                  keypaw_rgb_overlays),                        \
-               "overlay must be a child of a keypaw,rgb-overlays node");       \
+      DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)), keypaw_rgb_overlays),   \
+      "overlay must be a child of a keypaw,rgb-overlays node");                \
   BUILD_ASSERT(!(DT_PROP(DT_DRV_INST(inst), all_leds) &&                       \
                  (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
@@ -470,20 +488,20 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
     const struct kp_rgb_overlay_common_config *cfg = dev->config;              \
     struct kp_rgb_overlay_common_data *data = dev->data;                       \
     data->leds = cfg_inst##_targets;                                           \
-    data->led_count = cfg->all_leds                                            \
-                          ? 0 /* paints every LED; no target list needed */    \
-                          : kp_rgb_resolve_targets(                            \
-                                cfg->keys, cfg->keys_len, cfg->leds,           \
-                                cfg->leds_len, data->leds,                     \
-                                ARRAY_SIZE(cfg_inst##_targets));               \
+    data->led_count =                                                          \
+        cfg->all_leds                                                          \
+            ? 0 /* paints every LED; no target list needed */                  \
+            : kp_rgb_resolve_targets(cfg->keys, cfg->keys_len, cfg->leds,      \
+                                     cfg->leds_len, data->leds,                \
+                                     ARRAY_SIZE(cfg_inst##_targets));          \
     data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
-    data->local = IS_ENABLED(CONFIG_ZMK_SPLIT) &&                              \
-                  DT_PROP(DT_DRV_INST(inst), local);                           \
+    data->local =                                                              \
+        IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local);     \
     kp_rgb_overlay_register(dev);                                              \
     return 0;                                                                  \
   }                                                                            \
   static const struct kp_rgb_overlay_api cfg_inst##_api = {                    \
-      .active = active_fn,                                                     \
+      .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .render = render_fn,                                                     \
       .event_target = event_fn,                                                \
   };                                                                           \
@@ -531,8 +549,8 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * initialization. Returns 0 once accepted, not once hardware is black; failed
  * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
  * colored submissions until released. Release resumes current logical intent
- * without advancing animation time spent inhibited. Polling and overlay state
- * synchronization continue at normal cadence while logically ON. Pending key
+ * without advancing animation time spent inhibited. Event/deadline control and
+ * overlay synchronization remain live even while logically OFF. Pending key
  * feedback is discarded while inhibited. An in-flight render or feedback pass
  * may finish computing. */
 int zmk_rgb_matrix_set_inhibited(bool inhibited);
@@ -550,6 +568,6 @@ int zmk_rgb_matrix_select_effect(const struct device *behavior,
 int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
                                 int16_t direction);
 
-/* Schedule an immediate repaint and trigger-table re-evaluation. Safe from any
- * context. */
+/* Schedule an immediate repaint when output is eligible. Any-context; does not
+ * sample conditions or grant output permission. */
 void zmk_rgb_matrix_flush(void);

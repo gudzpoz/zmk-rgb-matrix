@@ -2,76 +2,62 @@
  * Copyright (c) 2026 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
- *
- * Built-in "layer" condition: active while a given keymap layer is active.
- * Declare one node per layer that a consumer should react to. The predicate is
- * sampled, never cached: an overlay's gate and the trigger table both re-evaluate
- * it every tick, so there is nothing to sync.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_layer
 
-#include <stdbool.h>
-
-#include <zephyr/device.h>
-#include <zephyr/sys/util.h>
-
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/rgb_matrix.h>
 
-/* Layers only exist where the keymap does, so on a split peripheral this
- * predicate has no source of truth; it must still compile and link there. */
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-#define KP_COND_LAYER_HAS_KEYMAP 1
+#define HAS_KEYMAP 1
 #include <zmk/keymap.h>
 #else
-#define KP_COND_LAYER_HAS_KEYMAP 0
+#define HAS_KEYMAP 0
 #endif
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-struct kp_cond_layer_config {
+struct layer_cfg {
   uint16_t layer;
   bool only_topmost;
 };
 
-static bool kp_cond_layer_active(const struct device *dev) {
-#if KP_COND_LAYER_HAS_KEYMAP
-  const struct kp_cond_layer_config *cfg = dev->config;
-
-  if (cfg->only_topmost) {
-    /* The property is a layer id; the accessor reports an index, hence the map. */
-    return zmk_keymap_layer_index_to_id(zmk_keymap_highest_layer_active()) ==
-           cfg->layer;
-  }
-  return zmk_keymap_layer_active((zmk_keymap_layer_id_t)cfg->layer);
+static bool sample(const struct device *dev, int64_t now_ms,
+                   int64_t *next_wakeup_ms) {
+  ARG_UNUSED(now_ms);
+  ARG_UNUSED(next_wakeup_ms);
+#if HAS_KEYMAP
+  const struct layer_cfg *c = dev->config;
+  return c->only_topmost
+             ? zmk_keymap_layer_index_to_id(zmk_keymap_highest_layer_active()) == c->layer
+             : zmk_keymap_layer_active((zmk_keymap_layer_id_t)c->layer);
 #else
   ARG_UNUSED(dev);
   return false;
 #endif
 }
 
-#define KP_COND_LAYER_DEFINE(inst)                                             \
-  static const struct kp_cond_layer_config kp_cond_layer_##inst##_cfg = {      \
-      .layer = DT_PROP(DT_DRV_INST(inst), layer),                              \
-      .only_topmost = DT_PROP(DT_DRV_INST(inst), only_topmost),                \
-  };                                                                           \
-  KP_RGB_CONDITION_DEFINE(inst, kp_cond_layer_active,                          \
-                          &kp_cond_layer_##inst##_cfg, NULL)
-
-DT_INST_FOREACH_STATUS_OKAY(KP_COND_LAYER_DEFINE)
-
-#if KP_COND_LAYER_HAS_KEYMAP
-/* Repaint on the layer edge so the change is immediate on the central and the
- * push to the peripheral starts at once. Central only. */
-static int kp_cond_layer_state_listener(const zmk_event_t *eh) {
-  if (as_zmk_layer_state_changed(eh) != NULL) {
-    zmk_rgb_matrix_flush();
+#if HAS_KEYMAP
+#define INVALIDATE(inst)                                                       \
+  kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
+static int listener(const zmk_event_t *eh) {
+  if (as_zmk_layer_state_changed(eh)) {
+    DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
   }
   return ZMK_EV_EVENT_BUBBLE;
 }
-ZMK_LISTENER(kp_cond_layer_state, kp_cond_layer_state_listener);
+ZMK_LISTENER(kp_cond_layer_state, listener);
 ZMK_SUBSCRIPTION(kp_cond_layer_state, zmk_layer_state_changed);
-#endif /* KP_COND_LAYER_HAS_KEYMAP */
+#endif
 
-#endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */
+#define DEFINE(inst)                                                           \
+  static const struct layer_cfg cfg_##inst = {                                 \
+      DT_PROP(DT_DRV_INST(inst), layer),                                       \
+      DT_PROP(DT_DRV_INST(inst), only_topmost)};                               \
+  static const struct kp_rgb_condition_api api_##inst = {                      \
+      .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};               \
+  KP_RGB_CONDITION_DEFINE(inst, &api_##inst, &cfg_##inst, NULL)
+DT_INST_FOREACH_STATUS_OKAY(DEFINE)
+
+#endif

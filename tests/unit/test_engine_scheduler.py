@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
         fixture(true, false);
         host_run_until(160);
         assert(host_timer_fires == 11 && kp_tick_work.runs == 11);
-        assert(polls == 11 && refreshes == 11 && dispatches == 11);
+        assert(polls == 0 && refreshes == 0 && dispatches == 0);
         assert(renders == (KP_LED_COUNT ? 11 : 0));
         assert(writes == (KP_LED_COUNT ? 12 : 0));
         for (size_t i = 0; i < host_transfer_count; i++) {
@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name, "inhibited")) {
         fixture(true, true);
         host_run_until(160);
-        assert(host_timer_fires == 11 && polls == 11 && refreshes == 11);
+        assert(host_timer_fires == 11 && polls == 0 && refreshes == 0 && dispatches == 0);
         assert(renders == 0 && writes == (KP_LED_COUNT ? 1 : 0));
         assert(!colored);
         assert(zmk_rgb_matrix_set_inhibited(false) == 0);
@@ -248,6 +248,7 @@ int main(int argc, char **argv) {
     } else {
         assert(!"unknown case");
     }
+    assert(!polls && !refreshes && !dispatches);
     printf("%s leds=%d time_ms=%llu timer_fires=%u tick_runs=%u polls=%d "
            "renders=%d transfers=%zu: passed\n", name, KP_LED_COUNT,
            (unsigned long long)now, host_timer_fires, kp_tick_work.runs,

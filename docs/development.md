@@ -78,14 +78,12 @@ public, so a third-party kind can call it from a listener (see
 because a Zephyr work item can be queued only once, so a burst costs at most one
 extra frame.
 
-The same tick also samples the trigger table (`kp_rgb_triggers_poll()`), exactly
-as it samples overlay conditions, so a trigger whose condition changes without a
-layer event still re-fires. See
+Condition/trigger control runs separately on source invalidations and absolute
+condition deadlines, not animation ticks. It remains live with all zones OFF,
+idle suppression, inhibition, or zero LEDs. All configured local and central
+consumer roots remain live in Stage 1; there is no demand pruning.
+`zmk_rgb_matrix_flush()` requests pixels, not condition sampling. See
 [Trigger table internals](#trigger-table-internals).
-
-The tick paints locally *before* dispatching overlay state (see below), so a
-blocking split send does not delay the central's own LEDs — that ordering is why
-a layer change used to lag visibly while `RGB_EFF` felt instant.
 
 ### The matrix lock and deferred key events
 
@@ -127,7 +125,7 @@ Two questions look alike but are not, and the split between them shapes the whol
 API:
 
 - **View** — *what should be lit right now?* A pure function of the current
-  conditions and the static devicetree: stateless, sampled every tick, reversible
+  conditions and the static devicetree: cached, refreshed on source changes/deadlines, reversible
   by construction. This is an **overlay**.
 - **State** — *change the user's selection.* Edge-triggered, persisted,
   split-synced, and **not idempotent** (`RGB_TOG` twice is a no-op, `RGB_EFF`
@@ -155,31 +153,47 @@ effect.
 
 ### Conditions are the shared primitive
 
-A condition is a predicate (`kp_rgb_condition_api`) consumed by both an overlay
-and a trigger, so a layer or CapsLock predicate is written once. The
-compositor's `active()` delegates to its node's `condition` phandle and the
-trigger's does the same; `NULL` means unconditionally active. Conditions carry
-no ordinal and no split state of their own — the central-evaluated **overlay**
-pushes a bit per overlay, not per condition. Note the split of authority:
-whether the condition is evaluated once on the central or per half is the
-consuming overlay's `local` flag to declare, because the push bit belongs to the
-overlay.
+A condition exposes an immutable `struct kp_rgb_condition_api` and registers with
+`KP_RGB_CONDITION_DEFINE(inst, api_expr, cfg_expr, data_expr)`. Config/data may be
+NULL; engine cache storage belongs to the registration, not provider data.
 
-Boolean compositions are also implemented as conditions:
-`keypaw,rgb-condition-and` / `-or`. It inherits that overlay's locality, which
-probably is not the most flexible design. Referencing sibling condition nodes is
-a DAG (edtlib only makes a child depend on its parent, not on its phandles);
-only a self- or mutual reference is a genuine cycle.
+`bool sample(const struct device *dev, int64_t now_ms, int64_t *next_wakeup_ms)`
+runs on the control worker and returns the active Boolean. False means inactive,
+not a scheduling stop: inactive timed nodes still schedule. Before every invocation,
+the engine initializes a fresh deadline to `KP_RGB_CONDITION_NEVER` (`INT64_MAX`).
+Untimed providers use `ARG_UNUSED(next_wakeup_ms)`; no manual NEVER assignment is
+needed. Timed providers may overwrite `*next_wakeup_ms` with an absolute signed
+64-bit monotonic uptime deadline strictly greater than the supplied `now_ms`, or
+NEVER. A timed provider can cease scheduling by leaving the pointer untouched on
+its next call. NEVER means stable until notified, not permission to poll. After a
+late wake, sample current state and report a future deadline rather than replaying
+missed boundaries. Sampling must not execute actions,
+write pixels, schedule work, or recursively sample another provider.
 
-Most conditions are stateless, but the API does not require it. The one built-in
-exception is `keypaw,rgb-condition-latch`: it keeps a bool in `dev->data` (the
-fourth argument of `KP_RGB_CONDITION_DEFINE`) that a
-`keypaw,behavior-rgb-overlay-toggle` nested under it flips. That state is
-deliberately volatile and per-half — never persisted, and not in the overlay
-state words. It needs no engine support: the engine already samples `active()`
-every tick, so a default overlay pushes the resulting bit and a `local` overlay
-reads its own latch. The toggle is `GLOBAL` and resolves "flip" to an absolute
-value on the central, so both halves agree even after a peripheral reboots.
+After a coherent, synchronized source mutation, call
+`kp_rgb_condition_invalidate(condition)`: any-context, non-blocking and coalescing.
+Intermediate transitions can disappear before sampling; this is not a lossless edge
+queue. NULL/unregistered targets are programming errors. Initial sampling is mandatory
+and subsumes early notifications. `zmk_rgb_matrix_flush()` is not a substitute.
+
+Optional `dependencies(dev, count)` returns immutable firmware-lifetime metadata;
+NULL is allowed only for zero dependencies. The engine validates the DAG, including
+cycles, missing/unready devices and undeclared reads, then samples shared nodes once
+per control pass in dependency order with one `now_ms`. Combinators use worker-only
+`kp_rgb_condition_value(child)` to read declared cached children, never to sample.
+AND/OR may short-circuit reads, but all child notifications/deadlines remain live;
+combinators normally leave their own deadline pointer untouched.
+
+`KP_RGB_CONDITION_ANY_SIDE` is the default scope. A
+`KP_RGB_CONDITION_CENTRAL_ONLY` provider still compiles/links on peripherals, but a
+local peripheral consumer of it, even through a combinator, is rejected. Scope
+restricts source evaluation; the overlay's `local` flag selects gate authority.
+The central pushes one bit per overlay, not per condition.
+
+Latch state is volatile provider data, never persisted. Its GLOBAL toggle resolves
+an absolute value on the central, applies the mutation and invalidates the source.
+Invalid provider contracts disable affected consumers with a diagnostic; a fault
+is not a false snapshot and must not synthesize an exit action.
 
 ### The compositor
 
@@ -263,14 +277,11 @@ discriminator a callback needs.
 
 ### Triggers are independent edge pairs
 
-A trigger is a condition plus the `&kprgb` bindings to run on its rising edge,
-and the optional `on-exit` to run on its falling edge. The engine samples the
-table every render tick (a condition has no way to announce a change), so the
-edge pair is what keeps a level condition from repeating: binding it straight to
-`RGB_TOG` would otherwise toggle every tick.
-
-Rules are independent. A rule with no condition is simply unconditional: it
-fires once at boot and never falls, so its `on-exit` never runs.
+A trigger consumes a cached condition and runs `on-enter` on false → true and
+`on-exit` on true → false. Rules have independent baselines; unchanged values
+never reapply presets. With default `startup = "enter-if-active"`, an unconditional
+rule fires once after readiness. `startup = "baseline"` records initial state
+without executing an action. See [Trigger table internals](#trigger-table-internals).
 
 ### The devicetree trick that makes the phandles safe
 
@@ -293,37 +304,24 @@ sized from `DT_CHILD_NUM`, so there is **no fixed cap** (the old
 
 ### Predicate vs renderer
 
-There is one overlay kind, a compositor. Its `active(dev)` delegates to the
-node's `condition` phandle (`NULL` condition means always active), and its
-`render(dev, frame)` renders the composited effect into a private layer buffer
-and blends it onto the frame at `opacity` percent. The gate still lives in the
-engine (`kp_rgb_overlay_gate()`), so `render` keeps its signature;
-`active == NULL` means "render every tick and self-sample".
+`kp_rgb_overlay_api.condition` is a direct condition device pointer (NULL means
+unconditional). There is no `active` callback or self-sampling render path.
+`KP_RGB_OVERLAY_DEFINE(inst, render_fn, event_fn, cfg_inst)` no longer takes an
+`active_fn` argument. Renderers consume worker-published gates; their void
+`render(dev, frame)` signature and effect/frame timing remain unchanged in Stage 1.
 
 ### Central by default, `local` for per-half
 
-Where a condition is evaluated is the overlay's choice, and the default is the
-common case:
+- **Central-evaluated (default).** Control samples the condition on the central
+  and publishes overlay visibility as 16-bit state words. A peripheral consumes
+  the pushed bit without sampling that tree for this overlay.
+- **Per-half (`local;`).** Each half evaluates its own condition tree. These gates
+  are not pushed. The entire tree must support evaluation on that half; a
+  CENTRAL_ONLY dependency makes a local peripheral consumer invalid.
 
-- **Central-evaluated (default).** The central evaluates `active()` in the render
-  tick (`kp_rgb_overlay_refresh()`) and pushes only the words whose bits changed,
-  one 16-bit word per command, packed as `(word << 16) | bits`
-  (`RGB_OVL_STATE_BITS`/`_WORD`). A peripheral gates its renderer on the pushed
-  bit and never calls `active()`. This covers a central-only source (a layer or
-  the dynamic-macro recorder) and a global host source (CapsLock) alike, so the
-  DTS needs no flag for any of them.
-- **Per-half (`local;`).** The overlay sets `local;` and each half calls
-  `active()` for itself; such an overlay is never in the pushed words. It
-  changes *where the gate runs*, not what is rendered — both halves run the
-  renderer either way, so only a condition whose value genuinely differs per
-  half and is not kept in step by the split link needs it, and no built-in
-  condition does (`layer` is central-only, `caps-lock` is a global host source,
-  `latch` is synchronised by its GLOBAL toggle).
-
-The default is deliberately the common case: getting it wrong the other way (a
-central source left to the peripherals) fails silently, whereas a global source
-under central evaluation is simply correct. `local;` is the opt-in that promises
-the condition is truthful on the peripheral.
+Both halves render locally. Gate authority does not change where effect pixels or
+battery levels come from. All configured central and local roots stay live even
+when local output is suppressed; Stage 1 performs no consumer-demand pruning.
 
 `RGB_OVL_STATE_CMD` lives beside the upstream include in
 `include/dt-bindings/keypaw/rgb_matrix.h` (it claims slot 15, maintained there);
@@ -335,12 +333,9 @@ bits used).
 
 ### Design points that were not obvious
 
-- **Only changed words travel.** `dispatch()` keeps a mirror (`kp_overlay_sent`)
-  of what it last broadcast and sends only the differing words. A mirror rather
-  than a changed-word list is deliberate: if a tick cannot take the matrix lock
-  and skips its dispatch, `state != sent` stays true and the next tick still has
-  something to push. A changed-word list would have dropped that update
-  permanently, since `refresh()` has already written the new state.
+- **Only changed words travel.** Dispatch compares current overlay state with
+  the last broadcast snapshot. Control owns gate updates independently of the
+  periodic render tick; repainting is not a source-notification mechanism.
 - **The command must not persist.** The `RGB_OVL_STATE_CMD` handler applies the
   word and returns *before* the `kp_rgb_save_state()` that closes the switch, so
   a layer toggle never schedules a flash write.
@@ -352,12 +347,10 @@ bits used).
   command handler) and read on the RGB low-priority workqueue (the render tick).
   Each aligned `uint16_t` access cannot tear, so the worst case is one stale
   ~32 ms frame.
-- **Flush wiring.** The layer condition subscribes to `zmk_layer_state_changed`
-  (central only), the `RGB_OVL_STATE_CMD` handler flushes when a pushed word
-  actually changes (peripheral), and the caps condition flushes on its
-  `zmk_hid_indicators_changed` listener. Note extra frames are not free for
-  effects that advance state per render (`reactive`, `starlight`, `rain`): they
-  advance one extra step per event, imperceptible at human event rates.
+- **Source notification.** Layer, Caps Lock and latch changes invalidate their
+  condition after updating the source. The control worker refreshes cached gates;
+  changed received overlay words request a peripheral repaint. Animation ticks and
+  repaint requests do not provide a fallback for a missing source notification.
 
 ### Where conditions can run
 
@@ -378,10 +371,10 @@ CONFIG_ZMK_SPLIT_ROLE_CENTRAL`). Consequences:
   half, so `layer_fn1`'s left-half keys already had LEDs on the peripheral; the
   compositor simply never ran because the condition had no source. The push makes
   those LEDs light.
-- A condition whose source is central-only must still **compile and link on the
-  peripheral**, because a shared DTSI expands it on both halves. Gate the *read*,
-  not the device: the layer condition returns false there, and the caps condition
-  reads the event the peripheral re-raises.
+- A central-only provider must still **compile and link on the peripheral** for
+  shared DTSI configurations. Declare `KP_RGB_CONDITION_CENTRAL_ONLY`; the graph
+  rejects local peripheral consumers transitively rather than sampling a missing
+  host source. Default central-evaluated overlays consume the pushed gate there.
 
 ## Split state sync (`src/rgb_split_sync.c`)
 
@@ -459,36 +452,56 @@ needed.
 
 ## Trigger table internals
 
-`src/rgb_triggers.c` owns the ordered table declared by a
-`keypaw,rgb-trigger-table` node. It is modelled on
-`zmk/app/src/conditional_layer.c` in shape (built only for the split central,
-enumerating children with `DT_FOREACH_CHILD_STATUS_OKAY`), but is driven by the
-render tick: `kp_rgb_triggers_poll()` is called from `kp_rgb_matrix_tick()`,
-exactly like the overlay-condition sample.
+`src/rgb_triggers.c` consumes the control worker's cached graph snapshots. Tables
+execute on the split central (or standalone device) only. Peripherals do not
+initialize baselines or dispatch startup, enter or exit actions.
 
 ### Independent edges
 
-Each trigger keeps its own previous-active flag and fires `bindings` on the
-rising edge and `on-exit` on the falling edge; nothing is "selected", so one rule
-never shadows another, and declaration order only decides which runs first when
-several change on the same evaluation.
+Each trigger has an independent baseline. `on-enter` runs on false → true and
+`on-exit` on true → false; unchanged values preserve manual selections. At least
+one action list must be nonempty. Legacy trigger `bindings` is rejected.
+`startup = "enter-if-active"` is the default: initial true runs enter, initial false
+does nothing. `startup = "baseline"` records initial state without actions.
 
-Boot evaluates once at `APPLICATION` init, after the behavior's `POST_KERNEL`
-init applied `initial-effect`. Every condition true at boot is a rising edge
-from the zero-initial flags, so an unconditional rule acts immediately and can
-override `initial-effect`.
+All edges are captured and baselines committed before actions run, outside graph
+and matrix locks, in declaration order. Actions support validated one-shot RGB
+controls and latch operations, not arbitrary key presses or hold-tap behavior.
+Both lists invoke one-shot commands; `on-exit` is not a release handler. Global
+RGB commands use the central behavior/transport path once, without peripheral
+trigger execution or transport echo.
 
-The sampling is gated on `kp_rgb_any_on`, and `zmk_rgb_matrix_flush()` early-
-returns when the matrix is off, so any change made while the matrix is dark is
-only applied on the next `RGB_ON` tick. A trigger therefore cannot be what turns
-the matrix on. That matches how the overlay view behaves.
+Actions that mutate conditions queue a subsequent pass, never recursive sampling.
+A chain may use at most eight feedback evaluation/action passes per external
+transaction; a nonsettling chain diagnoses and quarantines involved triggers until
+reboot. Invalid condition snapshots disable affected consumers, not synthesize exits.
+Control remains live while all zones are OFF, idle-suppressed, inhibited, or absent.
+
+### Startup readiness
+
+`CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y` by default. With settings enabled,
+`src/rgb_control_start.c` uses `SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO` at
+`INT_MAX`: full key loading and lower-priority source commits precede control
+startup. This does **not** promise ordering after every application's commit at
+the same priority or after later source initialization. With settings disabled,
+the hook runs at APPLICATION priority 99; a `BUILD_ASSERT` requires matrix
+`CONFIG_APPLICATION_INIT_PRIORITY < 99`.
+
+Custom integrations that need equal-priority/later provider readiness or subtree
+settings loads must disable automatic start and call the public
+`void zmk_rgb_matrix_start(void)` after defaults, full settings restoration and all
+provider sources are ready. It is idempotent and thread-context only. Pre-start
+notifications are subsumed by mandatory initial sampling; no startup actions run
+early. No ZMK patch or private ZMK symbols are required.
+
+See [Stage 1 validation](stage-1-validation.md) for migration and acceptance checks.
 
 ### Why there is no `triggers` list
 
 Declaration order is the firing order, and the table holds **no phandle list
 of its own children**. Two devicetree cycles, both found the hard way:
 
-- On `&kprgb`: a trigger's `bindings` reference `&kprgb`, so a list there is
+- On `&kprgb`: a trigger's `on-enter` actions reference `&kprgb`, so a list there is
   `kprgb -> trigger -> kprgb`. edtlib rejects it outright.
 - On the table itself: edtlib makes every node depend on its parent, so a parent
   listing its own child is also a 2-cycle. It is **not** reported as a cycle:
@@ -502,9 +515,8 @@ Rejected syntax: a flat mixed list such as
 `triggers = <&lst &layer_one &target_effect>;`. One phandle array cannot carry a
 condition and a target together: `phandle-array` would demand `#trigger-cells`
 on every node, and cell-encoding the target would lose the relative-command and
-colour payloads. The action property name is not free either:
-`ZMK_KEYMAP_EXTRACT_BINDING` hardcodes `bindings`, so `on-exit` needs its own
-extraction macro (`KP_TRIG_EXIT_BINDING` in `src/rgb_triggers.c`).
+colour payloads. `on-enter` and `on-exit` use property-specific binding extraction;
+unrelated keymap and behavior `bindings` properties retain their names.
 
 ### `no-cycle`
 

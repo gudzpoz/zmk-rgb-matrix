@@ -80,6 +80,12 @@ jobs:
       - name: Deterministic engine scheduling tests
         run: python3 tests/unit/test_engine_scheduler.py
 
+      - name: Deterministic condition control tests
+        run: python3 tests/unit/test_conditions.py
+
+      - name: Cached trigger edge tests
+        run: python3 tests/unit/test_triggers.py
+
       - name: Unit tests
         working-directory: zmk-ws
         run: |

@@ -40,9 +40,9 @@ int main(void) {
  kp_rgb_matrix_tick_handler(&kp_tick_timer);
  assert(tick_submits==submitted+1);
  now=10000;kp_rgb_matrix_tick(NULL);
- assert(polls==1 && refreshes==1 && dispatches==1 && renders==0 && feedback==0 && colored==0);
+ assert(polls==0 && refreshes==0 && dispatches==0 && renders==0 && feedback==0 && colored==0);
  for(int i=0;i<3;i++) { now+=CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;kp_rgb_matrix_tick(NULL); }
- assert(polls==4 && refreshes==4 && dispatches==4 && renders==0 && feedback==0);
+ assert(polls==0 && refreshes==0 && dispatches==0 && renders==0 && feedback==0);
  if(KP_LED_COUNT) {
   assert(kp_rgb_black_pending && retry_delay==100);failures=7;
   int delays[]={200,400,800,1000,1000,1000,1000};
@@ -129,6 +129,7 @@ int main(void) {
  if(KP_LED_COUNT) {
   assert(kp_rgb_black_pending);kp_rgb_matrix_off_handler(NULL);assert(!kp_rgb_black_pending);
  }
+ assert(!polls && !refreshes && !dispatches);
  puts("production-extracted output gate tests passed");
 }
 '''

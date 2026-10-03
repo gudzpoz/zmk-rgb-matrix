@@ -12,26 +12,21 @@
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
 
-/* Caps Lock is a condition with no layer event, so it exercises the trigger
- * table's per-tick sampling. `fixture_caps` is otherwise consumed only by the
- * inert `fixture_or`, so the trigger is the sole pixel path for Caps Lock: it
- * recolours solid blue while on and restores red from `on-exit` when it clears. */
+/* The trigger is the sole pixel path for Caps Lock: fixture_or is inert. */
 / {
     rgb_triggers: rgb_triggers {
         compatible = "keypaw,rgb-trigger-table";
 
         smoke_caps: smoke_caps {
             condition = <&fixture_caps>;
-            bindings = <&kprgb RGB_EFS_CMD 0>,
+            on-enter = <&kprgb RGB_EFS_CMD 0>,
                        <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
             on-exit = <&kprgb RGB_EFS_CMD 0>,
                       <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
 
-        /* No condition, so it fires once at boot and never again. */
         smoke_default: smoke_default {
-            condition = <&fixture_always>;
-            bindings = <&kprgb RGB_EFS_CMD 0>,
+            on-enter = <&kprgb RGB_EFS_CMD 0>,
                        <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
     };

@@ -162,13 +162,13 @@ static void k_timer_start(struct k_timer *t,int delay,int period) { (void)t;(voi
 #endif
 static bool device_is_ready(const struct device *d) { return d!=NULL; }
 static int kp_rgb_validate_zones(void) { kp_rgb_matrix_valid=true;return 0; }
-static void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
-static bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
-static void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
+void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
+bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
+void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
 static const struct device *const *kp_rgb_overlay_list(void) { return NULL; }
 static size_t kp_rgb_overlay_count(void) { return 0; }
 static bool kp_rgb_overlay_covers_all(const struct device *d) { (void)d;return false; }
-static bool kp_rgb_overlay_gate(const struct device *d,const void *api) { (void)d;(void)api;return true; }
+static bool kp_rgb_overlay_gate(const struct device *d) { (void)d;return true; }
 static void kp_rgb_deliver_position(const struct zmk_position_state_changed *e) { (void)e; assert(held);feedback++; }
 static void (*host_render_hook)(void);
 struct host_transfer {

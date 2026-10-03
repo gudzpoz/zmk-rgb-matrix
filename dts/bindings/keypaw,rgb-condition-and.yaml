@@ -7,6 +7,9 @@ description: |
   reference other combinators, but the reference graph must be acyclic. An
   omitted `condition` on a consumer means "unconditionally active"; this node is
   how two or more predicates are combined instead.
+  Operands are declared dependencies with cached values; short-circuiting does
+  not suspend their notifications or deadlines. A local peripheral consumer may
+  not reference a central-only source, including through nested combinators.
 
 compatible: "keypaw,rgb-condition-and"
 

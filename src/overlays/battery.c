@@ -24,7 +24,6 @@
 
 struct kp_ovl_battery_config {
   struct kp_rgb_overlay_common_config common;
-  const struct device *condition; /* NULL = always active */
   uint32_t color;                 /* 0xRRGGBB */
   uint32_t background_color;      /* 0xRRGGBB */
   bool reverse;
@@ -32,17 +31,6 @@ struct kp_ovl_battery_config {
 struct kp_ovl_battery_data {
   struct kp_rgb_overlay_common_data common;
 };
-
-static bool kp_ovl_battery_active(const struct device *dev) {
-  const struct kp_ovl_battery_config *cfg = dev->config;
-
-  if (cfg->condition == NULL) {
-    return true;
-  }
-  const struct kp_rgb_condition_api *cond =
-      (const struct kp_rgb_condition_api *)cfg->condition->api;
-  return cond->active(cfg->condition);
-}
 
 #if KP_LED_COUNT > 0
 /* Reading order: the longer board axis first, then the other; `reverse` flips it
@@ -147,15 +135,13 @@ static void kp_ovl_battery_render(const struct device *dev,
   static const struct kp_ovl_battery_config kp_ovl_battery_##inst##_cfg = {    \
       .common =                                                                \
           KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_battery_##inst),     \
-      .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .color = DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00),                 \
       .background_color =                                                      \
           DT_PROP_OR(DT_DRV_INST(inst), background_color, 0x000000),           \
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
   static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
-  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_active, kp_ovl_battery_render,    \
-                        NULL, kp_ovl_battery_##inst)
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_render, NULL, kp_ovl_battery_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_BATTERY_DEFINE)
 

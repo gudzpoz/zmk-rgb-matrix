@@ -55,19 +55,15 @@ properties:
   local:
     type: boolean
     description: |
-      Evaluate this overlay's gate -- its `condition`, or a self-sampling
-      `active` -- independently on each half, instead of evaluating it once on
-      the split central and pushing only the resulting on/off bit. It chooses
-      *where the gate runs*, not what is painted: both halves run the renderer,
-      so a per-half source read inside it (a battery gauge's own charge) is
-      per-half with or without this flag.
+      Evaluate this overlay's condition independently on each half instead of
+      evaluating it on the split central and pushing the resulting on/off bit.
+      The renderer consumes a cached gate; there is no self-sampling callback.
+      This chooses gate authority, not pixel sources: both halves render locally,
+      so a battery gauge still uses its own charge with or without this flag.
 
-      Omit it -- the common case -- to evaluate the condition on the central and
-      push the bit to the peripherals; on a peripheral the compositor is then
-      gated by that pushed state and never calls the condition.
-
-      Use it only for a condition whose value genuinely differs per half and is
-      not kept in step by the split link. None of the built-in conditions
-      qualifies: `layer` is central-only, `caps-lock` is a global host source,
-      and `latch` is synchronised by its GLOBAL toggle. Getting this wrong is
-      silent, so leave it off unless you can name the per-half source.
+      Omit it to use central evaluation. A peripheral then consumes the pushed
+      gate without sampling this overlay's condition tree. When set, every
+      dependency must support evaluation on its half; a central-only source in
+      a local peripheral tree is rejected, including through AND/OR conditions.
+      Local roots remain live during output suppression; this flag does not
+      enable demand pruning or animation-based polling.

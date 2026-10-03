@@ -295,11 +295,9 @@ is composited by default; an effect narrows that with its own `overlays`/
 
 ## Writing a condition
 
-A condition is a reusable predicate consumed by overlays and triggers. It carries
-no registry identity. Most conditions are stateless and pass `NULL` for both the
-config and the data slot, but a kind may keep state in `dev->data` (the latch
-kind does; see "Stateful conditions" below). No init function is needed -- a
-static initializer is enough.
+A condition is a reusable sampled predicate consumed by overlays and triggers.
+It has no persisted or split identity. Providers may keep volatile source state
+in `dev->data`; engine cache and scheduling state belong to the registration.
 
 ### 1. Binding
 
@@ -308,7 +306,6 @@ compatible: "keypaw,rgb-condition-mything"
 properties:
   threshold:
     type: int
-    required: false
     default: 20
 ```
 
@@ -386,42 +383,48 @@ static bool kp_cond_layer_active(const struct device *dev) {
 }
 ```
 
+Short-circuiting cached reads does not suspend child deadlines or notifications.
+Combinators normally need no deadline of their own. Invalid dependencies, cycles,
+undeclared reads and invalid deadlines diagnose faults and disable affected
+consumers; a fault must not synthesize trigger exits.
+
+### Source scope, split authority and startup
+
+`KP_RGB_CONDITION_ANY_SIDE` is the default scope. Declare
+`KP_RGB_CONDITION_CENTRAL_ONLY` when source state is available only on the central
+(or standalone device), as with keymap layers. Keep the device linkable on both
+halves and compile out unavailable source reads/listeners on peripherals. Do not
+substitute a false value as permission for a local consumer: the engine rejects a
+local peripheral tree containing a central-only dependency, transitively.
+
+Scope restricts source evaluation; an overlay's `local` flag chooses gate authority:
+
+- Default overlays use central cached gates and push visibility bits. Peripherals
+  consume the bits without sampling that overlay's tree.
+- `local;` overlays evaluate a tree independently on each half. Both halves must
+  have valid sources. Renderers already run locally, so a battery gauge's local
+  charge does not itself require local gate evaluation.
+
+All configured local and central roots remain live during logical OFF, idle
+suppression, inhibition and zero local LEDs. Stage 1 does not prune consumer demand.
+
+Provider sources must be ready before initial sampling and startup actions.
+`CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y` starts via the settings commit hook at
+`INT_MAX` after full key loading/lower-priority commits, or APPLICATION 99 with
+settings disabled. It does not guarantee readiness after equal-priority commits,
+later asynchronous initialization or subtree loads. Such integrations must disable
+auto-start and call the idempotent, thread-only `zmk_rgb_matrix_start()` after
+defaults, full settings restoration and provider readiness. See
+[startup readiness](development.md#startup-readiness) for the init-priority
+constraint and full contract; no ZMK patch/private symbols are needed.
+
 ### Repainting on an event
 
-The engine repaints every tick (`CONFIG_KEYPAW_RGB_MATRIX_TICK_MS`, 32 ms by
-default), and on the central-only path a peripheral adds a second tick of
-latency. If the condition's source has an event, subscribe to it and call
-`zmk_rgb_matrix_flush()` when the value changes:
-
-```c
-static int my_listener(const zmk_event_t *eh) {
-  if (as_zmk_some_event(eh) != NULL) {
-    zmk_rgb_matrix_flush();
-  }
-  return ZMK_EV_EVENT_BUBBLE;
-}
-ZMK_LISTENER(my_cond, my_listener);
-ZMK_SUBSCRIPTION(my_cond, zmk_some_event);
-```
-
-`zmk_rgb_matrix_flush()` is public, submit-only, non-blocking, and does not
-reset the animation clock, so the extra frame does not restart an effect.
-Concurrent calls coalesce. It also re-samples the trigger table, so the same
-call shortens a trigger's latency as well as an overlay's.
-
-A listener is never needed for correctness as the engine repaints every tick and
-samples the trigger table on the same tick. But still, it buys you a bit of
-**latency**, and where it helps depends on how the condition is evaluated:
-
-- **Central-evaluated (default).** Subscribe on the central: the flush submits
-  the same tick work that evaluates the conditions and dispatches the push, so
-  the change is immediate *and* the push starts at once instead of waiting for
-  the next timer tick. The peripheral automatically flushes when a pushed word
-  arrives changed.
-- **`local`.** Each half evaluates for itself and nothing is pushed, so each
-  half needs its own listener to avoid waiting a tick.
-
-See [`layer.c`](../src/conditions/layer.c) for an example.
+`zmk_rgb_matrix_flush()` requests an immediate repaint when output is eligible.
+It is any-context, non-blocking and coalescing, and does not reset the animation
+clock or grant output permission. Use it for changed pixels, not condition-source
+notification: it does not sample conditions or triggers. A source event listener
+must publish its state and invalidate the corresponding condition as above.
 
 ## Writing a trigger
 

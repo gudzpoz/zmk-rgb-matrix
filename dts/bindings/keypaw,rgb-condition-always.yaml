@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Unconditionally active: an overlay gated by it always paints, and a trigger
-  using it fires its `bindings` once at boot. It never falls, so a trigger's
-  `on-exit` never runs.
+  Unconditionally active. With startup="enter-if-active" (the default), a trigger
+  using it fires on-enter once after defaults, settings and provider readiness.
+  With startup="baseline", no startup action runs. It never falls, so on-exit
+  never runs. An overlay gated by it is always eligible to paint.
 
 compatible: "keypaw,rgb-condition-always"

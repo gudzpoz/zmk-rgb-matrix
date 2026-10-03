@@ -7,10 +7,11 @@ description: |
   -- a keymap layer, Caps Lock, an always-on predicate -- serves every consumer
   instead of each reimplementing it.
 
-  The node itself is not a device and has no driver; it only groups the
-  conditions for readability. Unlike an overlay, a condition has no ordinal and
-  no state, so nothing here is addressed on the split link: a default
-  (central-evaluated) overlay evaluates its condition on the central and pushes
-  only the resulting on/off bit.
+  The node itself is not a device and has no driver; it groups conditions for
+  readability. Conditions have no persisted or split identity. Providers may
+  keep volatile state and must notify after coherent source changes; time-based
+  changes use absolute deadlines, not animation polling. Consumers read cached
+  snapshots. A default central-evaluated overlay pushes only its resulting on/off
+  bit; a local overlay evaluates a tree whose sources must support that half.
 
 compatible: "keypaw,rgb-conditions"

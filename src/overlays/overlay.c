@@ -28,7 +28,6 @@
 
 struct kp_ovl_config {
   struct kp_rgb_overlay_common_config common;
-  const struct device *condition; /* NULL = always active */
   const struct device *effect;    /* the composited effect */
 };
 
@@ -40,17 +39,6 @@ struct kp_ovl_data {
 /* Indexed like frame->pixels; sized to this half's LED count. */
 static struct led_rgb kp_ovl_layer[KP_LED_COUNT];
 #endif
-
-static bool kp_ovl_active(const struct device *dev) {
-  const struct kp_ovl_config *cfg = dev->config;
-
-  if (cfg->condition == NULL) {
-    return true;
-  }
-  const struct kp_rgb_condition_api *cond =
-      (const struct kp_rgb_condition_api *)cfg->condition->api;
-  return cond->active(cfg->condition);
-}
 
 /* The effect the engine should deliver input events to, so a composited
  * reactive/ripple effect can see keystrokes. */
@@ -96,12 +84,10 @@ static void kp_ovl_render(const struct device *dev, struct kp_rgb_frame *frame) 
   KP_RGB_OVERLAY_EFFECT_ASSERT(DT_DRV_INST(inst))                              \
   static const struct kp_ovl_config kp_ovl_##inst##_cfg = {                    \
       .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_##inst),       \
-      .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                   \
       .effect = KP_RGB_OVERLAY_EFFECT(DT_DRV_INST(inst)),                      \
   };                                                                           \
   static struct kp_ovl_data kp_ovl_##inst##_data;                              \
-  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_active, kp_ovl_render,                    \
-                        kp_ovl_event_target, kp_ovl_##inst)
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_render, kp_ovl_event_target, kp_ovl_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_DEFINE)
 
