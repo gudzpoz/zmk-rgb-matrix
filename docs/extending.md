@@ -609,6 +609,32 @@ a *different* effect is fine.
 Unlike effect slots, overlay order is not persisted, so reordering overlays is
 safe across a flash as long as both halves use the same devicetree.
 
+## External output inhibition
+
+> This might only be useful if you're hoping to implement a battery-saving mode
+> for your keyboard.
+
+A single external policy aggregator can call
+`zmk_rgb_matrix_set_inhibited(bool)` from `<zmk/rgb_matrix.h>` to gate every
+local zone. The gate defaults to `false`, is runtime-only, and may be set from
+thread context before matrix initialization (for example, in `POST_KERNEL`).
+It does not change logical ON/user intent, saved settings, or normal split
+commands; each split half needs its own local gate owner.
+
+The setter returns `0` when accepted, or `-EWOULDBLOCK` from ISR context. A
+completed inhibit call prevents further colored submissions, but does not
+promise that the hardware is already black. Black-transfer failures retry at
+100, 200, 400, 800, then 1000 ms until successful or superseded by effective ON.
+This also applies to normal aggregate OFF and the initial black transfer.
+
+While inhibited, effects, overlays, and key feedback do not render or advance;
+queued key feedback is discarded. Trigger polling and overlay synchronization
+continue at the normal tick cadence while logically ON, including on a
+stripless central. Release resumes the current logical intent without charging
+the inhibited interval to animation elapsed time. `zmk_rgb_matrix_is_inhibited()`
+reads the gate; `zmk_rgb_matrix_get_state()` retains its logical ON contract,
+independent of external inhibition. Neither getter promises hardware settlement.
+
 ## Split checklist
 
 Before shipping a third-party extension, confirm:

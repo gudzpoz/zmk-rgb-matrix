@@ -52,10 +52,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
   BUILD_ASSERT(sizeof(DEVICE_DT_NAME(DT_DRV_INST(inst))) <= 9,                 \
                "keypaw,behavior-rgb-matrix: node name must fit the 9-byte "    \
                "split behavior_dev field");                                    \
-  BUILD_ASSERT(                                                                \
-      DT_CHILD_NUM(DT_DRV_INST(inst)) <= KP_RGB_MAX_REGISTRY_EFFECTS,          \
-      "raise KP_RGB_PERSIST_MAX_EFFECTS / enable a different registry cap for " \
-      "the larger effect registry");                                           \
+  BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= KP_RGB_MAX_REGISTRY_EFFECTS, \
+               "raise KP_RGB_PERSIST_MAX_EFFECTS / enable a different "        \
+               "registry cap for "                                             \
+               "the larger effect registry");                                  \
   BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT8_MAX,                   \
                "effect count must fit the blob's count byte");                 \
   KP_RGB_BEHAVIOR_LEDS(inst);                                                  \
@@ -78,8 +78,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
           DT_PROP_OR(DT_DRV_INST(inst), initial_brightness, 30),               \
       .initial_duration_ms =                                                   \
           DT_PROP_OR(DT_DRV_INST(inst), initial_duration_ms, 1000),            \
-      .initial_effect =                                                        \
-          DT_PROP_OR(DT_DRV_INST(inst), initial_effect, 0),                    \
+      .initial_effect = DT_PROP_OR(DT_DRV_INST(inst), initial_effect, 0),      \
       .tuning =                                                                \
           {                                                                    \
               .max_brightness =                                                \
@@ -92,7 +91,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
     struct kp_rgb_behavior_context *ctx = &kp_rgb_context_##inst;              \
     ctx->dev = dev;                                                            \
     ctx->state.on = kp_rgb_effective_on(                                       \
-        ctx->initial_on, IS_ENABLED(CONFIG_KEYPAW_POWER_FIRST));               \
+        ctx->initial_on, IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));  \
     if (kp_rgb_apply_defaults(ctx) < 0) {                                      \
       LOG_WRN("Initial RGB effect unavailable for %s", dev->name);             \
     }                                                                          \

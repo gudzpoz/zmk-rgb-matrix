@@ -525,9 +525,24 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
       "an overlay takes either `effect = <&fx>;` or a nested effect, "         \
       "not both");
 
+/* Runtime-only output gate for all local zones; default false. Does not change
+ * logical ON/user intent, settings, or split commands. One external policy
+ * aggregator must own the setter. Thread context only, including before matrix
+ * initialization. Returns 0 once accepted, not once hardware is black; failed
+ * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
+ * colored submissions until released. Release resumes current logical intent
+ * without advancing animation time spent inhibited. Polling and overlay state
+ * synchronization continue at normal cadence while logically ON. Pending key
+ * feedback is discarded while inhibited. An in-flight render or feedback pass
+ * may finish computing. */
+int zmk_rgb_matrix_set_inhibited(bool inhibited);
+/* Returns the current gate state, not hardware settlement; safe from any context. */
+bool zmk_rgb_matrix_is_inhibited(void);
+
 int zmk_rgb_matrix_toggle(const struct device *behavior);
 int zmk_rgb_matrix_on(const struct device *behavior);
 int zmk_rgb_matrix_off(const struct device *behavior);
+/* Returns logical ON after idle suppression; external inhibition does not alter it. */
 int zmk_rgb_matrix_get_state(const struct device *behavior, bool *on_off);
 
 int zmk_rgb_matrix_select_effect(const struct device *behavior,

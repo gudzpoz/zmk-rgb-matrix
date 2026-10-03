@@ -74,6 +74,9 @@ jobs:
           west init -l app
           west update --fetch-opt=--filter=tree:0
 
+      - name: Output gate tests
+        run: python3 tests/unit/test_output_gate.py
+
       - name: Unit tests
         working-directory: zmk-ws
         run: |
