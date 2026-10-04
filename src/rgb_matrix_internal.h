@@ -42,7 +42,6 @@ struct kp_rgb_controller {
   struct kp_rgb_tuning tuning;
   const struct device *const *effects;
   const struct kp_rgb_effect_defaults *effect_defaults;
-  const uint8_t *no_cycle;
   size_t effect_count;
   size_t effect_index;
   bool initial_on;

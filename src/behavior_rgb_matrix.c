@@ -39,15 +39,12 @@ BUILD_ASSERT(DT_CHILD_NUM(KP_CONTROLLER) <= UINT8_MAX,
 #define KP_RGB_EFFECT_DEVICE(node_id)                                          \
   COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay), (DEVICE_DT_GET(node_id), ),   \
               (NULL, ))
-#define KP_RGB_NO_CYCLE_ONE(node_id) DT_PROP(node_id, no_cycle),
 #define KP_RGB_EFFECT_DEFAULT_ONE(node_id)                                     \
   {.color = KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),                \
    .duration_ms = (uint16_t)DT_PROP_OR(node_id, duration, 0)},
 
 static const struct device *const kp_rgb_effects[KP_RGB_MAX_EFFECTS] = {
     DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_DEVICE)};
-static const uint8_t kp_rgb_effect_no_cycle[KP_RGB_MAX_EFFECTS] = {
-    DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_NO_CYCLE_ONE)};
 static const struct kp_rgb_effect_defaults
     kp_rgb_effect_defaults[KP_RGB_MAX_EFFECTS] = {
         DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_DEFAULT_ONE)};
@@ -55,7 +52,6 @@ static const struct kp_rgb_effect_defaults
 struct kp_rgb_controller kp_rgb_controller = {
     .effects = kp_rgb_effects,
     .effect_defaults = kp_rgb_effect_defaults,
-    .no_cycle = kp_rgb_effect_no_cycle,
     .effect_count = DT_CHILD_NUM(KP_CONTROLLER),
     .initial_on = DT_PROP_OR(KP_CONTROLLER, initial_on, 1),
     .initial_brightness = DT_PROP_OR(KP_CONTROLLER, initial_brightness, 30),
@@ -144,10 +140,6 @@ const struct device *kp_rgb_effect_at(size_t index) {
 
 size_t kp_rgb_selected_effect(void) { return kp_rgb_controller.effect_index; }
 
-static bool kp_effect_cyclable(size_t index) {
-  return kp_rgb_effect_at(index) != NULL && !kp_rgb_controller.no_cycle[index];
-}
-
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta) {
   size_t count = kp_rgb_effect_count();
   if (count == 0) {
@@ -155,13 +147,13 @@ uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta) {
   }
   int16_t norm_delta = delta % (int16_t)count;
   uint16_t start = (current + norm_delta + count) % count;
-  if (kp_effect_cyclable(start)) {
+  if (kp_rgb_effect_at(start) != NULL) {
     return start;
   }
   int direction = delta < 0 ? -1 : 1;
   for (size_t i = 1; i < count; i++) {
     size_t index = (start + (i * direction) + count) % count;
-    if (kp_effect_cyclable(index)) {
+    if (kp_rgb_effect_at(index) != NULL) {
       return index;
     }
   }

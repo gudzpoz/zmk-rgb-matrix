@@ -232,9 +232,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
            DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_overlay),         \
            "RGB effect must be a child of keypaw,behavior-rgb-matrix or "      \
            "keypaw,rgb-overlay");                                              \
-       BUILD_ASSERT(!DT_PROP(node_id, no_cycle),                               \
-                    "no-cycle is registry-only; a nested effect is never "     \
-                    "cycled");                                                 \
        BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, overlays) &&                    \
                         !DT_PROP(node_id, no_overlays),                        \
                     "overlays/no-overlays are registry-only; overlays are not "\
