@@ -110,11 +110,7 @@ static int kp_rgb_load_cb(const char *name, size_t len,
     kp_rgb_resolve_active();
   }
   kp_rgb_controller.state.user_on = blob.user_on;
-  if (blob.user_on) {
-    zmk_rgb_matrix_on();
-  } else {
-    zmk_rgb_matrix_off();
-  }
+  kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
 }
@@ -135,14 +131,7 @@ int kp_rgb_save_state(void) {
 }
 
 static void kp_rgb_restore_defaults(void) {
-  kp_rgb_matrix_lock();
   (void)kp_rgb_apply_defaults();
-  if (kp_rgb_controller.state.user_on) {
-    zmk_rgb_matrix_on();
-  } else {
-    zmk_rgb_matrix_off();
-  }
-  kp_rgb_matrix_unlock();
   zmk_rgb_matrix_flush();
 }
 

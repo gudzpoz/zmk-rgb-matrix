@@ -23,7 +23,9 @@ struct kp_rgb_effect_api {
     size_t overlays_len;
 };
 struct kp_rgb_overlay_api { const struct device *(*event_target)(const struct device *); };
-static struct { struct { bool on; const struct device *active_fx; } state; } kp_rgb_controller;
+static struct { struct { const struct device *active_fx; } state; } kp_rgb_controller;
+static bool kp_rgb_output_allowed;
+#define atomic_get(p) (*(p))
 static bool gates[2] = {true,true};
 static bool mapped = true;
 static unsigned counts[3];
@@ -48,7 +50,7 @@ TESTS = r'''
 int main(void) {
     struct kp_rgb_effect_api base_api = {.on_event=on_event};
     const struct device base = {&base_api,&counts[0],NULL};
-    kp_rgb_controller.state.on = true;
+    kp_rgb_output_allowed = true;
     kp_rgb_controller.state.active_fx = &base;
     const struct zmk_position_state_changed event = {17,true};
     kp_rgb_deliver_position(&event);
@@ -69,7 +71,7 @@ int main(void) {
     base_api.overlays_len = 0;
     kp_rgb_deliver_position(&event);
     assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 2);
-    kp_rgb_controller.state.on = false;
+    kp_rgb_output_allowed = false;
     kp_rgb_deliver_position(&event);
     assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 2);
     puts("private effect event routing passed");

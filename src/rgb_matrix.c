@@ -107,14 +107,11 @@ static const struct device *const strip =
 static struct led_rgb pixels[KP_LED_COUNT];
 static uint32_t last_tick;
 static K_MUTEX_DEFINE(kp_rgb_lock);
-static atomic_t kp_rgb_any_on;
+static atomic_t kp_rgb_output_allowed;
 static atomic_t kp_rgb_inhibited;
 static bool kp_rgb_output_ready;
 static bool kp_rgb_black_pending;
 static uint32_t kp_rgb_black_retry_ms = 100;
-
-static void kp_rgb_request_black_locked(void);
-static void kp_rgb_pending_purge(void);
 
 /* A half with no strip renders nothing, but the central-only overlay and split
  * machinery still runs. */
@@ -122,30 +119,19 @@ static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
 const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
-static bool kp_any_on_locked(void) {
-  return kp_rgb_controller.state.on;
+static bool kp_rgb_logical_on_locked(void) {
+  return kp_rgb_controller.state.user_on &&
+         (!IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE) ||
+          zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
 }
 
-/* Caller holds kp_rgb_lock; timer ISR reads the atomic mirror. */
-static void kp_rgb_publish_any_on_locked(void) {
-  bool was_on = atomic_get(&kp_rgb_any_on);
-  bool on = kp_any_on_locked();
-  atomic_set(&kp_rgb_any_on, on);
-  if (on && !atomic_get(&kp_rgb_inhibited)) {
-    kp_rgb_black_pending = false;
-  } else if (was_on && !on) {
-    kp_rgb_request_black_locked();
-  }
-}
 #define KP_TRY_LOCK()                                                          \
   k_mutex_lock(&kp_rgb_lock, K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS))
 
 void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
 void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
 
-/* The lock is never held across flash I/O and every holder outranks this
- * low-priority queue, so waiting is a hiccup, not a deadlock. Dropping the frame
- * would also skip the overlay dispatch on this tick. Bounded, so a stuck holder
+/* The lock is never held across flash I/O. Bound the wait so a stuck holder
  * warns instead of hanging the queue. */
 #define KP_RGB_LOCK_RETRY_MS 1
 #define KP_RGB_LOCK_RETRIES 8
@@ -161,12 +147,11 @@ static bool kp_rgb_matrix_lock_patiently(void) {
 
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
-/* Runs in the system timer ISR, so it must not take kp_rgb_lock (a mutex is
- * illegal in ISR context). It reads the atomic mirror; the work handler
- * re-checks controller state under the lock. */
+
+/* Timer ISR: the worker rechecks permission under the matrix mutex. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
-  if (atomic_get(&kp_rgb_any_on)) {
+  if (atomic_get(&kp_rgb_output_allowed)) {
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
   }
 }
@@ -174,9 +159,6 @@ static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
 K_TIMER_DEFINE(kp_tick_timer, kp_rgb_matrix_tick_handler, NULL);
 
 static void kp_start_timer(void) {
-  if (!atomic_get(&kp_rgb_any_on)) {
-    return;
-  }
   last_tick = k_uptime_get_32();
   k_timer_start(&kp_tick_timer, K_NO_WAIT,
                 K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
@@ -218,13 +200,9 @@ static void kp_render_overlays(struct kp_rgb_frame *frame,
 
 static void kp_rgb_matrix_tick(struct k_work *work) {
   ARG_UNUSED(work);
-  if (!kp_rgb_output_ready || !atomic_get(&kp_rgb_any_on)) {
+  if (!atomic_get(&kp_rgb_output_allowed)) {
     return;
   }
-  if (!kp_rgb_has_leds()) {
-    return;
-  }
-  bool any_on;
   if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
     /* Retry on the queue rather than waiting for the next timer tick; the
@@ -232,13 +210,16 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
     return;
   }
+  if (!atomic_get(&kp_rgb_output_allowed)) {
+    kp_rgb_matrix_unlock();
+    return;
+  }
   uint32_t now = k_uptime_get_32();
   uint32_t elapsed = now - last_tick;
   last_tick = now;
-  any_on = kp_any_on_locked() && !atomic_get(&kp_rgb_inhibited);
   memset(pixels, 0, sizeof(pixels));
   const struct device *fx = kp_rgb_controller.state.active_fx;
-  if (any_on && fx != NULL) {
+  if (fx != NULL) {
     struct kp_rgb_frame frame = {
         .tune = &kp_rgb_controller.tuning,
         .count = KP_LED_COUNT,
@@ -261,8 +242,8 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     }
     kp_render_overlays(&frame, overlays, overlay_count, first);
   }
-  /* Callbacks may inhibit output while this recursive mutex is held. */
-  if (any_on && !atomic_get(&kp_rgb_inhibited)) {
+  /* Callbacks may change output permission under this recursive mutex. */
+  if (atomic_get(&kp_rgb_output_allowed)) {
     int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
     if (err < 0) {
       LOG_WRN("Failed to update the RGB strip (%d)", err);
@@ -287,8 +268,7 @@ static void kp_rgb_request_black_locked(void) {
 static void kp_rgb_matrix_off_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_matrix_lock();
-  if (kp_rgb_black_pending &&
-      (!kp_any_on_locked() || atomic_get(&kp_rgb_inhibited))) {
+  if (kp_rgb_black_pending && !atomic_get(&kp_rgb_output_allowed)) {
     /* led_strip_update_rgb() may overwrite even a failed submission. */
     memset(pixels, 0, sizeof(pixels));
     int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
@@ -312,16 +292,8 @@ int zmk_rgb_matrix_set_inhibited(bool inhibited) {
   }
   kp_rgb_matrix_lock();
   if (atomic_get(&kp_rgb_inhibited) != inhibited) {
-    /* Release must not purge newly admitted feedback. */
-    kp_rgb_pending_purge();
     atomic_set(&kp_rgb_inhibited, inhibited);
-    last_tick = k_uptime_get_32();
-    if (inhibited || !kp_any_on_locked()) {
-      kp_rgb_request_black_locked();
-    } else {
-      kp_rgb_black_pending = false;
-      zmk_rgb_matrix_flush();
-    }
+    kp_rgb_reconcile_power_locked();
   }
   kp_rgb_matrix_unlock();
   return 0;
@@ -330,13 +302,11 @@ int zmk_rgb_matrix_set_inhibited(bool inhibited) {
 bool zmk_rgb_matrix_is_inhibited(void) {
   return atomic_get(&kp_rgb_inhibited) != 0;
 }
+
 K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
 
 void zmk_rgb_matrix_flush(void) {
-  if (!kp_rgb_output_ready) {
-    return;
-  }
-  if (!atomic_get(&kp_rgb_any_on)) {
+  if (!atomic_get(&kp_rgb_output_allowed)) {
     return;
   }
   k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
@@ -353,7 +323,7 @@ static void kp_rgb_deliver_event(const struct device *dev,
 /* Caller holds kp_rgb_lock. */
 static void kp_rgb_deliver_position(const struct zmk_position_state_changed *ev) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
-  if (!kp_rgb_controller.state.on || fx == NULL ||
+  if (!atomic_get(&kp_rgb_output_allowed) || fx == NULL ||
       kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
     return;
   }
@@ -389,16 +359,32 @@ static uint8_t kp_rgb_pending_tail;
 static uint32_t kp_rgb_pending_dropped;
 static struct k_spinlock kp_rgb_pending_lock;
 
-static void kp_rgb_pending_purge(void) {
+void kp_rgb_reconcile_power_locked(void) {
+  bool allowed = kp_rgb_output_ready && kp_rgb_has_leds() &&
+                 kp_rgb_logical_on_locked() && !atomic_get(&kp_rgb_inhibited);
+  if (allowed == (bool)atomic_get(&kp_rgb_output_allowed)) {
+    return;
+  }
+
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_pending_lock);
   kp_rgb_pending_tail = kp_rgb_pending_head;
   kp_rgb_pending_dropped = 0;
+  /* Admission and purge share the ring lock so newly admitted input survives. */
+  atomic_set(&kp_rgb_output_allowed, allowed);
   k_spin_unlock(&kp_rgb_pending_lock, key);
+
+  if (allowed) {
+    kp_rgb_black_pending = false;
+    kp_start_timer();
+  } else {
+    k_timer_stop(&kp_tick_timer);
+    kp_rgb_request_black_locked();
+  }
 }
 
 static bool kp_rgb_pending_push(const struct zmk_position_state_changed *ev) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_pending_lock);
-  if (atomic_get(&kp_rgb_inhibited)) {
+  if (!atomic_get(&kp_rgb_output_allowed)) {
     k_spin_unlock(&kp_rgb_pending_lock, key);
     return false;
   }
@@ -446,7 +432,7 @@ static void kp_rgb_matrix_pending_handler(struct k_work *work) {
   }
   struct zmk_position_state_changed ev;
   while (kp_rgb_pending_pop(&ev)) {
-    if (atomic_get(&kp_rgb_any_on) && !atomic_get(&kp_rgb_inhibited)) {
+    if (atomic_get(&kp_rgb_output_allowed)) {
       kp_rgb_deliver_position(&ev);
     }
   }
@@ -458,30 +444,12 @@ static void kp_rgb_matrix_pending_handler(struct k_work *work) {
   }
 }
 
-#if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
-static void kp_rgb_permission_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_matrix_lock();
-  kp_rgb_controller.state.on =
-      kp_rgb_effective_on(kp_rgb_controller.state.user_on, true);
-  kp_rgb_publish_any_on_locked();
-  bool any_on = kp_any_on_locked();
-  if (any_on) {
-    kp_start_timer();
-  } else {
-    k_timer_stop(&kp_tick_timer);
-  }
-  kp_rgb_matrix_unlock();
-}
-K_WORK_DEFINE(kp_permission_work, kp_rgb_permission_handler);
-#endif
-
 static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
   const struct zmk_position_state_changed *pos_ev =
       as_zmk_position_state_changed(eh);
   if (pos_ev != NULL) {
     /* RGB may drop under sustained pressure; key handling must not. */
-    if (atomic_get(&kp_rgb_any_on) && kp_rgb_pending_push(pos_ev)) {
+    if (kp_rgb_pending_push(pos_ev)) {
       k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_pending_work);
     }
     return ZMK_EV_EVENT_BUBBLE;
@@ -489,12 +457,9 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
 
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
   if (as_zmk_activity_state_changed(eh) != NULL) {
-    static bool is_awake = true;
-    bool awake = zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE;
-    if (awake != is_awake) {
-      is_awake = awake;
-      kp_rgb_permission_handler(NULL);
-    }
+    kp_rgb_matrix_lock();
+    kp_rgb_reconcile_power_locked();
+    kp_rgb_matrix_unlock();
     return ZMK_EV_EVENT_BUBBLE;
   }
 #endif
@@ -506,49 +471,37 @@ ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_position_state_changed);
 ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_activity_state_changed);
 #endif
 
-int zmk_rgb_matrix_on(void) {
+static int kp_rgb_set_user_on(bool on) {
   int ret = KP_TRY_LOCK();
-  if (ret < 0)
+  if (ret < 0) {
     return ret;
-  bool was_on = kp_any_on_locked();
-  kp_rgb_controller.state.on = kp_rgb_effective_on(
-      true, IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
-  kp_rgb_publish_any_on_locked();
-  bool any_on = kp_any_on_locked();
-  if (!was_on && any_on) {
-    kp_start_timer();
-  } else if (!any_on) {
-    k_timer_stop(&kp_tick_timer);
   }
+  kp_rgb_controller.state.user_on = on;
+  kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
 }
 
-int zmk_rgb_matrix_off(void) {
-  int ret = KP_TRY_LOCK();
-  if (ret < 0)
-    return ret;
-  kp_rgb_controller.state.on = false;
-  kp_rgb_publish_any_on_locked();
-  bool any_on = kp_any_on_locked();
-  if (!any_on)
-    k_timer_stop(&kp_tick_timer);
-  kp_rgb_matrix_unlock();
-  return 0;
-}
+int zmk_rgb_matrix_on(void) { return kp_rgb_set_user_on(true); }
+
+int zmk_rgb_matrix_off(void) { return kp_rgb_set_user_on(false); }
 
 int zmk_rgb_matrix_toggle(void) {
-  kp_rgb_matrix_lock();
-  bool on = kp_rgb_controller.state.on;
+  int ret = KP_TRY_LOCK();
+  if (ret < 0) {
+    return ret;
+  }
+  kp_rgb_controller.state.user_on = !kp_rgb_controller.state.user_on;
+  kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
-  return on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on();
+  return 0;
 }
 
 int zmk_rgb_matrix_get_state(bool *on_off) {
   if (on_off == NULL)
     return -EINVAL;
   kp_rgb_matrix_lock();
-  *on_off = kp_rgb_controller.state.on;
+  *on_off = kp_rgb_logical_on_locked();
   kp_rgb_matrix_unlock();
   return 0;
 }
@@ -584,15 +537,8 @@ static int kp_rgb_matrix_init(void) {
                                   K_MSEC(100));
     }
   }
-  kp_rgb_controller.state.on = kp_rgb_effective_on(
-      kp_rgb_controller.state.on,
-      IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
-  kp_rgb_publish_any_on_locked();
-  bool any_on = kp_any_on_locked();
+  kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
-  if (any_on) {
-    kp_start_timer();
-  }
   return 0;
 }
 SYS_INIT(kp_rgb_matrix_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

@@ -26,15 +26,6 @@ MOCKS = r'''
 #define SYS_INIT(...)
 #define K_MSEC(x) (x)
 #define ZMK_ACTIVITY_ACTIVE 0
-static bool idle;
-static int zmk_rgb_matrix_on(void) {
-    kp_rgb_controller.state.on = !idle;
-    return 0;
-}
-static int zmk_rgb_matrix_off(void) {
-    kp_rgb_controller.state.on = false;
-    return 0;
-}
 static unsigned flushes;
 static void zmk_rgb_matrix_flush(void) { flushes++; }
 struct k_work { void (*handler)(struct k_work *); };
@@ -56,8 +47,10 @@ typedef int (*settings_read_cb)(void *, void *, size_t);
 static char saved_path[128], deleted_path[128];
 static unsigned char saved_blob[512];
 static size_t saved_size;
+static unsigned saves;
 static int settings_save_one(const char *path, const void *value, size_t size) {
     assert(!held && size <= sizeof(saved_blob));
+    saves++;
     strcpy(saved_path,path); memcpy(saved_blob,value,size); saved_size=size; return 0;
 }
 static int settings_delete(const char *path) { assert(!held); strcpy(deleted_path,path); return 0; }
@@ -86,6 +79,8 @@ int main(void) {
     kp_rgb_controller.initial_brightness = 70;
     kp_rgb_controller.initial_duration_ms = 1000;
     assert(kp_rgb_apply_defaults() == 0);
+    assert(lock_entries == 1 && reconciles == 1 && reconciled_user_on && !held);
+    assert(!pending && !saves);
     assert(!strcmp(registered_subtree, "keypaw/rgb_matrix"));
     struct kp_rgb_persist_blob blob;
     const struct kp_rgb_persist_effect stored[] = {{800,100,90,80},{900,200,70,60}};
@@ -93,20 +88,25 @@ int main(void) {
     assert(registered_set("kprgb/state",sizeof(blob),read_blob,&blob) == -ENOENT);
     assert(registered_set("state/extra",sizeof(blob),read_blob,&blob) == -ENOENT);
     assert(reads == 0);
+    unsigned locks_before = lock_entries, reconciles_before = reconciles;
     assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(kp_rgb_controller.state.on && kp_rgb_controller.state.user_on);
+    assert(lock_entries == locks_before + 1 && reconciles == reconciles_before + 1);
+    assert(reconciled_user_on && kp_rgb_controller.state.user_on && !held);
+    assert(!pending && !saves);
     assert(kp_rgb_selected_effect() == 1 && data[0].color.h == 100 && data[1].color.h == 200);
-    idle = true;
+    blob.user_on = false;
     assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(!kp_rgb_controller.state.on && kp_rgb_controller.state.user_on);
-    idle = false;
+    assert(!reconciled_user_on && !kp_rgb_controller.state.user_on);
+    blob.user_on = true;
     assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
+    reconciles_before = reconciles;
     assert(registered_set("state",sizeof(blob)-1,read_blob,&blob) == -EINVAL);
     assert(registered_set("state",sizeof(blob),short_read,&blob) == -EINVAL);
     assert(registered_set("state",sizeof(blob),failed_read,&blob) == -EIO);
     blob.version++;
     assert(registered_set("state",sizeof(blob),read_blob,&blob) == -EINVAL);
     blob.version--;
+    assert(reconciles == reconciles_before && !pending && !saves);
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
     pending = NULL;
@@ -116,10 +116,14 @@ int main(void) {
     memcpy(&saved,saved_blob,sizeof(saved));
     assert(saved.selected_index == 1 && saved.effects[0].h == 100);
     assert(kp_rgb_save_state() == 0 && pending);
+    locks_before = lock_entries; reconciles_before = reconciles;
+    unsigned saves_before = saves;
     kp_rgb_reset_state();
+    assert(lock_entries == locks_before + 1 && reconciles == reconciles_before + 1);
+    assert(saves == saves_before && !held);
     assert(!pending && !strcmp(deleted_path,"keypaw/rgb_matrix/state"));
     assert(kp_rgb_selected_effect() == 0 && data[0].color.h == 10);
-    assert(kp_rgb_controller.state.on && kp_rgb_controller.state.user_on && flushes);
+    assert(reconciled_user_on && kp_rgb_controller.state.user_on && flushes);
     puts("singleton settings namespace/load/save/reset passed");
     return 0;
 }

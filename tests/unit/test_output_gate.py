@@ -23,10 +23,21 @@ int main(void) {
  assert(pthread_mutexattr_destroy(&attributes)==0);
  assert(!zmk_rgb_matrix_is_inhibited());
  isr=true;assert(zmk_rgb_matrix_set_inhibited(true)==-EWOULDBLOCK);isr=false;
- ctx.state.on=true;ctx.state.user_on=true;ctx.state.active_fx=&fx;
+ ctx.state.user_on=true;ctx.state.active_fx=&fx;
  ctx.tuning.sentinel=123;
- assert(zmk_rgb_matrix_on()==0 && atomic_get(&kp_rgb_any_on));
- zmk_rgb_matrix_flush();kp_rgb_matrix_tick(NULL);
+ assert(zmk_rgb_matrix_on()==0 && !atomic_get(&kp_rgb_output_allowed));
+ host_try_lock_error=-EBUSY;
+ assert(zmk_rgb_matrix_off()==-EBUSY && ctx.state.user_on);
+ assert(zmk_rgb_matrix_toggle()==-EBUSY && ctx.state.user_on);
+ host_try_lock_error=0;
+ assert(zmk_rgb_matrix_off()==0 && !ctx.state.user_on);
+ host_try_lock_error=-EBUSY;
+ assert(zmk_rgb_matrix_on()==-EBUSY && !ctx.state.user_on);
+ host_try_lock_error=0;
+ assert(zmk_rgb_matrix_on()==0 && ctx.state.user_on);
+ struct zmk_position_state_changed ev={.position=0,.state=true};
+ assert(!kp_rgb_pending_push(&ev) && !timer_period);
+ zmk_rgb_matrix_flush();kp_rgb_matrix_tick_handler(&kp_tick_timer);kp_rgb_matrix_tick(NULL);
  assert(!kp_rgb_output_ready && !tick_submits && !renders && !writes);
  if(KP_LED_COUNT) {
   host_strip_ready=false;
@@ -41,15 +52,14 @@ int main(void) {
  failures=KP_LED_COUNT?1:0;
  assert(kp_rgb_matrix_init()==0);
  assert(kp_rgb_output_ready);
- assert(ctx.state.on && ctx.state.user_on && ctx.tuning.sentinel==123);
+ assert(ctx.state.user_on && ctx.tuning.sentinel==123);
  assert(ctx.state.active_fx==&fx);
  bool state=false;assert(zmk_rgb_matrix_get_state(&state)==0 && state);
- struct zmk_position_state_changed ev={.position=0,.state=true};
  assert(!kp_rgb_pending_push(&ev));
- assert(timer_period==CONFIG_KEYPAW_RGB_MATRIX_TICK_MS);
+ assert(timer_period==0);
  int submitted=tick_submits;
  kp_rgb_matrix_tick_handler(&kp_tick_timer);
- assert(tick_submits==submitted+1);
+ assert(tick_submits==submitted);
  now=10000;kp_rgb_matrix_tick(NULL);
  assert(polls==0 && refreshes==0 && dispatches==0 && renders==0 && feedback==0 && colored==0);
  for(int i=0;i<3;i++) { now+=CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;kp_rgb_matrix_tick(NULL); }
@@ -65,16 +75,16 @@ int main(void) {
  assert(zmk_rgb_matrix_off()==0);
  binding.param1=RGB_TOG_CMD;
  assert(convert_toggle(&ctx,&binding)==0 && binding.param1==RGB_ON_CMD);
- assert(zmk_rgb_matrix_on()==0 && ctx.state.on);
+ assert(zmk_rgb_matrix_on()==0 && ctx.state.user_on);
  assert(zmk_rgb_matrix_is_inhibited() && !colored);
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
  now+=16;kp_rgb_matrix_tick(NULL);
  if(KP_LED_COUNT) assert(renders==1 && rendered_elapsed==16);
- assert(kp_rgb_pending_push(&ev));
+ assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));
  assert(zmk_rgb_matrix_set_inhibited(true)==0);
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
  kp_rgb_matrix_pending_handler(NULL);assert(feedback==0);
- assert(kp_rgb_pending_push(&ev));kp_rgb_matrix_pending_handler(NULL);assert(feedback==1);
+ assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));kp_rgb_matrix_pending_handler(NULL);assert(feedback==(KP_LED_COUNT>0));
  int before=writes;kp_rgb_matrix_off_handler(NULL);assert(writes==before);
  // Normal OFF failure must retry even after the driver's buffer mutation.
  assert(zmk_rgb_matrix_off()==0);
@@ -88,8 +98,8 @@ int main(void) {
  assert(zmk_rgb_matrix_on()==0);
  before=writes;kp_rgb_matrix_off_handler(NULL);assert(writes==before);
  // Local idle policy remains independent of the inhibition gate.
- idle=true;kp_rgb_permission_handler(NULL);assert(!ctx.state.on && ctx.state.user_on);
- idle=false;kp_rgb_permission_handler(NULL);assert(ctx.state.on);
+ host_activity(false);assert(!kp_rgb_logical_on_locked() && ctx.state.user_on);
+ host_activity(true);assert(kp_rgb_logical_on_locked());
  if(KP_LED_COUNT) {
   pthread_t tick,setter;
   atomic_set(&block_transfer,1);
@@ -128,10 +138,27 @@ int main(void) {
  }
  assert(zmk_rgb_matrix_set_inhibited(true)==0);
  inject_pending_press=true;
- assert(zmk_rgb_matrix_set_inhibited(false)==0 && !inject_pending_press);
+ assert(zmk_rgb_matrix_set_inhibited(false)==0);
+ if(KP_LED_COUNT) assert(!inject_pending_press);
+ inject_pending_press=false;
  struct zmk_position_state_changed received;
  assert(kp_rgb_pending_pop(&received)==pending_press_accepted);
- assert(kp_rgb_pending_push(&ev) && kp_rgb_pending_pop(&received));
+ assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));
+ assert(kp_rgb_pending_pop(&received)==(KP_LED_COUNT>0));
+ // Input racing the close is purged; input after closing is rejected.
+ inject_pending_press=KP_LED_COUNT>0;
+ assert(zmk_rgb_matrix_set_inhibited(true)==0);
+ assert(pending_press_accepted==(KP_LED_COUNT>0));
+ assert(!kp_rgb_pending_pop(&received));
+ assert(zmk_rgb_matrix_set_inhibited(false)==0);
+ inject_after_unlock=KP_LED_COUNT>0;
+ assert(zmk_rgb_matrix_set_inhibited(true)==0);
+ assert(!post_release_accepted && !kp_rgb_pending_pop(&received));
+ // Inject immediately after publication releases the pending spinlock.
+ inject_after_unlock=KP_LED_COUNT>0;
+ assert(zmk_rgb_matrix_set_inhibited(false)==0);
+ assert(post_release_accepted==(KP_LED_COUNT>0));
+ assert(kp_rgb_pending_pop(&received)==post_release_accepted);
  // Initial black failure with an already OFF controller is not lost.
  zmk_rgb_matrix_set_inhibited(false);
  zmk_rgb_matrix_off();
@@ -143,8 +170,8 @@ int main(void) {
  assert(!polls && !refreshes && !dispatches);
  assert(zmk_rgb_matrix_get_state(NULL)==-EINVAL);
  assert(zmk_rgb_matrix_off()==0);
- assert(zmk_rgb_matrix_toggle()==0 && ctx.state.on);
- assert(zmk_rgb_matrix_toggle()==0 && !ctx.state.on);
+ assert(zmk_rgb_matrix_toggle()==0 && ctx.state.user_on);
+ assert(zmk_rgb_matrix_toggle()==0 && !ctx.state.user_on);
  puts("production-extracted output gate tests passed");
 }
 '''

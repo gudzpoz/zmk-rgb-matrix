@@ -66,9 +66,6 @@ struct kp_rgb_controller kp_rgb_controller = {
 
 static int kp_rgb_behavior_init(const struct device *dev) {
   kp_rgb_controller.dev = dev;
-  kp_rgb_controller.state.on =
-      kp_rgb_effective_on(kp_rgb_controller.initial_on,
-                          IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
   if (kp_rgb_apply_defaults() < 0) {
     LOG_WRN("Initial RGB effect unavailable");
   }
@@ -196,6 +193,7 @@ int kp_rgb_apply_defaults(void) {
   }
   kp_rgb_controller.effect_index = kp_rgb_controller.initial_effect;
   int ret = kp_rgb_resolve_active();
+  kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return ret;
 }
@@ -336,12 +334,9 @@ static int on_keymap_binding_convert_central_state_dependent_params(
   ARG_UNUSED(event);
   switch (binding->param1) {
   case RGB_TOG_CMD: {
-    bool state;
-    int err = zmk_rgb_matrix_get_state(&state);
-    if (err) {
-      return err;
-    }
-    binding->param1 = state ? RGB_OFF_CMD : RGB_ON_CMD;
+    kp_rgb_matrix_lock();
+    binding->param1 = kp_rgb_controller.state.user_on ? RGB_OFF_CMD : RGB_ON_CMD;
+    kp_rgb_matrix_unlock();
     break;
   }
   case RGB_BRI_CMD:
@@ -406,24 +401,13 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
   ARG_UNUSED(event);
   int ret;
   switch (binding->param1) {
-  case RGB_TOG_CMD: {
-    kp_rgb_matrix_lock();
-    bool toggle_on = !kp_rgb_controller.state.on;
-    kp_rgb_controller.state.user_on = toggle_on;
-    kp_rgb_matrix_unlock();
-    ret = toggle_on ? zmk_rgb_matrix_on() : zmk_rgb_matrix_off();
+  case RGB_TOG_CMD:
+    ret = zmk_rgb_matrix_toggle();
     break;
-  }
   case RGB_ON_CMD:
-    kp_rgb_matrix_lock();
-    kp_rgb_controller.state.user_on = true;
-    kp_rgb_matrix_unlock();
     ret = zmk_rgb_matrix_on();
     break;
   case RGB_OFF_CMD:
-    kp_rgb_matrix_lock();
-    kp_rgb_controller.state.user_on = false;
-    kp_rgb_matrix_unlock();
     ret = zmk_rgb_matrix_off();
     break;
   case RGB_HUI_CMD:

@@ -98,9 +98,9 @@ struct kp_rgb_frame {
   const struct kp_rgb_coord *coords;
   /* Output pixels for each LED */
   struct led_rgb *pixels;
-  /* Milliseconds since the previous render. Not always
-   * `KEYPAW_RGB_MATRIX_TICK_MS` as API might request immediate animation
-   * flush. */
+  /* Milliseconds since the previous rendering tick or output resume. Excludes
+   * time spent OFF, idle-suppressed, or inhibited. An immediate flush may make
+   * this shorter than CONFIG_KEYPAW_RGB_MATRIX_TICK_MS. */
   uint32_t elapsed;
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
@@ -115,10 +115,12 @@ struct kp_rgb_frame {
 typedef void (*rgb_matrix_effect_render_callback_t)(const struct device *dev,
                                                     struct kp_rgb_frame *frame);
 
-/* A key event callback. Both press events and release events are delivered. Use
- * `ev->state` to tell them apart. kp_rgb_led_for_position() to find the LED,
- * since there is no frame here. Runs under the matrix lock, so keep it
- * short. */
+/* Use ev->state to distinguish presses and releases, and
+ * kp_rgb_led_for_position() to find the LED. Runs under the matrix lock on the
+ * low-priority queue. Feedback is admitted only with initialized local LEDs,
+ * logical ON, and inhibited=false. Pending feedback is discarded on OFF, idle
+ * suppression, or inhibition; a full queue also drops events,
+ * so press/release pairs are not guaranteed. An in-flight pass may finish. */
 typedef void (*rgb_matrix_effect_event_callback_t)(
     const struct device *dev, const struct zmk_position_state_changed *ev);
 
@@ -538,6 +540,11 @@ int zmk_rgb_matrix_set_inhibited(bool inhibited);
 /* Returns the current gate state, not hardware settlement; safe from any context. */
 bool zmk_rgb_matrix_is_inhibited(void);
 
+/* Set or toggle local user intent; toggle inverts intent even while idle or
+ * inhibited. Idle suppression and inhibition may still prevent output.
+ * Thread context only. Return 0 on success or a negative lock error; success
+ * does not promise hardware settlement. These calls neither save settings nor
+ * send split commands. */
 int zmk_rgb_matrix_toggle(void);
 int zmk_rgb_matrix_on(void);
 int zmk_rgb_matrix_off(void);

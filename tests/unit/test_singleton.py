@@ -55,8 +55,8 @@ struct kp_rgb_effect_common_data { struct kp_rgb_hsb color; uint16_t duration_ms
 static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) {
     return dev->data;
 }
-static unsigned held;
-static void kp_rgb_matrix_lock(void) { held++; }
+static unsigned held, lock_entries;
+static void kp_rgb_matrix_lock(void) { if (!held) lock_entries++; held++; }
 static void kp_rgb_matrix_unlock(void) { assert(held); held--; }
 '''
 
@@ -121,7 +121,16 @@ def fixture_code():
     source = (ROOT / "src/behavior_rgb_matrix.c").read_text()
     code = PRELUDE + "\n".join(structure(internal, name) for name in (
         "kp_rgb_state", "kp_rgb_effect_defaults", "kp_rgb_controller"))
-    code += "\nstatic struct kp_rgb_controller kp_rgb_controller;\n"
+    code += r'''
+static struct kp_rgb_controller kp_rgb_controller;
+static unsigned reconciles;
+static bool reconciled_user_on;
+static void kp_rgb_reconcile_power_locked(void) {
+    assert(held == 1);
+    reconciles++;
+    reconciled_user_on = kp_rgb_controller.state.user_on;
+}
+'''
     code += "\n".join(function(source, name) for name in (
         "kp_rgb_effect_count", "kp_rgb_effect_at", "kp_rgb_selected_effect",
         "kp_rgb_calc_effect_index", "kp_rgb_resolve_active",

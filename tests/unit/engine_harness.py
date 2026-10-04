@@ -27,8 +27,8 @@ def function(name):
 TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD: \{\n.*?^  \}\n", BEHAVIOR_SOURCE, re.M | re.S)
 assert TOGGLE_CASE, "RGB toggle conversion"
 TOGGLE_FUNCTION = """
-static int convert_toggle(struct kp_rgb_controller *ctx, struct binding *binding) {
-    (void)ctx;
+static int convert_toggle(struct kp_rgb_controller *controller, struct binding *binding) {
+    (void)controller;
     switch (binding->param1) {
 """ + TOGGLE_CASE.group() + """
     default: return -EINVAL;
@@ -53,7 +53,6 @@ PRELUDE = r'''
 #define K_NO_WAIT 0
 #define K_MSEC(x) (x)
 #define CONFIG_KEYPAW_RGB_MATRIX_TICK_MS 16
-#define CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE 1
 #define IS_ENABLED(x) (x)
 #define LOG_WRN(...) ((void)0)
 #define LOG_ERR(...) ((void)0)
@@ -92,7 +91,7 @@ struct kp_rgb_effect_api {
 struct kp_rgb_overlay_api { void (*render)(const struct device *,struct kp_rgb_frame *); };
 struct kp_rgb_controller {
  const struct device *dev;
- struct { bool on,user_on; const struct device *active_fx; } state;
+ struct { bool user_on; const struct device *active_fx; } state;
  struct kp_rgb_tuning tuning;
 };
 static struct kp_rgb_controller kp_rgb_controller;
@@ -106,7 +105,8 @@ static bool kp_rgb_matrix_lock_patiently(void) {
  if (host_lock_failures) { host_lock_failures--; return false; }
  kp_rgb_matrix_lock(); return true;
 }
-#define KP_TRY_LOCK() (kp_rgb_matrix_lock(),0)
+static int host_try_lock_error;
+#define KP_TRY_LOCK() (host_try_lock_error ? host_try_lock_error : (kp_rgb_matrix_lock(),0))
 static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
 struct k_spinlock { int unused; };
 typedef int k_spinlock_key_t;
@@ -122,11 +122,19 @@ static int k_spin_lock(struct k_spinlock *l) {
  }
  pthread_mutex_lock(&pending_lock);return 0;
 }
-static void k_spin_unlock(struct k_spinlock *l,int key) { (void)l; (void)key; pthread_mutex_unlock(&pending_lock); }
+static bool inject_after_unlock,post_release_accepted;
+static void k_spin_unlock(struct k_spinlock *l,int key) {
+ (void)l; (void)key; pthread_mutex_unlock(&pending_lock);
+ if(inject_after_unlock) {
+  inject_after_unlock=false;
+  const struct zmk_position_state_changed ev={.position=0,.state=true};
+  post_release_accepted=kp_rgb_pending_push(&ev);
+ }
+}
 static struct zmk_position_state_changed kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
 static uint8_t kp_rgb_pending_head,kp_rgb_pending_tail;
 static uint32_t kp_rgb_pending_dropped;
-static atomic_t kp_rgb_any_on,kp_rgb_inhibited;
+static atomic_t kp_rgb_output_allowed,kp_rgb_inhibited;
 static bool kp_rgb_output_ready,kp_rgb_black_pending;
 static uint32_t kp_rgb_black_retry_ms=100,last_tick;
 static uint64_t now;
@@ -148,7 +156,12 @@ static uint32_t k_uptime_get_32(void) { return now; }
 static bool k_is_in_isr(void) { return isr; }
 #define ZMK_ACTIVITY_ACTIVE 0
 static int zmk_activity_get_state(void) { return idle; }
-static bool kp_rgb_effective_on(bool on,bool apply) { return on && (!apply || !idle); }
+typedef struct { bool activity; } zmk_event_t;
+#define ZMK_EV_EVENT_BUBBLE 0
+static const struct zmk_position_state_changed *as_zmk_position_state_changed(const zmk_event_t *e) { (void)e; return NULL; }
+#if CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
+static const zmk_event_t *as_zmk_activity_state_changed(const zmk_event_t *e) { return e->activity ? e : NULL; }
+#endif
 static void *zmk_workqueue_lowprio_work_q(void) { return NULL; }
 #if HOST_SCHEDULER
 #include "engine_scheduler.h"
@@ -206,32 +219,43 @@ static int led_strip_update_rgb(const struct device *d,struct led_rgb *p,size_t 
  return record->result;
 }
 static void kp_rgb_request_black_locked(void);
-static void kp_rgb_pending_purge(void);
+void kp_rgb_reconcile_power_locked(void);
 void zmk_rgb_matrix_flush(void);
 '''
 
+ACTIVITY_FUNCTION = r'''
+static void host_activity(bool active) {
+    idle = !active;
+    const zmk_event_t event = {.activity = true};
+    assert(kp_rgb_matrix_event_listener(&event) ==
+           (CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE ? ZMK_EV_EVENT_BUBBLE : -ENOTSUP));
+}
+'''
+
 FUNCTIONS = [
-    "kp_rgb_has_leds", "kp_any_on_locked", "kp_rgb_publish_any_on_locked",
+    "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
     "kp_rgb_matrix_tick_handler", "kp_start_timer",
     "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_matrix_tick",
     "kp_rgb_request_black_locked", "kp_rgb_matrix_off_handler",
+    "kp_rgb_reconcile_power_locked",
     "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
-    "zmk_rgb_matrix_flush", "kp_rgb_pending_purge", "kp_rgb_pending_push",
+    "zmk_rgb_matrix_flush", "kp_rgb_pending_push",
     "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_matrix_pending_handler",
-    "kp_rgb_permission_handler", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
+    "kp_rgb_matrix_event_listener", "kp_rgb_set_user_on", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
     "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "kp_rgb_matrix_init",
 ]
 
 
-def run_tests(tests, *, scheduler=False, cases=(None,)):
+def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True):
     """Build fresh fixtures for LED and zero-LED configurations; propagate failures."""
     with tempfile.TemporaryDirectory() as directory:
         for leds in (2, 0):
             source = pathlib.Path(directory) / "engine.c"
             source.write_text(
                 f"#define KP_LED_COUNT {leds}\n#define HOST_SCHEDULER {int(scheduler)}\n"
+                f"#define CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE {int(auto_off_idle)}\n"
                 + PRELUDE + "\n".join(map(function, FUNCTIONS))
-                + TOGGLE_FUNCTION + tests
+                + TOGGLE_FUNCTION + ACTIVITY_FUNCTION + tests
             )
             binary = pathlib.Path(directory) / "engine"
             subprocess.run(

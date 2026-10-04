@@ -16,17 +16,10 @@
 #include <zephyr/toolchain.h>
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
-#include <zmk/activity.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
 
-static inline bool kp_rgb_effective_on(bool intent, bool apply_idle) {
-  bool active = zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE;
-  return intent && (!apply_idle || active);
-}
-
 struct kp_rgb_state {
-  bool on;
   bool user_on;
   const struct device *active_fx;
 };
@@ -55,6 +48,9 @@ extern struct kp_rgb_controller kp_rgb_controller;
 /* Never hold the matrix lock across flash I/O. */
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
+
+/* Caller holds the matrix lock. */
+void kp_rgb_reconcile_power_locked(void);
 
 int kp_rgb_resolve_active(void);
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
@@ -108,7 +104,7 @@ const struct device *kp_rgb_effect_at(size_t index);
 size_t kp_rgb_selected_effect(void);
 int kp_rgb_save_state(void);
 
-/* Restore presets and user intent. The caller applies effective power. */
+/* Restore presets and user intent, then reconcile local output permission. */
 int kp_rgb_apply_defaults(void);
 void kp_rgb_reset_state(void);
 
