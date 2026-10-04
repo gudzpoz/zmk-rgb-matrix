@@ -24,15 +24,15 @@
 /* basis: x, y, radial, pinwheel, spiral, chevron, flag. */
 /* direction: out, in, dual, bloom. */
 /* palette: rainbow, solid. */
-DEFINE_DT_ENUM(basis, x, y, radial, pinwheel, spiral, chevron, flag);
-DEFINE_DT_ENUM(direction, out, in, dual, bloom);
-DEFINE_DT_ENUM(palette, rainbow, solid);
+DEFINE_DT_ENUM(kp_rainbow_basis_t, basis, x, y, radial, pinwheel, spiral, chevron, flag);
+DEFINE_DT_ENUM(kp_rainbow_direction_t, direction, out, in, dual, bloom);
+DEFINE_DT_ENUM(kp_rainbow_palette_t, palette, rainbow, solid);
 
 struct kp_eff_rainbow_config {
   struct kp_rgb_effect_common_config common;
-  basis_t basis;
-  direction_t direction;
-  palette_t palette;
+  kp_rainbow_basis_t basis;
+  kp_rainbow_direction_t direction;
+  kp_rainbow_palette_t palette;
 };
 
 struct kp_eff_rainbow_data {

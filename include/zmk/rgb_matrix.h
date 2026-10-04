@@ -41,7 +41,7 @@
 /* -------------------------------------------------------------------------
  * Devicetree string-enum -> C enum helpers
  *
- *     DEFINE_DT_ENUM(axis, none, vertical, horizontal);
+ *     DEFINE_DT_ENUM(axis_t, axis, none, vertical, horizontal);
  *     .axis = CONV_DT_ENUM(inst, axis),
  *     if (cfg->axis == DT_ENUM_CONST(axis, vertical)) { ... }
  *
@@ -52,10 +52,10 @@
 #define KP_ENUM_ENTRY(idx, val, prop)                                          \
   CONCAT(DT_DRV_COMPAT, _, prop, _, val) = idx
 /* Define an enum with device-tree string enum values. */
-#define DEFINE_DT_ENUM(prop, ...)                                              \
+#define DEFINE_DT_ENUM(type_name, prop, ...)                                   \
   typedef enum {                                                               \
     FOR_EACH_IDX_FIXED_ARG(KP_ENUM_ENTRY, (, ), prop, __VA_ARGS__),            \
-  } CONCAT(prop, _t)
+  } type_name
 
 /* Resolve an instance's property to its named constant. */
 #define CONV_DT_ENUM(inst, prop)                                               \

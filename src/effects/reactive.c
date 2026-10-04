@@ -29,18 +29,18 @@
  * nexus = everything but the cross lines. */
 /* palette: solid = user hue, gradient = position-based hue, complement =
  * pressed keys flash the opposite hue. */
-DEFINE_DT_ENUM(spread, point, disc, cross, nexus);
-DEFINE_DT_ENUM(palette, solid, gradient, complement);
+DEFINE_DT_ENUM(kp_reactive_spread_t, spread, point, disc, cross, nexus);
+DEFINE_DT_ENUM(kp_reactive_palette_t, palette, solid, gradient, complement);
 
 struct kp_eff_reactive_config {
   struct kp_rgb_effect_common_config common;
   /* Unlit-LED brightness relative to the effect colour, in percent. Effect
    * local on purpose: it is not the keyboard-wide idle brightness. */
   uint8_t background_brightness;
-  spread_t spread;
+  kp_reactive_spread_t spread;
   uint16_t radius; /* layout units, for disc/nexus falloff */
   bool multi;      /* accumulate several presses vs. just the latest */
-  palette_t palette;
+  kp_reactive_palette_t palette;
 };
 
 struct kp_eff_reactive_data {

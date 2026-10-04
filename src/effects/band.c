@@ -21,13 +21,13 @@
 
 /* channel: sat = BAND_SAT family, val = BAND_VAL family. */
 /* shape: linear = scroll, pinwheel = rotate, spiral = wind outward. */
-DEFINE_DT_ENUM(channel, sat, val);
-DEFINE_DT_ENUM(shape, linear, pinwheel, spiral);
+DEFINE_DT_ENUM(kp_band_channel_t, channel, sat, val);
+DEFINE_DT_ENUM(kp_band_shape_t, shape, linear, pinwheel, spiral);
 
 struct kp_eff_band_config {
   struct kp_rgb_effect_common_config common;
-  channel_t channel;
-  shape_t shape;
+  kp_band_channel_t channel;
+  kp_band_shape_t shape;
 };
 
 struct kp_eff_band_data {
@@ -38,7 +38,7 @@ struct kp_eff_band_data {
 
 
 /* Spatial coordinate of an LED in [0, 65536) along the chosen shape. */
-static uint32_t kp_band_spatial(shape_t shape, uint16_t x, uint16_t y, uint16_t bl,
+static uint32_t kp_band_spatial(kp_band_shape_t shape, uint16_t x, uint16_t y, uint16_t bl,
                                 uint16_t bh, uint32_t max_r) {
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;

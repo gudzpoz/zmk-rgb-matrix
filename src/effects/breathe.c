@@ -19,11 +19,11 @@
 
 /* brightness = BREATHING (whole-board fade), river = RIVERFLOW (x-offset
  * pulse), hue = HUE_BREATHING, pendulum = HUE_PENDULUM, and wave = HUE_WAVE. */
-DEFINE_DT_ENUM(mode, brightness, river, hue, pendulum, wave);
+DEFINE_DT_ENUM(kp_breathe_mode_t, mode, brightness, river, hue, pendulum, wave);
 
 struct kp_eff_breathe_config {
   struct kp_rgb_effect_common_config common;
-  mode_t mode;
+  kp_breathe_mode_t mode;
   /* Hue swing, in degrees, for the hue-oscillating modes. */
   uint16_t hue_amplitude;
 };
@@ -42,7 +42,7 @@ static uint32_t kp_breathe_wave(uint32_t phase, uint32_t period) {
 }
 
 static uint16_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
-                                      uint16_t x, uint16_t span, mode_t mode,
+                                      uint16_t x, uint16_t span, kp_breathe_mode_t mode,
                                       uint16_t hue_amplitude) {
   uint32_t position;
   if (mode == DT_ENUM_CONST(mode, hue)) {

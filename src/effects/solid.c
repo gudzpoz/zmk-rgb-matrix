@@ -14,11 +14,11 @@
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 /* none = SOLID_COLOR, vertical = GRADIENT_UP_DOWN, horizontal = GRADIENT_LEFT_RIGHT. */
-DEFINE_DT_ENUM(axis, none, vertical, horizontal);
+DEFINE_DT_ENUM(kp_solid_axis_t, axis, none, vertical, horizontal);
 
 struct kp_eff_solid_config {
   struct kp_rgb_effect_common_config common;
-  axis_t axis; /* enum keypaw_rgb_matrix_solid_axis */
+  kp_solid_axis_t axis; /* enum keypaw_rgb_matrix_solid_axis */
 };
 struct kp_eff_solid_data {
   struct kp_rgb_effect_common_data common;

@@ -99,8 +99,8 @@ properties:
 
 ```c
 // Define the enum: the allowed values must still be listed in the YAML.
-DEFINE_DT_ENUM(basis, x, y, radial, pinwheel, spiral, chevron, flag);
-// The type name is `<enum_name>_t`, so `basis` -> `basis_t`.
+DEFINE_DT_ENUM(kp_rainbow_basis_t, basis, x, y, radial, pinwheel, spiral, chevron, flag);
+// The first argument is the exact typedef name; no suffix is added.
 
 // Convert a devicetree value in a config initializer:
 .basis = CONV_DT_ENUM(inst, basis),

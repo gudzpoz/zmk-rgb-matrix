@@ -23,7 +23,7 @@
 /* pixel = random keys, flow = cursor walking the chain, jellybean = random hue
  * and saturation, fractal = a single-hue pulse from the centre, drops = QMK's
  * RAINDROPS (see kp_rain_drops_hue below). */
-DEFINE_DT_ENUM(mode, pixel, flow, drops, jellybean, fractal);
+DEFINE_DT_ENUM(kp_rain_mode_t, mode, pixel, flow, drops, jellybean, fractal);
 
 /* Hue nudges RAINDROPS makes per animation period. Tying the rate to the period
  * keeps `duration` meaningful here as it is for every other effect. */
@@ -36,7 +36,7 @@ DEFINE_DT_ENUM(mode, pixel, flow, drops, jellybean, fractal);
 
 struct kp_eff_rain_config {
   struct kp_rgb_effect_common_config common;
-  mode_t mode;
+  kp_rain_mode_t mode;
 };
 
 struct kp_eff_rain_data {
