@@ -105,7 +105,6 @@ const struct kp_rgb_coord *kp_rgb_led_coord(size_t led) {
 static const struct device *const strip =
     COND_CODE_1(KP_RGB_HAS_STRIP, (DEVICE_DT_GET(KP_RGB_STRIP)), (NULL));
 static struct led_rgb pixels[KP_LED_COUNT];
-static uint32_t last_tick;
 static K_MUTEX_DEFINE(kp_rgb_lock);
 static atomic_t kp_rgb_output_allowed;
 static atomic_t kp_rgb_inhibited;
@@ -148,6 +147,93 @@ static bool kp_rgb_matrix_lock_patiently(void) {
 extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
 
+/* Prioritize key handling over RGB feedback: every event is copied here and
+ * delivered by the low-priority queue. Drop events if the ring fills up. */
+#define KP_RGB_EVENT_QUEUE_LEN 16
+
+static struct kp_rgb_key_event
+    kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
+static uint8_t kp_rgb_pending_head;
+static uint8_t kp_rgb_pending_tail;
+static uint32_t kp_rgb_pending_dropped;
+static struct k_spinlock kp_rgb_pending_lock;
+
+static bool kp_rgb_pending_pop(struct kp_rgb_key_event *out);
+static bool kp_rgb_pending_available(void);
+static uint32_t kp_rgb_pending_take_dropped(void);
+static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev);
+
+typedef void (*effect_visitor)(const struct device *dev, int64_t now_ms);
+static void kp_rgb_each_effect(effect_visitor visit, int64_t now_ms) {
+  for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
+    const struct device *dev = kp_rgb_effect_at(i);
+    if (dev != NULL) visit(dev, now_ms);
+  }
+  const struct device *const *overlays = kp_rgb_overlay_list();
+  for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+    if (overlays[i] == NULL) continue;
+    const struct kp_rgb_overlay_api *api = overlays[i]->api;
+    const struct device *child = api->event_target ? api->event_target(overlays[i]) : NULL;
+    if (child != NULL) visit(child, now_ms);
+  }
+}
+
+static void kp_rgb_restart_clock(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  const struct kp_rgb_effect_api *api = dev->api;
+  api->runtime->animating = false;
+}
+
+static void kp_rgb_clear_wanted(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  const struct kp_rgb_effect_api *api = dev->api;
+  api->runtime->wanted = false;
+}
+
+static void kp_rgb_mark_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  const struct kp_rgb_effect_api *api = dev->api;
+  api->runtime->reset_pending = true;
+}
+
+void kp_rgb_request_runtime_reset_locked(void) {
+  kp_rgb_each_effect(kp_rgb_mark_reset, 0);
+  zmk_rgb_matrix_flush();
+}
+
+static void kp_rgb_reconcile_effect(const struct device *dev, int64_t now_ms) {
+  const struct kp_rgb_effect_api *api = dev->api;
+  struct kp_rgb_effect_runtime *state = api->runtime;
+  const struct kp_rgb_effect_callbacks *cb = api->callbacks;
+  if (state->active && !state->wanted) {
+    state->active = false;
+    state->animating = false;
+    if (cb->set_active != NULL) cb->set_active(dev, false, now_ms);
+  }
+  if (state->reset_pending || (state->wanted && !state->initialized)) {
+    if (cb->reset != NULL) cb->reset(dev, now_ms);
+    state->initialized = true;
+    state->reset_pending = false;
+    state->animating = false;
+  }
+  if (state->wanted && !state->active) {
+    state->active = true;
+    state->animating = false;
+    if (cb->set_active != NULL) cb->set_active(dev, true, now_ms);
+  }
+}
+
+void kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame) {
+  const struct kp_rgb_effect_api *api = dev->api;
+  struct kp_rgb_effect_runtime *state = api->runtime;
+  if (!state->active || !atomic_get(&kp_rgb_output_allowed)) return;
+  struct kp_rgb_frame local = *frame;
+  local.elapsed_ms = state->animating && frame->now_ms > state->last_render_ms
+      ? (uint32_t)MIN((uint64_t)(frame->now_ms - state->last_render_ms), UINT32_MAX)
+      : 0;
+  state->last_render_ms = frame->now_ms;
+  state->animating = api->callbacks->render(dev, &local);
+}
 /* Timer ISR: the worker rechecks permission under the matrix mutex. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
@@ -159,7 +245,7 @@ static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
 K_TIMER_DEFINE(kp_tick_timer, kp_rgb_matrix_tick_handler, NULL);
 
 static void kp_start_timer(void) {
-  last_tick = k_uptime_get_32();
+  kp_rgb_each_effect(kp_rgb_restart_clock, 0);
   k_timer_start(&kp_tick_timer, K_NO_WAIT,
                 K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
 }
@@ -200,56 +286,69 @@ static void kp_render_overlays(struct kp_rgb_frame *frame,
 
 static void kp_rgb_matrix_tick(struct k_work *work) {
   ARG_UNUSED(work);
-  if (!atomic_get(&kp_rgb_output_allowed)) {
-    return;
-  }
   if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
-    /* Retry on the queue rather than waiting for the next timer tick; the
-     * bounded wait above is what keeps this from becoming a tight loop. */
     k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
     return;
   }
-  if (!atomic_get(&kp_rgb_output_allowed)) {
-    kp_rgb_matrix_unlock();
-    return;
-  }
-  uint32_t now = k_uptime_get_32();
-  uint32_t elapsed = now - last_tick;
-  last_tick = now;
-  memset(pixels, 0, sizeof(pixels));
+
+  int64_t now_ms = k_uptime_get();
   const struct device *fx = kp_rgb_controller.state.active_fx;
-  if (fx != NULL) {
+  const struct device *const *overlays = NULL;
+  size_t overlay_count = 0, first = SIZE_MAX;
+  kp_rgb_each_effect(kp_rgb_clear_wanted, now_ms);
+
+  if (fx != NULL && atomic_get(&kp_rgb_output_allowed)) {
+    const struct kp_rgb_effect_api *api = fx->api;
+    overlays = api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
+    overlay_count = api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
+    first = kp_last_covering_overlay(overlays, overlay_count);
+    api->runtime->wanted = first == SIZE_MAX;
+
+    for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
+      if (overlays[i] == NULL || !kp_rgb_overlay_gate(overlays[i])) continue;
+      const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
+      const struct device *child = ovl->event_target ? ovl->event_target(overlays[i]) : NULL;
+      if (child != NULL) {
+        const struct kp_rgb_effect_api *child_api = child->api;
+        child_api->runtime->wanted = true;
+      }
+    }
+  }
+
+  kp_rgb_each_effect(kp_rgb_reconcile_effect, now_ms);
+
+  struct kp_rgb_key_event event;
+  for (size_t i = 0; i < KP_RGB_EVENT_QUEUE_LEN && kp_rgb_pending_pop(&event); i++) {
+    kp_rgb_deliver_position(&event);
+  }
+
+  if (atomic_get(&kp_rgb_output_allowed)) {
+    memset(pixels, 0, sizeof(pixels));
     struct kp_rgb_frame frame = {
         .tune = &kp_rgb_controller.tuning,
         .count = KP_LED_COUNT,
         .coords = kp_led_coords,
         .pixels = pixels,
-        .elapsed = elapsed,
+        .now_ms = now_ms,
         .board_length = kp_rgb_board_length,
         .board_height = kp_rgb_board_height,
         .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
     };
-    const struct kp_rgb_effect_api *api = fx->api;
-    const struct device *const *overlays =
-        api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
-    size_t overlay_count =
-        api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
-    size_t first = kp_last_covering_overlay(overlays, overlay_count);
-    if (first == SIZE_MAX) {
-      api->render(fx, &frame);
-      first = 0;
+    if (fx != NULL) {
+      kp_rgb_effect_render(fx, &frame);
+      kp_render_overlays(&frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
     }
-    kp_render_overlays(&frame, overlays, overlay_count, first);
-  }
-  /* Callbacks may change output permission under this recursive mutex. */
-  if (atomic_get(&kp_rgb_output_allowed)) {
-    int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
-    if (err < 0) {
-      LOG_WRN("Failed to update the RGB strip (%d)", err);
+    if (atomic_get(&kp_rgb_output_allowed)) {
+      int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+      if (err < 0) LOG_WRN("Failed to update the RGB strip (%d)", err);
     }
   }
   kp_rgb_matrix_unlock();
+
+  if (kp_rgb_pending_available()) zmk_rgb_matrix_flush();
+  uint32_t dropped = kp_rgb_pending_take_dropped();
+  if (dropped > 0) LOG_WRN("dropped %u RGB event(s): key-event queue full", dropped);
 }
 
 static void kp_rgb_matrix_off_handler(struct k_work *work);
@@ -306,22 +405,19 @@ bool zmk_rgb_matrix_is_inhibited(void) {
 K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
 
 void zmk_rgb_matrix_flush(void) {
-  if (!atomic_get(&kp_rgb_output_allowed)) {
-    return;
-  }
   k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
 }
 
 static void kp_rgb_deliver_event(const struct device *dev,
-                                 const struct zmk_position_state_changed *ev) {
+                                 const struct kp_rgb_key_event *ev) {
   const struct kp_rgb_effect_api *api = dev->api;
-  if (api->on_event != NULL) {
-    api->on_event(dev, ev);
+  if (api->runtime->active && api->callbacks->on_event != NULL) {
+    api->callbacks->on_event(dev, ev);
   }
 }
 
 /* Caller holds kp_rgb_lock. */
-static void kp_rgb_deliver_position(const struct zmk_position_state_changed *ev) {
+static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
   if (!atomic_get(&kp_rgb_output_allowed) || fx == NULL ||
       kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
@@ -348,17 +444,6 @@ static void kp_rgb_deliver_position(const struct zmk_position_state_changed *ev)
   }
 }
 
-/* Prioritize key handling over RGB feedback: every event is copied here and
- * delivered by the low-priority queue. Drop events if the ring fills up. */
-#define KP_RGB_EVENT_QUEUE_LEN 16
-
-static struct zmk_position_state_changed
-    kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
-static uint8_t kp_rgb_pending_head;
-static uint8_t kp_rgb_pending_tail;
-static uint32_t kp_rgb_pending_dropped;
-static struct k_spinlock kp_rgb_pending_lock;
-
 void kp_rgb_reconcile_power_locked(void) {
   bool allowed = kp_rgb_output_ready && kp_rgb_has_leds() &&
                  kp_rgb_logical_on_locked() && !atomic_get(&kp_rgb_inhibited);
@@ -380,9 +465,10 @@ void kp_rgb_reconcile_power_locked(void) {
     k_timer_stop(&kp_tick_timer);
     kp_rgb_request_black_locked();
   }
+  zmk_rgb_matrix_flush();
 }
 
-static bool kp_rgb_pending_push(const struct zmk_position_state_changed *ev) {
+static bool kp_rgb_pending_push(const struct kp_rgb_key_event *ev) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_pending_lock);
   if (!atomic_get(&kp_rgb_output_allowed)) {
     k_spin_unlock(&kp_rgb_pending_lock, key);
@@ -400,7 +486,7 @@ static bool kp_rgb_pending_push(const struct zmk_position_state_changed *ev) {
   return room;
 }
 
-static bool kp_rgb_pending_pop(struct zmk_position_state_changed *out) {
+static bool kp_rgb_pending_pop(struct kp_rgb_key_event *out) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_pending_lock);
   bool pending = kp_rgb_pending_tail != kp_rgb_pending_head;
   if (pending) {
@@ -420,38 +506,23 @@ static uint32_t kp_rgb_pending_take_dropped(void) {
   return dropped;
 }
 
-static void kp_rgb_matrix_pending_handler(struct k_work *work);
-K_WORK_DEFINE(kp_pending_work, kp_rgb_matrix_pending_handler);
-
-static void kp_rgb_matrix_pending_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  if (!kp_rgb_matrix_lock_patiently()) {
-    /* Bounded wait failed; keep the events queued and try again. */
-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_pending_work);
-    return;
-  }
-  struct zmk_position_state_changed ev;
-  while (kp_rgb_pending_pop(&ev)) {
-    if (atomic_get(&kp_rgb_output_allowed)) {
-      kp_rgb_deliver_position(&ev);
-    }
-  }
-  kp_rgb_matrix_unlock();
-
-  uint32_t dropped = kp_rgb_pending_take_dropped();
-  if (dropped > 0) {
-    LOG_WRN("dropped %u RGB event(s): key-event queue full", dropped);
-  }
+static bool kp_rgb_pending_available(void) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_pending_lock);
+  bool pending = kp_rgb_pending_tail != kp_rgb_pending_head;
+  k_spin_unlock(&kp_rgb_pending_lock, key);
+  return pending;
 }
 
 static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
   const struct zmk_position_state_changed *pos_ev =
       as_zmk_position_state_changed(eh);
   if (pos_ev != NULL) {
-    /* RGB may drop under sustained pressure; key handling must not. */
-    if (kp_rgb_pending_push(pos_ev)) {
-      k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_pending_work);
-    }
+    struct kp_rgb_key_event event = {
+        .position = pos_ev->position,
+        .pressed = pos_ev->state,
+        .timestamp_ms = pos_ev->timestamp,
+    };
+    if (kp_rgb_pending_push(&event)) zmk_rgb_matrix_flush();
     return ZMK_EV_EVENT_BUBBLE;
   }
 

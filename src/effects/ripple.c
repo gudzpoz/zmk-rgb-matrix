@@ -15,7 +15,6 @@
 
 #include <zephyr/sys/util.h>
 
-#include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_matrix_math.h>
 
@@ -37,14 +36,13 @@ struct kp_eff_ripple_config {
 
 struct kp_rgb_ripple_trigger {
   bool used;
-  uint32_t start_ms;
+  int64_t start_ms;
   int32_t x;
   int32_t y;
 };
 
 struct kp_eff_ripple_data {
   struct kp_rgb_effect_common_data common;
-  uint32_t now_ms;
   struct kp_rgb_ripple_trigger triggers[KP_RIPPLE_TRIGGERS];
 };
 
@@ -54,14 +52,14 @@ static void kp_eff_ripple_add(struct led_rgb *acc, struct led_rgb add) {
   acc->b = (uint8_t)MIN(255u, (uint32_t)acc->b + add.b);
 }
 
-static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_frame *f) {
   struct kp_eff_ripple_data *data = dev->data;
   const struct kp_eff_ripple_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
-  data->now_ms += f->elapsed;
+  bool evolving = false;
 
   struct kp_rgb_hsb bg = base;
   bg.b = KP_RGB_SCALE(base.b, cfg->background_brightness);
@@ -76,13 +74,16 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
       continue;
     }
 
-    uint32_t age = data->now_ms - trigger->start_ms;
+    uint64_t age = f->now_ms > trigger->start_ms
+                       ? (uint64_t)f->now_ms - (uint64_t)trigger->start_ms
+                       : 0;
     if (age >= period) {
       trigger->used = false;
       continue;
     }
 
-    int32_t radius = (int32_t)((uint32_t)f->board_length * age / period);
+    evolving = true;
+    int32_t radius = (int32_t)((uint64_t)f->board_length * age / period);
     if (radius <= 0) {
       continue;
     }
@@ -118,18 +119,19 @@ static void kp_eff_ripple_render(const struct device *dev, struct kp_rgb_frame *
       kp_eff_ripple_add(&f->pixels[i], kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct)));
     }
   }
+  return evolving;
 }
 
-static void kp_eff_ripple_event(const struct device *dev,
-                                const struct zmk_position_state_changed *ev) {
-  if (!ev->state) {
-    return; /* only a press starts a ripple */
+static bool kp_eff_ripple_event(const struct device *dev,
+                                const struct kp_rgb_key_event *ev) {
+  if (!ev->pressed) {
+    return false;
   }
 
   size_t led = kp_rgb_led_for_position(ev->position);
   const struct kp_rgb_coord *origin = kp_rgb_led_coord(led);
   if (origin == NULL) {
-    return;
+    return false;
   }
 
   struct kp_eff_ripple_data *data = dev->data;
@@ -139,13 +141,34 @@ static void kp_eff_ripple_event(const struct device *dev,
     }
     data->triggers[t] = (struct kp_rgb_ripple_trigger){
         .used = true,
-        .start_ms = data->now_ms,
+        .start_ms = ev->timestamp_ms,
         .x = origin->x,
         .y = origin->y,
     };
-    return;
+    return true;
+  }
+  return false;
+}
+
+static void kp_eff_ripple_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_ripple_data *data = dev->data;
+  struct kp_rgb_effect_common_data common = data->common;
+  *data = (struct kp_eff_ripple_data){.common = common};
+}
+
+static void kp_eff_ripple_set_active(const struct device *dev, bool active, int64_t now_ms) {
+  if (!active) {
+    kp_eff_ripple_reset(dev, now_ms);
   }
 }
+
+static const struct kp_rgb_effect_callbacks kp_eff_ripple_callbacks = {
+    .render = kp_eff_ripple_render,
+    .on_event = kp_eff_ripple_event,
+    .set_active = kp_eff_ripple_set_active,
+    .reset = kp_eff_ripple_reset,
+};
 
 #define KP_EFF_RIPPLE_DEFINE(inst)                                             \
   static const struct kp_eff_ripple_config kp_eff_ripple_##inst##_cfg = {      \
@@ -161,8 +184,8 @@ static void kp_eff_ripple_event(const struct device *dev,
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_ripple_render,                \
-                       kp_eff_ripple_event, kp_eff_ripple_##inst)
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_ripple_callbacks,            \
+                       kp_eff_ripple_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_RIPPLE_DEFINE)
 

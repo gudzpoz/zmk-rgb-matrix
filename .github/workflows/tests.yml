@@ -84,6 +84,12 @@ jobs:
           python3 tests/unit/test_singleton_split.py
           python3 tests/unit/test_private_events.py
 
+      - name: Effect timing and lifecycle tests
+        run: |
+          python3 tests/unit/test_effect_timing.py
+          python3 tests/unit/test_lifecycle.py
+          python3 tests/unit/test_overlay_gate.py
+
       - name: Output gate tests
         run: python3 tests/unit/test_output_gate.py
 

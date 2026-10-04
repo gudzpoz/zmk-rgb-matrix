@@ -19,7 +19,6 @@
 
 #include <zephyr/sys/util.h>
 
-#include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_matrix_math.h>
 
@@ -46,7 +45,10 @@ struct kp_eff_reactive_config {
 struct kp_eff_reactive_data {
   struct kp_rgb_effect_common_data common;
 #if KP_LED_COUNT > 0
+  struct kp_rgb_key_event pending[16];
+  size_t pending_count;
   uint8_t levels[KP_LED_COUNT];
+  uint32_t remainder[KP_LED_COUNT];
 #endif
 };
 
@@ -93,15 +95,45 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
 }
 #endif /* KP_LED_COUNT > 0 */
 
-static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame *f) {
+#if KP_LED_COUNT > 0
+static void kp_eff_reactive_apply(const struct device *dev, const struct kp_rgb_key_event *ev);
+
+static void kp_eff_reactive_advance(const struct device *dev, uint32_t elapsed_ms) {
+  if (elapsed_ms == 0) {
+    return;
+  }
+  struct kp_eff_reactive_data *data = dev->data;
+  uint32_t period = kp_rgb_effect_period(dev);
+  uint64_t elapsed = MIN(elapsed_ms, period);
+  for (size_t i = 0; i < KP_LED_COUNT; i++) {
+    uint64_t total = elapsed * 255u + data->remainder[i];
+    uint64_t loss = total / period;
+    data->levels[i] = loss >= data->levels[i] ? 0 : data->levels[i] - loss;
+    data->remainder[i] = data->levels[i] ? total % period : 0;
+  }
+}
+#endif
+
+static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb_frame *f) {
 #if KP_LED_COUNT == 0
   ARG_UNUSED(dev);
   ARG_UNUSED(f);
+  return false;
 #else
   struct kp_eff_reactive_data *data = dev->data;
   const struct kp_eff_reactive_config *cfg = dev->config;
-  uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t decay = MAX(255u * f->elapsed / period, 1u);
+  int64_t end_ms = MAX(f->now_ms, 0);
+  int64_t cursor = end_ms - (int64_t)MIN((uint64_t)end_ms, f->elapsed_ms);
+  for (size_t i = 0; i < data->pending_count; i++) {
+    const struct kp_rgb_key_event *ev = &data->pending[i];
+    int64_t event_ms = CLAMP(ev->timestamp_ms, cursor, end_ms);
+    kp_eff_reactive_advance(dev, (uint32_t)(event_ms - cursor));
+    kp_eff_reactive_apply(dev, ev);
+    cursor = event_ms;
+  }
+  kp_eff_reactive_advance(dev, (uint32_t)(end_ms - cursor));
+  data->pending_count = 0;
+  bool evolving = false;
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
@@ -109,6 +141,7 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
 
   for (size_t i = 0; i < f->count; i++) {
     uint8_t level = data->levels[i];
+    evolving |= level != 0;
     uint16_t hue = base.h;
     if (cfg->palette == DT_ENUM_CONST(palette, gradient)) {
       hue = (uint16_t)((base.h + (uint32_t)f->coords[i].x * KP_RGB_HUE_MAX / span) %
@@ -121,23 +154,14 @@ static void kp_eff_reactive_render(const struct device *dev, struct kp_rgb_frame
     struct kp_rgb_hsb hsb = {.h = hue, .s = base.s};
     hsb.b = MAX((uint8_t)((uint32_t)base.b * level / 255u), floor_b);
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
-
-    /* Decay after rendering so a fresh hit shows at full brightness. */
-    data->levels[i] = level > decay ? (uint8_t)(level - decay) : 0;
   }
+  return evolving;
 #endif /* KP_LED_COUNT > 0 */
 }
 
-static void kp_eff_reactive_event(const struct device *dev,
-                                  const struct zmk_position_state_changed *ev) {
-#if KP_LED_COUNT == 0
-  ARG_UNUSED(dev);
-  ARG_UNUSED(ev);
-#else
-  if (!ev->state) {
-    return; /* only a press starts a fade */
-  }
-
+#if KP_LED_COUNT > 0
+static void kp_eff_reactive_apply(const struct device *dev,
+                                  const struct kp_rgb_key_event *ev) {
   struct kp_eff_reactive_data *data = dev->data;
   const struct kp_eff_reactive_config *cfg = dev->config;
   size_t led = kp_rgb_led_for_position(ev->position);
@@ -150,6 +174,7 @@ static void kp_eff_reactive_event(const struct device *dev,
    * multi-press modes accumulate several hits additively. */
   if (!cfg->multi) {
     memset(data->levels, 0, sizeof(data->levels));
+    memset(data->remainder, 0, sizeof(data->remainder));
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
@@ -166,8 +191,44 @@ static void kp_eff_reactive_event(const struct device *dev,
       data->levels[i] = contrib;
     }
   }
-#endif /* KP_LED_COUNT > 0 */
 }
+#endif
+
+static bool kp_eff_reactive_event(const struct device *dev, const struct kp_rgb_key_event *ev) {
+#if KP_LED_COUNT > 0
+  struct kp_eff_reactive_data *data = dev->data;
+  if (!ev->pressed || kp_rgb_led_coord(kp_rgb_led_for_position(ev->position)) == NULL ||
+      data->pending_count == 16) {
+    return false;
+  }
+  data->pending[data->pending_count++] = *ev;
+  return true;
+#else
+  ARG_UNUSED(dev);
+  ARG_UNUSED(ev);
+  return false;
+#endif
+}
+
+static void kp_eff_reactive_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_reactive_data *data = dev->data;
+  struct kp_rgb_effect_common_data common = data->common;
+  *data = (struct kp_eff_reactive_data){.common = common};
+}
+
+static void kp_eff_reactive_set_active(const struct device *dev, bool active, int64_t now_ms) {
+  if (!active) {
+    kp_eff_reactive_reset(dev, now_ms);
+  }
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
+    .render = kp_eff_reactive_render,
+    .on_event = kp_eff_reactive_event,
+    .set_active = kp_eff_reactive_set_active,
+    .reset = kp_eff_reactive_reset,
+};
 
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
@@ -187,8 +248,8 @@ static void kp_eff_reactive_event(const struct device *dev,
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_reactive_render,              \
-                       kp_eff_reactive_event, kp_eff_reactive_##inst)
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_reactive_callbacks,          \
+                       kp_eff_reactive_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_REACTIVE_DEFINE)
 

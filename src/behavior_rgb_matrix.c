@@ -208,6 +208,7 @@ int kp_rgb_select_effect(uint16_t index) {
   kp_rgb_matrix_lock();
   kp_rgb_controller.effect_index = index;
   kp_rgb_controller.state.active_fx = kp_rgb_effect_at(index);
+  zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();
   return 0;
 }

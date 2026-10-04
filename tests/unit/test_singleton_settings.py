@@ -26,8 +26,8 @@ MOCKS = r'''
 #define SYS_INIT(...)
 #define K_MSEC(x) (x)
 #define ZMK_ACTIVITY_ACTIVE 0
-static unsigned flushes;
-static void zmk_rgb_matrix_flush(void) { flushes++; }
+static unsigned resets;
+static void kp_rgb_request_runtime_reset_locked(void) { assert(held); resets++; zmk_rgb_matrix_flush(); }
 struct k_work { void (*handler)(struct k_work *); };
 struct k_work_delayable { struct k_work work; };
 struct k_work_sync { int unused; };
@@ -123,7 +123,7 @@ int main(void) {
     assert(saves == saves_before && !held);
     assert(!pending && !strcmp(deleted_path,"keypaw/rgb_matrix/state"));
     assert(kp_rgb_selected_effect() == 0 && data[0].color.h == 10);
-    assert(reconciled_user_on && kp_rgb_controller.state.user_on && flushes);
+    assert(reconciled_user_on && kp_rgb_controller.state.user_on && flushes && resets == 1);
     puts("singleton settings namespace/load/save/reset passed");
     return 0;
 }

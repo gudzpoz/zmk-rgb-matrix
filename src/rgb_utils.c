@@ -74,7 +74,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
 #define KP_OVERLAY_SLOTS MAX(1, KP_RGB_OVERLAY_COUNT)
 
 static const struct device *kp_overlay_registry[KP_OVERLAY_SLOTS];
-static volatile uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
+static uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
@@ -104,15 +104,21 @@ size_t kp_rgb_overlay_count(void) { return KP_RGB_OVERLAY_COUNT; }
 uint16_t kp_rgb_overlay_word_count(void) { return KP_RGB_OVERLAY_WORDS; }
 
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value) {
-  if (word >= KP_RGB_OVERLAY_WORDS || kp_overlay_state[word] == value) {
-    return false;
+  kp_rgb_matrix_lock();
+  bool changed = word < KP_RGB_OVERLAY_WORDS && kp_overlay_state[word] != value;
+  if (changed) {
+    kp_overlay_state[word] = value;
+    zmk_rgb_matrix_flush();
   }
-  kp_overlay_state[word] = value;
-  return true;
+  kp_rgb_matrix_unlock();
+  return changed;
 }
 
 uint16_t kp_rgb_overlay_get_word(uint16_t word) {
-  return word < KP_RGB_OVERLAY_WORDS ? kp_overlay_state[word] : 0;
+  kp_rgb_matrix_lock();
+  uint16_t value = word < KP_RGB_OVERLAY_WORDS ? kp_overlay_state[word] : 0;
+  kp_rgb_matrix_unlock();
+  return value;
 }
 
 bool kp_rgb_overlay_covers_all(const struct device *dev) {
@@ -124,6 +130,8 @@ bool kp_rgb_overlay_covers_all(const struct device *dev) {
 
 bool kp_rgb_overlay_gate(const struct device *dev) {
   const struct kp_rgb_overlay_common_data *data = dev->data;
+  const struct kp_rgb_overlay_common_config *cfg = dev->config;
+  if (cfg->opacity == 0 || (!cfg->all_leds && data->led_count == 0)) return false;
 
   if (data->local) {
     return data->gate;
@@ -148,6 +156,7 @@ void kp_rgb_overlay_conditions_init(void) {
 }
 
 bool kp_rgb_overlay_refresh(void) {
+  kp_rgb_matrix_lock();
   bool changed = false;
   uint16_t next[KP_RGB_OVERLAY_WORDS] = {0};
 
@@ -177,6 +186,7 @@ bool kp_rgb_overlay_refresh(void) {
   ARG_UNUSED(next);
 #endif
 
+  kp_rgb_matrix_unlock();
   return changed;
 }
 

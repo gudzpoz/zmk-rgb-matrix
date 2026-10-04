@@ -65,7 +65,7 @@ struct k_work {
  void (*handler)(struct k_work *); bool queued,running,scheduled;
  uint64_t due,order,deadline,schedule_order; unsigned runs;
 };
-static struct k_work kp_off_work, kp_tick_work, kp_pending_work;
+static struct k_work kp_off_work, kp_tick_work;
 struct k_timer {
  void (*handler)(struct k_timer *); bool active; uint64_t due; uint32_t period;
 };
@@ -74,21 +74,31 @@ static int timer_period,tick_submits;
 typedef _Atomic int atomic_t;
 #define atomic_get(p) atomic_load(p)
 #define atomic_set(p,v) atomic_store(p,v)
-struct device { const void *api; const char *name; };
+struct device { const void *api; const char *name; void *data; const void *config; };
+typedef void (*effect_visitor)(const struct device *dev, int64_t now_ms);
 struct led_rgb { uint8_t r,g,b; };
 struct kp_rgb_coord { uint16_t x,y; };
 struct kp_rgb_tuning { int sentinel; };
 struct kp_rgb_frame {
  const struct kp_rgb_tuning *tune; size_t count;
  const struct kp_rgb_coord *coords; struct led_rgb *pixels;
- uint32_t elapsed; uint16_t board_length,board_height; bool is_idle;
+ int64_t now_ms; uint32_t elapsed_ms; uint16_t board_length,board_height; bool is_idle;
 };
-struct zmk_position_state_changed { uint32_t position; bool state; };
+struct zmk_position_state_changed { uint32_t position; bool state; int64_t timestamp; };
+struct kp_rgb_key_event { uint32_t position; bool pressed; int64_t timestamp_ms; };
+struct kp_rgb_effect_runtime { int64_t last_render_ms; bool initialized,active,wanted,animating,reset_pending; };
+struct kp_rgb_effect_callbacks {
+ bool (*render)(const struct device *,const struct kp_rgb_frame *);
+ bool (*on_event)(const struct device *,const struct kp_rgb_key_event *);
+ void (*reset)(const struct device *,int64_t);
+ void (*set_active)(const struct device *,bool,int64_t);
+};
 struct kp_rgb_effect_api {
- void (*render)(const struct device *,struct kp_rgb_frame *);
+ const struct kp_rgb_effect_callbacks *callbacks;
+ struct kp_rgb_effect_runtime *runtime;
  const struct device *const *overlays; size_t overlays_len;
 };
-struct kp_rgb_overlay_api { void (*render)(const struct device *,struct kp_rgb_frame *); };
+struct kp_rgb_overlay_api { void (*render)(const struct device *,struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); };
 struct kp_rgb_controller {
  const struct device *dev;
  struct { bool user_on; const struct device *active_fx; } state;
@@ -112,12 +122,12 @@ struct k_spinlock { int unused; };
 typedef int k_spinlock_key_t;
 static struct k_spinlock kp_rgb_pending_lock;
 static bool inject_pending_press,pending_press_accepted;
-static bool kp_rgb_pending_push(const struct zmk_position_state_changed *ev);
+static bool kp_rgb_pending_push(const struct kp_rgb_key_event *ev);
 static int k_spin_lock(struct k_spinlock *l) {
  (void)l;
  if(inject_pending_press) {
   inject_pending_press=false;
-  const struct zmk_position_state_changed ev={.position=0,.state=true};
+  const struct kp_rgb_key_event ev={.position=0,.pressed=true};
   pending_press_accepted=kp_rgb_pending_push(&ev);
  }
  pthread_mutex_lock(&pending_lock);return 0;
@@ -127,16 +137,16 @@ static void k_spin_unlock(struct k_spinlock *l,int key) {
  (void)l; (void)key; pthread_mutex_unlock(&pending_lock);
  if(inject_after_unlock) {
   inject_after_unlock=false;
-  const struct zmk_position_state_changed ev={.position=0,.state=true};
+  const struct kp_rgb_key_event ev={.position=0,.pressed=true};
   post_release_accepted=kp_rgb_pending_push(&ev);
  }
 }
-static struct zmk_position_state_changed kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
+static struct kp_rgb_key_event kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
 static uint8_t kp_rgb_pending_head,kp_rgb_pending_tail;
 static uint32_t kp_rgb_pending_dropped;
 static atomic_t kp_rgb_output_allowed,kp_rgb_inhibited;
 static bool kp_rgb_output_ready,kp_rgb_black_pending;
-static uint32_t kp_rgb_black_retry_ms=100,last_tick;
+static uint32_t kp_rgb_black_retry_ms=100;
 static uint64_t now;
 static struct led_rgb pixels[KP_LED_COUNT];
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
@@ -152,13 +162,13 @@ static atomic_t transfer_entered,transfer_release,block_transfer;
 static atomic_t setter_entered,setter_done;
 #endif
 static uint32_t rendered_elapsed;
-static uint32_t k_uptime_get_32(void) { return now; }
+static int64_t k_uptime_get(void) { return now; }
 static bool k_is_in_isr(void) { return isr; }
 #define ZMK_ACTIVITY_ACTIVE 0
 static int zmk_activity_get_state(void) { return idle; }
-typedef struct { bool activity; } zmk_event_t;
+typedef struct { bool activity; const struct zmk_position_state_changed *position; } zmk_event_t;
 #define ZMK_EV_EVENT_BUBBLE 0
-static const struct zmk_position_state_changed *as_zmk_position_state_changed(const zmk_event_t *e) { (void)e; return NULL; }
+static const struct zmk_position_state_changed *as_zmk_position_state_changed(const zmk_event_t *e) { return e->position; }
 #if CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
 static const zmk_event_t *as_zmk_activity_state_changed(const zmk_event_t *e) { return e->activity ? e : NULL; }
 #endif
@@ -176,11 +186,18 @@ static bool device_is_ready(const struct device *d) { return d!=NULL && host_str
 void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
 bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
 void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
-static const struct device *const *kp_rgb_overlay_list(void) { return NULL; }
-static size_t kp_rgb_overlay_count(void) { return 0; }
-static bool kp_rgb_overlay_covers_all(const struct device *d) { (void)d;return false; }
-static bool kp_rgb_overlay_gate(const struct device *d) { (void)d;return true; }
-static void kp_rgb_deliver_position(const struct zmk_position_state_changed *e) { (void)e; assert(held);feedback++; }
+struct host_overlay { const struct device *child; bool gate,cover; };
+static const struct device *host_overlays[8];
+static size_t host_overlay_count;
+static const struct device *const *kp_rgb_overlay_list(void) { return host_overlays; }
+static size_t kp_rgb_overlay_count(void) { return host_overlay_count; }
+static bool kp_rgb_overlay_covers_all(const struct device *d) { return ((struct host_overlay *)d->data)->cover; }
+static bool kp_rgb_overlay_gate(const struct device *d) { return ((struct host_overlay *)d->data)->gate; }
+static void kp_rgb_deliver_position(const struct kp_rgb_key_event *e);
+static bool kp_rgb_pending_pop(struct kp_rgb_key_event *e);
+static bool kp_rgb_pending_available(void);
+static uint32_t kp_rgb_pending_take_dropped(void);
+static size_t kp_rgb_led_for_position(uint32_t p) { return p < KP_LED_COUNT ? p : SIZE_MAX; }
 static void (*host_render_hook)(void);
 struct host_transfer {
  uint64_t at_ms; int result; struct led_rgb pixels[KP_LED_COUNT];
@@ -189,17 +206,25 @@ static struct host_transfer host_transfers[1024];
 static size_t host_transfer_count;
 static bool host_mutate_output = true;
 static bool host_allow_color_failure;
-static void render(const struct device *d,struct kp_rgb_frame *f) {
- (void)d; assert(held); renders++;rendered_elapsed=f->elapsed;
+static bool render(const struct device *d,const struct kp_rgb_frame *f) {
+ (void)d; assert(held); renders++;rendered_elapsed=f->elapsed_ms;
  for(size_t n=0;n<f->count;n++) f->pixels[n].r=17;
  if(host_render_hook) host_render_hook();
  if(inhibit_from_render) {
   inhibit_from_render=false;
   assert(zmk_rgb_matrix_set_inhibited(true)==0);
  }
+ return true;
 }
-static const struct kp_rgb_effect_api api={.render=render};
+static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) { (void)d;(void)e;assert(held);feedback++;return true; }
+static struct kp_rgb_effect_runtime runtime;
+static const struct kp_rgb_effect_callbacks callbacks={.render=render,.on_event=on_event};
+static const struct kp_rgb_effect_api api={.callbacks=&callbacks,.runtime=&runtime};
 static const struct device fx={.api=&api};
+static const struct device *host_effects[8]={&fx};
+static size_t host_effect_count=1;
+static size_t kp_rgb_effect_count(void) { return host_effect_count; }
+static const struct device *kp_rgb_effect_at(size_t n) { return host_effects[n]; }
 static int led_strip_update_rgb(const struct device *d,struct led_rgb *p,size_t n) {
  (void)d; assert(held);assert(n>0);writes++;
  bool color=false;
@@ -234,13 +259,16 @@ static void host_activity(bool active) {
 
 FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
+    "kp_rgb_each_effect", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
+    "kp_rgb_request_runtime_reset_locked", "kp_rgb_reconcile_effect", "kp_rgb_effect_render",
     "kp_rgb_matrix_tick_handler", "kp_start_timer",
     "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_matrix_tick",
     "kp_rgb_request_black_locked", "kp_rgb_matrix_off_handler",
     "kp_rgb_reconcile_power_locked",
     "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
     "zmk_rgb_matrix_flush", "kp_rgb_pending_push",
-    "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_matrix_pending_handler",
+    "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_pending_available",
+    "kp_rgb_deliver_event", "kp_rgb_deliver_position",
     "kp_rgb_matrix_event_listener", "kp_rgb_set_user_on", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
     "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "kp_rgb_matrix_init",
 ]

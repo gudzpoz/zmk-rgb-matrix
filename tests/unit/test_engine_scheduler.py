@@ -19,7 +19,6 @@ static void fixture(bool on, bool inhibit) {
     assert(pthread_mutexattr_destroy(&attr) == 0);
     kp_tick_work.handler = kp_rgb_matrix_tick;
     kp_off_work.handler = kp_rgb_matrix_off_handler;
-    kp_pending_work.handler = kp_rgb_matrix_pending_handler;
     kp_tick_timer.handler = kp_rgb_matrix_tick_handler;
     ctx.dev = &dummy;
     ctx.state.user_on = on;
@@ -100,9 +99,9 @@ int main(int argc, char **argv) {
         fixture(true, false);
         host_run_ready();
         for (int i = 0; i < 100; i++) zmk_rgb_matrix_flush();
-        assert(kp_tick_work.runs == (KP_LED_COUNT ? 1 : 0) && tick_submits == (KP_LED_COUNT ? 101 : 0));
+        assert(kp_tick_work.runs == (KP_LED_COUNT ? 1 : 0) && tick_submits == (KP_LED_COUNT ? 102 : 100));
         host_run_ready();
-        assert(kp_tick_work.runs == (KP_LED_COUNT ? 2 : 0));
+        assert(kp_tick_work.runs == (KP_LED_COUNT ? 2 : 1));
         host_run_until(8);
         zmk_rgb_matrix_flush();
         host_run_ready();
@@ -110,12 +109,12 @@ int main(int argc, char **argv) {
         if (KP_LED_COUNT) assert(kp_tick_timer.due == 16);
         host_run_until(16);
         if (KP_LED_COUNT) assert(rendered_elapsed == 8);
-        assert(kp_tick_work.runs == (KP_LED_COUNT ? 4 : 0));
+        assert(kp_tick_work.runs == (KP_LED_COUNT ? 4 : 2));
     } else if (!strcmp(name, "starved")) {
         fixture(true, false);
         host_run_ready();
         host_elapse_to(160);
-        assert(host_timer_fires == (KP_LED_COUNT ? 11 : 0) && tick_submits == (KP_LED_COUNT ? 11 : 0));
+        assert(host_timer_fires == (KP_LED_COUNT ? 11 : 0) && tick_submits == (KP_LED_COUNT ? 12 : 0));
         assert(kp_tick_work.runs == (KP_LED_COUNT ? 1 : 0));
         host_run_ready();
         assert(kp_tick_work.runs == (KP_LED_COUNT ? 2 : 0));
@@ -150,7 +149,7 @@ int main(int argc, char **argv) {
         fixture(true, false);
         host_run_ready();
         int rendered_before = renders;
-        struct zmk_position_state_changed ev = {.position = 0, .state = true};
+        struct kp_rgb_key_event ev = {.position = 0, .pressed = true};
         if (!KP_LED_COUNT) {
             assert(!kp_rgb_pending_push(&ev));
             assert(!feedback && !kp_rgb_pending_dropped);
@@ -158,16 +157,16 @@ int main(int argc, char **argv) {
         }
         for (int i = 0; i < KP_RGB_EVENT_QUEUE_LEN - 1; i++) {
             assert(kp_rgb_pending_push(&ev));
-            k_work_submit_to_queue(NULL, &kp_pending_work);
+            zmk_rgb_matrix_flush();
         }
         assert(!kp_rgb_pending_push(&ev) && kp_rgb_pending_dropped == 1);
         host_lock_failures = 1;
         host_run_ready();
-        assert(kp_pending_work.runs == 2 && feedback == KP_RGB_EVENT_QUEUE_LEN - 1);
-        assert(!kp_rgb_pending_dropped && renders == rendered_before);
+        assert(kp_tick_work.runs == 3 && feedback == KP_RGB_EVENT_QUEUE_LEN - 1);
+        assert(!kp_rgb_pending_dropped && renders == rendered_before + 1);
         assert(!kp_tick_work.queued);
         assert(kp_rgb_pending_push(&ev));
-        k_work_submit_to_queue(NULL, &kp_pending_work);
+        zmk_rgb_matrix_flush();
         assert(zmk_rgb_matrix_set_inhibited(true) == 0);
         host_run_ready();
         assert(feedback == KP_RGB_EVENT_QUEUE_LEN - 1);
@@ -246,7 +245,7 @@ int main(int argc, char **argv) {
         host_lock_failures = 1;
         zmk_rgb_matrix_flush();
         host_run_ready();
-        assert(kp_tick_work.runs == (KP_LED_COUNT ? 3 : 0));
+        assert(kp_tick_work.runs == (KP_LED_COUNT ? 3 : 2));
     } else if (!strcmp(name, "idle-policy")) {
         fixture(true, false);
         host_run_until(7);
@@ -256,7 +255,7 @@ int main(int argc, char **argv) {
         assert(logical == !CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE);
         assert(ctx.state.user_on);
         assert(kp_tick_timer.active == (logical && KP_LED_COUNT > 0));
-        if (logical && KP_LED_COUNT) assert(kp_tick_timer.due == 16 && last_tick == 0);
+        if (logical && KP_LED_COUNT) assert(kp_tick_timer.due == 16 && runtime.last_render_ms == 0);
         host_run_until(16);
         assert(renders == (KP_LED_COUNT ? (logical ? 2 : 1) : 0));
         host_activity(true);
@@ -268,11 +267,11 @@ int main(int argc, char **argv) {
         host_run_ready();
         host_run_until(7);
         uint64_t due = kp_tick_timer.due;
-        uint32_t tick = last_tick;
+        int64_t tick = runtime.last_render_ms;
         assert(zmk_rgb_matrix_on() == 0);
         assert(zmk_rgb_matrix_set_inhibited(false) == 0);
         host_activity(true);
-        assert(kp_tick_timer.due == due && last_tick == tick);
+        assert(kp_tick_timer.due == due && runtime.last_render_ms == tick);
         host_run_until(16);
         if (KP_LED_COUNT) assert(rendered_elapsed == 16 && renders == 2);
     } else if (!strcmp(name, "intent")) {
@@ -295,13 +294,13 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name, "purge")) {
         fixture(true, false);
         host_run_ready();
-        const struct zmk_position_state_changed ev = {.position = 0, .state = true};
+        const struct kp_rgb_key_event ev = {.position = 0, .pressed = true};
         for (int idle_close = 0; idle_close < 2; idle_close++) {
             assert(kp_rgb_pending_push(&ev) == (KP_LED_COUNT > 0));
             if (idle_close) host_activity(false); else assert(zmk_rgb_matrix_off() == 0);
             assert(!kp_rgb_pending_push(&ev));
             if (idle_close) host_activity(true); else assert(zmk_rgb_matrix_on() == 0);
-            kp_rgb_matrix_pending_handler(NULL);
+            kp_rgb_matrix_tick(NULL);
             assert(!feedback);
         }
     } else if (!strcmp(name, "stale")) {
@@ -325,7 +324,7 @@ int main(int argc, char **argv) {
             else if (reason == 1) assert(zmk_rgb_matrix_on() == 0);
             else host_activity(true);
             host_run_ready();
-            if (KP_LED_COUNT) assert(rendered_elapsed == 0 && last_tick == resumed_at);
+            if (KP_LED_COUNT) assert(rendered_elapsed == 0 && runtime.last_render_ms == (int64_t)resumed_at);
             host_run_until(resumed_at + 16);
             if (KP_LED_COUNT) assert(rendered_elapsed == 16);
         }
@@ -333,7 +332,7 @@ int main(int argc, char **argv) {
         assert(!"unknown case");
     }
     assert(!polls && !refreshes && !dispatches);
-    if (!KP_LED_COUNT) assert(!kp_tick_timer.active && !tick_submits && !feedback);
+    if (!KP_LED_COUNT) assert(!kp_tick_timer.active && !feedback);
     printf("%s leds=%d time_ms=%llu timer_fires=%u tick_runs=%u polls=%d "
            "renders=%d transfers=%zu: passed\n", name, KP_LED_COUNT,
            (unsigned long long)now, host_timer_fires, kp_tick_work.runs,

@@ -60,11 +60,13 @@ static uint16_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
   }
   return (uint16_t)(position * hue_amplitude / span);
 }
-static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_breathe_render(const struct device *dev,
+                                  const struct kp_rgb_frame *f) {
   struct kp_eff_breathe_data *data = dev->data;
   const struct kp_eff_breathe_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t phase = data->phase_ms % period;
+  uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
+  data->phase_ms = phase;
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
@@ -80,8 +82,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
       hsb.h = (uint16_t)((base.h + offset) % KP_RGB_HUE_MAX);
       f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
     }
-    data->phase_ms = (phase + f->elapsed) % period;
-    return;
+    return true;
   }
 
   if (cfg->mode == DT_ENUM_CONST(mode, river)) {
@@ -94,8 +95,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
       hsb.b = b;
       f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
     }
-    data->phase_ms = (phase + f->elapsed) % period;
-    return;
+    return true;
   }
 
   /* BREATHING: whole board fades up and down. */
@@ -107,8 +107,19 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
     f->pixels[i] = rgb;
   }
 
-  data->phase_ms = (phase + f->elapsed) % period;
+  return true;
 }
+
+static void kp_eff_breathe_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_breathe_data *data = dev->data;
+  data->phase_ms = 0;
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_breathe_callbacks = {
+    .render = kp_eff_breathe_render,
+    .reset = kp_eff_breathe_reset,
+};
 
 #define KP_EFF_BREATHE_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45) >= 0 &&        \
@@ -130,7 +141,7 @@ static void kp_eff_breathe_render(const struct device *dev, struct kp_rgb_frame 
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_breathe_render, NULL,         \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_breathe_callbacks,           \
                        kp_eff_breathe_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_BREATHE_DEFINE)

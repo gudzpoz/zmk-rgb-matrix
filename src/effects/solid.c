@@ -24,7 +24,7 @@ struct kp_eff_solid_data {
   struct kp_rgb_effect_common_data common;
 };
 
-static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_solid_render(const struct device *dev, const struct kp_rgb_frame *f) {
   const struct kp_eff_solid_data *data = dev->data;
   const struct kp_eff_solid_config *cfg = dev->config;
   struct kp_rgb_hsb base = data->common.color;
@@ -36,7 +36,7 @@ static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f
     for (size_t i = 0; i < f->count; i++) {
       f->pixels[i] = rgb;
     }
-    return;
+    return false;
   }
 
   /* Gradient: the hue sweeps the full wheel across one board axis. */
@@ -50,7 +50,12 @@ static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f
     hsb.h = (uint16_t)((base.h + pos * KP_RGB_HUE_MAX / span) % KP_RGB_HUE_MAX);
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
+  return false;
 }
+
+static const struct kp_rgb_effect_callbacks kp_eff_solid_callbacks = {
+    .render = kp_eff_solid_render,
+};
 
 #define KP_EFF_SOLID_DEFINE(inst)                                              \
   static const struct kp_eff_solid_config kp_eff_solid_##inst##_cfg = {        \
@@ -65,7 +70,7 @@ static void kp_eff_solid_render(const struct device *dev, struct kp_rgb_frame *f
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_solid_render, NULL,           \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_solid_callbacks,             \
                        kp_eff_solid_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_SOLID_DEFINE)

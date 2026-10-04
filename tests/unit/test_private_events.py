@@ -16,9 +16,14 @@ MOCKS = r'''
 #include <stddef.h>
 #include <stdio.h>
 struct device { const void *api; void *data; const void *config; };
-struct zmk_position_state_changed { uint32_t position; bool state; };
+struct kp_rgb_key_event { uint32_t position; bool pressed; int64_t timestamp_ms; };
+struct kp_rgb_effect_runtime { bool active; };
+struct kp_rgb_effect_callbacks {
+    bool (*on_event)(const struct device *, const struct kp_rgb_key_event *);
+};
 struct kp_rgb_effect_api {
-    void (*on_event)(const struct device *, const struct zmk_position_state_changed *);
+    const struct kp_rgb_effect_callbacks *callbacks;
+    struct kp_rgb_effect_runtime *runtime;
     const struct device *const *overlays;
     size_t overlays_len;
 };
@@ -29,12 +34,16 @@ static bool kp_rgb_output_allowed;
 static bool gates[2] = {true,true};
 static bool mapped = true;
 static unsigned counts[3];
-static void on_event(const struct device *dev, const struct zmk_position_state_changed *ev) {
-    assert(ev->position == 17); (*(unsigned *)dev->data)++;
+static bool on_event(const struct device *dev, const struct kp_rgb_key_event *ev) {
+    assert(ev->position == 17 && ev->timestamp_ms == 123); (*(unsigned *)dev->data)++; return true;
 }
 static const struct device *event_target(const struct device *dev) { return dev->config; }
-static const struct kp_rgb_effect_api child_api = {.on_event = on_event};
-static const struct device children[] = {{&child_api,&counts[1],NULL},{&child_api,&counts[2],NULL}};
+static const struct kp_rgb_effect_callbacks callbacks = {.on_event = on_event};
+static struct kp_rgb_effect_runtime states[3] = {{true},{true},{true}};
+static const struct kp_rgb_effect_api child_api[] = {
+    {.callbacks=&callbacks,.runtime=&states[1]}, {.callbacks=&callbacks,.runtime=&states[2]}
+};
+static const struct device children[] = {{&child_api[0],&counts[1],NULL},{&child_api[1],&counts[2],NULL}};
 static const struct kp_rgb_overlay_api overlay_api = {.event_target = event_target};
 static const struct device overlays[] = {
     {&overlay_api,&gates[0],&children[0]}, {&overlay_api,&gates[1],&children[1]}
@@ -48,11 +57,11 @@ static size_t kp_rgb_led_for_position(uint32_t position) { (void)position; retur
 
 TESTS = r'''
 int main(void) {
-    struct kp_rgb_effect_api base_api = {.on_event=on_event};
+    struct kp_rgb_effect_api base_api = {.callbacks=&callbacks,.runtime=&states[0]};
     const struct device base = {&base_api,&counts[0],NULL};
     kp_rgb_output_allowed = true;
     kp_rgb_controller.state.active_fx = &base;
-    const struct zmk_position_state_changed event = {17,true};
+    const struct kp_rgb_key_event event = {17,true,123};
     kp_rgb_deliver_position(&event);
     assert(counts[0] == 1 && counts[1] == 1 && counts[2] == 1);
     gates[0] = false;

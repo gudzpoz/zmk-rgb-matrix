@@ -54,10 +54,10 @@ struct kp_eff_static_data {
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_static_render, NULL,          \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_static_callbacks,            \
                        kp_eff_static_##inst)
 
-static void kp_eff_static_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_static_render(const struct device *dev, const struct kp_rgb_frame *f) {
   const struct kp_eff_static_config *cfg = dev->config;
   uint8_t pct = kp_rgb_brightness_pct(f);
 
@@ -66,7 +66,12 @@ static void kp_eff_static_render(const struct device *dev, struct kp_rgb_frame *
     struct led_rgb rgb = kp_hex_to_rgb(hex);
     f->pixels[i] = kp_rgb_rgb_scale(rgb, pct);
   }
+  return false;
 }
+
+static const struct kp_rgb_effect_callbacks kp_eff_static_callbacks = {
+    .render = kp_eff_static_render,
+};
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_STATIC_DEFINE)
 

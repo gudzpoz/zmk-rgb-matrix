@@ -28,10 +28,11 @@ struct kp_eff_spectrum_data {
 
 /* CYCLE_ALL: every LED shares the same hue cycle. */
 
-static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_spectrum_render(const struct device *dev, const struct kp_rgb_frame *f) {
   struct kp_eff_spectrum_data *data = dev->data;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t phase = data->phase_ms % period;
+  uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
+  data->phase_ms = phase;
   struct kp_rgb_hsb hsb = data->common.color;
   uint8_t pct = kp_rgb_brightness_pct(f);
 
@@ -42,8 +43,19 @@ static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame
     f->pixels[i] = rgb;
   }
 
-  data->phase_ms = (phase + f->elapsed) % period;
+  return true;
 }
+
+static void kp_eff_spectrum_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_spectrum_data *data = dev->data;
+  data->phase_ms = 0;
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_spectrum_callbacks = {
+    .render = kp_eff_spectrum_render,
+    .reset = kp_eff_spectrum_reset,
+};
 
 #define KP_EFF_SPECTRUM_DEFINE(inst)                                           \
   static const struct kp_eff_spectrum_config kp_eff_spectrum_##inst##_cfg = {  \
@@ -57,7 +69,7 @@ static void kp_eff_spectrum_render(const struct device *dev, struct kp_rgb_frame
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_spectrum_render, NULL,        \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_spectrum_callbacks,          \
                        kp_eff_spectrum_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_SPECTRUM_DEFINE)

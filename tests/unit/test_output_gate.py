@@ -35,15 +35,15 @@ int main(void) {
  assert(zmk_rgb_matrix_on()==-EBUSY && !ctx.state.user_on);
  host_try_lock_error=0;
  assert(zmk_rgb_matrix_on()==0 && ctx.state.user_on);
- struct zmk_position_state_changed ev={.position=0,.state=true};
+ struct kp_rgb_key_event ev={.position=0,.pressed=true};
  assert(!kp_rgb_pending_push(&ev) && !timer_period);
  zmk_rgb_matrix_flush();kp_rgb_matrix_tick_handler(&kp_tick_timer);kp_rgb_matrix_tick(NULL);
- assert(!kp_rgb_output_ready && !tick_submits && !renders && !writes);
+ assert(!kp_rgb_output_ready && tick_submits==1 && !renders && !writes);
  if(KP_LED_COUNT) {
   host_strip_ready=false;
   assert(kp_rgb_matrix_init()==-ENODEV);
   zmk_rgb_matrix_flush();kp_rgb_matrix_tick(NULL);
-  assert(!kp_rgb_output_ready && !tick_submits && !renders && !writes);
+  assert(!kp_rgb_output_ready && tick_submits==2 && !renders && !writes);
   host_strip_ready=true;
  }
  assert(zmk_rgb_matrix_set_inhibited(true)==0);
@@ -79,12 +79,12 @@ int main(void) {
  assert(zmk_rgb_matrix_is_inhibited() && !colored);
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
  now+=16;kp_rgb_matrix_tick(NULL);
- if(KP_LED_COUNT) assert(renders==1 && rendered_elapsed==16);
+ if(KP_LED_COUNT) assert(renders==1 && rendered_elapsed==0);
  assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));
  assert(zmk_rgb_matrix_set_inhibited(true)==0);
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
- kp_rgb_matrix_pending_handler(NULL);assert(feedback==0);
- assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));kp_rgb_matrix_pending_handler(NULL);assert(feedback==(KP_LED_COUNT>0));
+ kp_rgb_matrix_tick(NULL);assert(feedback==0);
+ assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));kp_rgb_matrix_tick(NULL);assert(feedback==(KP_LED_COUNT>0));
  int before=writes;kp_rgb_matrix_off_handler(NULL);assert(writes==before);
  // Normal OFF failure must retry even after the driver's buffer mutation.
  assert(zmk_rgb_matrix_off()==0);
@@ -141,7 +141,7 @@ int main(void) {
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
  if(KP_LED_COUNT) assert(!inject_pending_press);
  inject_pending_press=false;
- struct zmk_position_state_changed received;
+ struct kp_rgb_key_event received;
  assert(kp_rgb_pending_pop(&received)==pending_press_accepted);
  assert(kp_rgb_pending_push(&ev)==(KP_LED_COUNT>0));
  assert(kp_rgb_pending_pop(&received)==(KP_LED_COUNT>0));

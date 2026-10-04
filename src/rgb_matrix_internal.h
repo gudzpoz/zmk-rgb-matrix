@@ -51,6 +51,8 @@ void kp_rgb_matrix_unlock(void);
 
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);
+void kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
+void kp_rgb_request_runtime_reset_locked(void);
 
 int kp_rgb_resolve_active(void);
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);

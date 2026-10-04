@@ -131,8 +131,10 @@ int kp_rgb_save_state(void) {
 }
 
 static void kp_rgb_restore_defaults(void) {
+  kp_rgb_matrix_lock();
   (void)kp_rgb_apply_defaults();
-  zmk_rgb_matrix_flush();
+  kp_rgb_request_runtime_reset_locked();
+  kp_rgb_matrix_unlock();
 }
 
 #if IS_ENABLED(CONFIG_SETTINGS)

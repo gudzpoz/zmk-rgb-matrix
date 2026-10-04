@@ -9,6 +9,16 @@ compatible: "keypaw,rgb-matrix-starlight"
 include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
 
 properties:
+  step-interval-ms:
+    type: int
+    default: 32
+    description: |
+      Interval in milliseconds (1..65535) between independent per-LED trials
+      with a 4% probability of changing the target brightness, not guaranteed
+      changes. Independent of renderer cadence; duration controls the smooth
+      brightness fade. At most eight trials run per render; excess trials are
+      skipped without discarding elapsed fade time.
+
   smooth:
     type: boolean
     required: false

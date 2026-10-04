@@ -10,7 +10,7 @@
  */
 static struct k_work host_probe_work;
 static struct k_work *const host_works[] = {
-    &kp_tick_work, &kp_off_work, &kp_pending_work, &host_probe_work,
+    &kp_tick_work, &kp_off_work, &host_probe_work,
 };
 static uint64_t host_order;
 static unsigned host_timer_fires;

@@ -66,7 +66,7 @@ static int32_t kp_eff_digital_rain_start_q8(uint16_t min_y, uint16_t range_y) {
  * the columns drift apart), which makes `duration` mean "shorter is faster". */
 static int32_t kp_eff_digital_rain_speed_q8(uint16_t range_y, uint32_t period) {
   uint32_t frac = 50u + (sys_rand32_get() % 100u);
-  uint32_t sp_q8 = (uint32_t)range_y * KP_RAIN_Q8 * frac / (period * 50u);
+  uint32_t sp_q8 = (uint64_t)range_y * KP_RAIN_Q8 * frac / ((uint64_t)period * 50u);
   return (int32_t)MAX(sp_q8, 1u);
 }
 
@@ -74,7 +74,7 @@ static int32_t kp_eff_digital_rain_speed_q8(uint16_t range_y, uint32_t period) {
  * after the engine has resolved `coords`, so it is done lazily on first render.
  */
 static void kp_eff_digital_rain_seed(const struct device *dev,
-                                     struct kp_rgb_frame *f) {
+                                     const struct kp_rgb_frame *f) {
   struct kp_eff_digital_rain_data *data = dev->data;
   uint16_t min_x = 0xFFFF, max_x = 0, min_y = 0xFFFF, max_y = 0;
 
@@ -113,12 +113,15 @@ static void kp_eff_digital_rain_seed(const struct device *dev,
 }
 #endif /* KP_LED_COUNT > 0 */
 
-static void kp_eff_digital_rain_render(const struct device *dev,
-                                       struct kp_rgb_frame *f) {
+static bool kp_eff_digital_rain_render(const struct device *dev,
+                                       const struct kp_rgb_frame *f) {
 #if KP_LED_COUNT == 0
   ARG_UNUSED(dev);
   ARG_UNUSED(f);
 #else
+  if (f->count == 0) {
+    return true;
+  }
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t pct = kp_rgb_brightness_pct(f);
@@ -136,11 +139,33 @@ static void kp_eff_digital_rain_render(const struct device *dev,
   int32_t recycle_q8 = KP_RAIN_TO_Q8((int32_t)data->max_y + (int32_t)trail);
   uint32_t period = kp_rgb_effect_period(dev);
   for (uint8_t c = 0; c < KP_DIGITAL_COLS; c++) {
-    data->head_q8[c] += data->speed_q8[c] * (int32_t)f->elapsed;
-    if (data->head_q8[c] > recycle_q8) {
-      data->head_q8[c] = kp_eff_digital_rain_start_q8(data->min_y, range_y);
-      data->speed_q8[c] = kp_eff_digital_rain_speed_q8(range_y, period);
+    uint32_t remaining_ms = f->elapsed_ms;
+    int64_t head = data->head_q8[c];
+    int32_t speed = data->speed_q8[c];
+
+    for (uint8_t recycles = 0; recycles < 8 && remaining_ms > 0 && speed > 0;
+         recycles++) {
+      int64_t crossing_ms = ((int64_t)recycle_q8 - head) / speed + 1;
+      if (crossing_ms > remaining_ms) {
+        break;
+      }
+
+      remaining_ms -= (uint32_t)crossing_ms;
+      head = kp_eff_digital_rain_start_q8(data->min_y, range_y);
+      speed = kp_eff_digital_rain_speed_q8(range_y, period);
     }
+
+    head += (int64_t)speed * remaining_ms;
+    if (head > recycle_q8) {
+      /* After eight random recycles, deliberately wrap the remaining distance
+       * over a fixed inclusive Q8 span, retaining speed without more RNG calls.
+       * This bounds work without discarding elapsed time. */
+      int64_t restart_q8 = KP_RAIN_TO_Q8((int32_t)data->min_y - range_y);
+      int64_t span_q8 = (int64_t)recycle_q8 - restart_q8 + 1;
+      head = restart_q8 + (head - restart_q8) % span_q8;
+    }
+    data->head_q8[c] = (int32_t)head;
+    data->speed_q8[c] = speed;
   }
 
   for (size_t i = 0; i < f->count; i++) {
@@ -162,7 +187,20 @@ static void kp_eff_digital_rain_render(const struct device *dev,
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
 #endif /* KP_LED_COUNT > 0 */
+  return true;
 }
+
+static void kp_eff_digital_rain_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_digital_rain_data *data = dev->data;
+  struct kp_rgb_effect_common_data common = data->common;
+  *data = (struct kp_eff_digital_rain_data){.common = common};
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_digital_rain_callbacks = {
+    .render = kp_eff_digital_rain_render,
+    .reset = kp_eff_digital_rain_reset,
+};
 
 #define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                       \
   static const struct kp_eff_digital_rain_config                               \
@@ -177,7 +215,7 @@ static void kp_eff_digital_rain_render(const struct device *dev,
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 4000),    \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_digital_rain_render, NULL,    \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_digital_rain_callbacks,      \
                        kp_eff_digital_rain_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_DIGITAL_RAIN_DEFINE)

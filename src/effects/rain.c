@@ -37,6 +37,7 @@ DEFINE_DT_ENUM(kp_rain_mode_t, mode, pixel, flow, drops, jellybean, fractal);
 struct kp_eff_rain_config {
   struct kp_rgb_effect_common_config common;
   kp_rain_mode_t mode;
+  uint16_t step_interval_ms;
 };
 
 struct kp_eff_rain_data {
@@ -45,9 +46,12 @@ struct kp_eff_rain_data {
   uint8_t val[KP_LED_COUNT];  /* current brightness 0..255 */
   uint16_t hue[KP_LED_COUNT]; /* per-LED hue, 0..KP_RGB_HUE_MAX */
   uint8_t sat[KP_LED_COUNT];  /* per-LED saturation while lit */
+  uint32_t fade_remainder[KP_LED_COUNT];
 #endif
+  uint32_t step_remainder_ms;
   uint32_t flow_idx;
-  uint32_t phase_ms; /* fractal / drops phase */
+  uint32_t phase_ms;
+  uint32_t drop_remainder; /* elapsed_ms * 64, modulo duration */
   bool drops_seeded;
 };
 
@@ -64,9 +68,27 @@ static uint16_t kp_rain_drops_hue(uint16_t base_hue) {
   }
   return (uint16_t)hue;
 }
+
+static void kp_eff_rain_fade(struct kp_eff_rain_data *data, size_t count,
+                             uint32_t elapsed_ms, uint32_t period) {
+  if (elapsed_ms == 0) {
+    return;
+  }
+  for (size_t i = 0; i < count; i++) {
+    uint64_t progress = (uint64_t)elapsed_ms * 255u + data->fade_remainder[i];
+    uint64_t decay = progress / period;
+    if (decay >= data->val[i]) {
+      data->val[i] = 0;
+      data->fade_remainder[i] = 0;
+    } else {
+      data->val[i] -= decay;
+      data->fade_remainder[i] = progress % period;
+    }
+  }
+}
 #endif /* KP_LED_COUNT > 0 */
 
-static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_frame *f) {
 #if KP_LED_COUNT == 0
   ARG_UNUSED(dev);
   ARG_UNUSED(f);
@@ -74,64 +96,61 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
   struct kp_eff_rain_data *data = dev->data;
   const struct kp_eff_rain_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t decay = MAX(255u * f->elapsed / period, 1u);
   uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
   uint16_t bl = MAX(f->board_length, 1u);
 
-  /* RAINDROPS never dims: it re-hues one key at a time and stays lit. */
-  if (cfg->mode != DT_ENUM_CONST(mode, drops)) {
+  if (f->count == 0) {
+    return true;
+  }
+  if (cfg->mode == DT_ENUM_CONST(mode, drops) && !data->drops_seeded) {
     for (size_t i = 0; i < f->count; i++) {
-      data->val[i] = data->val[i] > decay ? (uint8_t)(data->val[i] - decay) : 0;
+      data->val[i] = 255;
+      data->sat[i] = base.s;
+      data->hue[i] = kp_rain_drops_hue(base.h);
     }
+    data->drops_seeded = true;
   }
-
-  switch (cfg->mode) {
-  case DT_ENUM_CONST(mode, flow): { /* a cursor walks the LED chain, sparking each in turn */
-    data->flow_idx = (data->flow_idx + 1) % f->count;
-    size_t idx = data->flow_idx;
-    data->val[idx] = 255;
-    data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
-    data->sat[idx] = base.s;
-    break;
-  }
-  case DT_ENUM_CONST(mode, drops): { /* RAINDROPS: nudge one key's hue, board stays lit */
-    if (!data->drops_seeded) {
-      /* QMK colours every LED on the effect's init frame. */
-      for (size_t i = 0; i < f->count; i++) {
-        data->val[i] = 255;
-        data->sat[i] = base.s;
-        data->hue[i] = kp_rain_drops_hue(base.h);
-      }
-      data->drops_seeded = true;
-      break;
-    }
-    data->phase_ms += f->elapsed;
-    uint32_t step_ms = MAX(period / KP_RAIN_DROPS_PER_PERIOD, 1u);
-    if (data->phase_ms >= step_ms) {
-      data->phase_ms -= step_ms;
+  if (cfg->mode == DT_ENUM_CONST(mode, fractal)) {
+    data->phase_ms = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
+  } else if (cfg->mode == DT_ENUM_CONST(mode, drops)) {
+    uint64_t progress = data->drop_remainder +
+                        (uint64_t)f->elapsed_ms * KP_RAIN_DROPS_PER_PERIOD;
+    uint32_t nudges = MIN(progress / period, 8u);
+    data->drop_remainder = progress % period;
+    for (uint32_t step = 0; step < nudges; step++) {
       size_t idx = sys_rand32_get() % f->count;
       data->hue[idx] = kp_rain_drops_hue(base.h);
     }
-    break;
-  }
-  case DT_ENUM_CONST(mode, fractal): { /* a single-hue pulse expanding horizontally from centre */
-    data->phase_ms = (data->phase_ms + f->elapsed) % period;
-    break;
-  }
-  default: { /* pixel / jellybean: occasionally spark a random key */
-    if (sys_rand32_get() % 100 < 35) {
-      size_t idx = sys_rand32_get() % f->count;
-      data->val[idx] = 255;
-      data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
-      /* jellybean also randomises saturation; the others keep the preset. */
-      data->sat[idx] =
-          (cfg->mode == DT_ENUM_CONST(mode, jellybean))
-              ? (uint8_t)(sys_rand32_get() % KP_RGB_SAT_MAX)
-              : base.s;
+  } else {
+    uint32_t remaining = f->elapsed_ms;
+    uint32_t interval = cfg->step_interval_ms;
+    uint32_t until_step = interval - data->step_remainder_ms;
+    for (uint32_t step = 0; step < 8 && remaining >= until_step; step++) {
+      kp_eff_rain_fade(data, f->count, until_step, period);
+      remaining -= until_step;
+      data->step_remainder_ms = 0;
+      until_step = interval;
+      if (cfg->mode == DT_ENUM_CONST(mode, flow)) {
+        data->flow_idx = (data->flow_idx + 1) % f->count;
+        size_t idx = data->flow_idx;
+        data->val[idx] = 255;
+        data->fade_remainder[idx] = 0;
+        data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
+        data->sat[idx] = base.s;
+      } else if (sys_rand32_get() % 100 < 35) {
+        size_t idx = sys_rand32_get() % f->count;
+        data->val[idx] = 255;
+        data->fade_remainder[idx] = 0;
+        data->hue[idx] = (uint16_t)(sys_rand32_get() % KP_RGB_HUE_MAX);
+        data->sat[idx] = (cfg->mode == DT_ENUM_CONST(mode, jellybean))
+                            ? (uint8_t)(sys_rand32_get() % KP_RGB_SAT_MAX)
+                            : base.s;
+      }
     }
-    break;
-  }
+    kp_eff_rain_fade(data, f->count, remaining, period);
+    data->step_remainder_ms =
+        ((uint64_t)data->step_remainder_ms + remaining) % interval;
   }
 
   for (size_t i = 0; i < f->count; i++) {
@@ -140,8 +159,7 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
     if (cfg->mode == DT_ENUM_CONST(mode, fractal)) {
       /* The pulse has two fronts (it mirrors from the centre), so halve the
        * phase to keep each front at a single-front rate. */
-      uint32_t phase01 =
-          kp_rgb_arm_phase(data->phase_ms * 65536u / period, 2u);
+      uint32_t phase01 = kp_rgb_arm_phase(data->phase_ms * 65536u / period, 2u);
       uint32_t rad = phase01 * (bl / 2u + 100u) / 65536u;
       int32_t d = (int32_t)f->coords[i].x - bl / 2;
       if (d < 0) {
@@ -170,12 +188,29 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
     }
   }
 #endif /* KP_LED_COUNT > 0 */
+  return true;
 }
 
+static void kp_eff_rain_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_rain_data *data = dev->data;
+  struct kp_rgb_effect_common_data common = data->common;
+  *data = (struct kp_eff_rain_data){.common = common};
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_rain_callbacks = {
+    .render = kp_eff_rain_render,
+    .reset = kp_eff_rain_reset,
+};
+
 #define KP_EFF_RAIN_DEFINE(inst)                                               \
+  BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), step_interval_ms) > 0 &&             \
+                   DT_PROP(DT_DRV_INST(inst), step_interval_ms) <= UINT16_MAX, \
+               "rain step-interval-ms must be in 1..65535");                   \
   static const struct kp_eff_rain_config kp_eff_rain_##inst##_cfg = {          \
       .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
       .mode = CONV_DT_ENUM(inst, mode),                                        \
+      .step_interval_ms = DT_PROP(DT_DRV_INST(inst), step_interval_ms),        \
   };                                                                           \
   static struct kp_eff_rain_data kp_eff_rain_##inst##_data = {                 \
       .common =                                                                \
@@ -185,7 +220,7 @@ static void kp_eff_rain_render(const struct device *dev, struct kp_rgb_frame *f)
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_rain_render, NULL,            \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rain_callbacks,              \
                        kp_eff_rain_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_RAIN_DEFINE)

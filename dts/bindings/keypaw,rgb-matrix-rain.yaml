@@ -25,3 +25,16 @@ properties:
       preset's saturation while varying only the hue. It therefore needs a
       saturated `color` to be visible: with a white preset every key renders as
       the same white and the effect looks static.
+
+  step-interval-ms:
+    type: int
+    default: 32
+    description: |
+      Interval in milliseconds, from 1 to 65535, between random spawn attempts
+      in pixel/jellybean mode or cursor advances in flow mode. Each spawn attempt
+      has a 35% chance of lighting one random LED; a spawn is not guaranteed.
+      This interval is independent of render cadence. Duration controls fading.
+      Ignored by drops (64 hue nudges per duration) and fractal (one phase cycle
+      per duration). At most eight due attempts/advances/nudges are processed per
+      render; excess opportunities are skipped, but fading and fractal phase
+      still consume the full elapsed time.

@@ -42,11 +42,12 @@ struct kp_eff_rainbow_data {
 
 
 
-static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame *f) {
+static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_frame *f) {
   struct kp_eff_rainbow_data *data = dev->data;
   const struct kp_eff_rainbow_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t phase = data->phase_ms % period;
+  uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
+  data->phase_ms = phase;
   uint32_t phase01 = phase * 65536u / period;
   uint16_t bl = MAX(f->board_length, 1u);
   uint16_t bh = MAX(f->board_height, 1u);
@@ -152,8 +153,19 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
     f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
   }
 
-  data->phase_ms = (phase + f->elapsed) % period;
+  return true;
 }
+
+static void kp_eff_rainbow_reset(const struct device *dev, int64_t now_ms) {
+  ARG_UNUSED(now_ms);
+  struct kp_eff_rainbow_data *data = dev->data;
+  data->phase_ms = 0;
+}
+
+static const struct kp_rgb_effect_callbacks kp_eff_rainbow_callbacks = {
+    .render = kp_eff_rainbow_render,
+    .reset = kp_eff_rainbow_reset,
+};
 
 #define KP_EFF_RAINBOW_DEFINE(inst)                                            \
   static const struct kp_eff_rainbow_config kp_eff_rainbow_##inst##_cfg = {    \
@@ -170,7 +182,7 @@ static void kp_eff_rainbow_render(const struct device *dev, struct kp_rgb_frame 
               .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
           },                                                                   \
   };                                                                           \
-  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), kp_eff_rainbow_render, NULL,         \
+  KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rainbow_callbacks,           \
                        kp_eff_rainbow_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_RAINBOW_DEFINE)

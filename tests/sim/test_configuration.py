@@ -18,10 +18,15 @@ REPO = MODULE.parent.parent
 WORKSPACE = Path(os.environ.get("ZMK_WS", REPO / "zmk"))
 LOCAL_WEST = REPO / ".venv/bin/west"
 WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west")
+EXAMPLE = Path(os.environ.get("RGB_EXAMPLE_MODULE", MODULE.parent / "zmk-rgb-effect-example"))
 
 CASES = {
     "baseline": (True, ""),
     "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
+    "external-effect": (True, '''
+&kprgb { external_example { compatible = "keypaw,rgb-matrix-example";
+    #binding-cells = <0>; }; };
+'''),
     "no-controller": (False, '&kprgb { status = "disabled"; };'),
     "two-controllers": (False, '''
 / { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";
@@ -62,11 +67,26 @@ DIAGNOSTICS = {
     "duplicate-overlay": r"redeclaration of enumerator|redefinition of enumerator",
 }
 
+for effect in ("rain", "starlight"):
+    for interval in (0, -1, 65536, 1, 65535):
+        name = f"{effect}-interval-{interval}"
+        CASES[name] = (1 <= interval <= 65535, f'''
+&kprgb {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
+    #binding-cells = <0>; step-interval-ms = <({interval})>; }}; }};
+''')
+        DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
+
 
 def main():
     with tempfile.TemporaryDirectory(prefix="rgb-config-") as directory:
         root = Path(directory)
         for name, (valid, fragment) in CASES.items():
+            if name == "external-effect" and not EXAMPLE.is_dir():
+                print(f"SKIP external-effect: {EXAMPLE} is not available", flush=True)
+                continue
+            modules = [str(MODULE), str(SIM / "module")]
+            if name == "external-effect":
+                modules.append(str(EXAMPLE))
             config = root / name / "config"
             config.mkdir(parents=True)
             for filename in ("native_sim.conf", "native_sim.keymap"):
@@ -77,7 +97,7 @@ def main():
             command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
                        "-b", "native_sim//zmk_test_mock", "-p", "--",
                        f"-DZMK_CONFIG={config}",
-                       f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
+                       f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
             result = subprocess.run(command, cwd=WORKSPACE, text=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             if (result.returncode == 0) != valid:

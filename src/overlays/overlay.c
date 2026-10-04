@@ -21,6 +21,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
+#include "../rgb_matrix_internal.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -52,16 +53,14 @@ static void kp_ovl_render(const struct device *dev, struct kp_rgb_frame *frame) 
 #else
   const struct kp_ovl_config *cfg = dev->config;
   const struct kp_ovl_data *data = dev->data;
-  const struct kp_rgb_effect_api *fx =
-      (const struct kp_rgb_effect_api *)cfg->effect->api;
 
   /* Effects overwrite the whole frame, so render into the shared layer buffer and
    * blend only this overlay's targets back. */
   struct led_rgb *base = frame->pixels;
   memset(kp_ovl_layer, 0, sizeof(kp_ovl_layer));
-  frame->pixels = kp_ovl_layer;
-  fx->render(cfg->effect, frame);
-  frame->pixels = base;
+  struct kp_rgb_frame child_frame = *frame;
+  child_frame.pixels = kp_ovl_layer;
+  kp_rgb_effect_render(cfg->effect, &child_frame);
 
   if (cfg->common.all_leds) {
     /* No target list: blend the whole layer buffer straight across. */
