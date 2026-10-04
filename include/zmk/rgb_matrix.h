@@ -130,7 +130,6 @@ struct kp_rgb_effect_api {
   const struct behavior_driver_api behavior;
   rgb_matrix_effect_render_callback_t render;
   rgb_matrix_effect_event_callback_t on_event;
-  const struct device *owner; /* parent keypaw,behavior-rgb-matrix */
   /* Per-effect overlay override, filled in by KP_RGB_EFFECT_DEFINE from the
    * effect node's devicetree:
    *   overlays = <&a &b>;  -> exactly those, in order
@@ -190,12 +189,15 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 #define KP_RGB_OVERLAYS_AT_IDX(idx, node_id)                                   \
   DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, overlays, idx))
 
-/* Declare the override list, but only when the node actually has one, so an
- * unused static array is never left behind. */
+/* Repeated phandles produce duplicate enumerators and fail the build. */
+#define KP_RGB_OVERLAY_UNIQUE(idx, node_id, cfg_inst)                          \
+  CONCAT(cfg_inst, _overlay_, DT_DEP_ORD(DT_PROP_BY_IDX(node_id, overlays, idx)))
 #define KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                          \
   COND_CODE_1(                                                                 \
       DT_NODE_HAS_PROP(node_id, overlays),                                     \
-      (static const struct device *const cfg_inst##_overlays[] = {LISTIFY(     \
+      (enum {LISTIFY(DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAY_UNIQUE,    \
+                     (, ), node_id, cfg_inst)};                                \
+       static const struct device *const cfg_inst##_overlays[] = {LISTIFY(     \
            DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAYS_AT_IDX, (, ),       \
            node_id)};),                                                        \
       ())
@@ -238,12 +240,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                     "overlays/no-overlays are registry-only; overlays are not "\
                     "composed onto a nested effect");))
 
-/* The owning behavior, for the binding-conversion hook; NULL for a private
- * effect, so a keymap binding of one fails instead of retargeting. */
-#define KP_RGB_EFFECT_OWNER(node_id)                                           \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
-              (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
-
 #define KP_RGB_EFFECT_CONVERT_HOOK(node_id)                                    \
   COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
               (kp_rgb_effect_convert_central_state_dependent_params), (NULL))
@@ -283,7 +279,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        (.parameter_metadata = &cfg_inst##_metadata, ))},       \
       .render = render_fn,                                                     \
       .on_event = event_fn,                                                    \
-      .owner = KP_RGB_EFFECT_OWNER(node_id),                                   \
       .overlays = KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst),                \
       .overlays_len = DT_PROP_LEN_OR(node_id, overlays, 0),                    \
   };                                                                           \
@@ -354,7 +349,7 @@ bool kp_rgb_condition_value(const struct device *condition);
  * Overlays
  *
  * An overlay is a non-behavior compositor: while its condition is active it
- * renders one effect (nested or referenced) into a private layer buffer and
+ * renders its nested effect into a temporary layer buffer and
  * blends it onto the targeted LEDs over whatever the active effect painted.
  * `keypaw,rgb-overlay` is the only kind; third parties extend the module with
  * conditions and effects, not overlay kinds. Overlays paint in their
@@ -372,7 +367,8 @@ struct kp_rgb_overlay_api {
   /* The effect this overlay composites, so the engine can deliver input events
    * to it (a composited reactive/ripple effect has no other way to see them).
    * NULL for a kind that does not delegate to an effect. The engine delivers
-   * only while the overlay is active and dedups by device pointer. */
+   * only while the overlay is active. Return only the overlay's private effect.
+   */
   const struct device *(*event_target)(const struct device *dev);
 };
 
@@ -516,32 +512,20 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * The compositor's devicetree contract
  *
  * Every overlay is the same generic kind (`keypaw,rgb-overlay`): it composites
- * exactly one effect (nested or referenced) while its optional condition is
- * active. These helpers resolve the two and enforce the "exactly one effect"
- * rule.
+ * exactly one enabled nested effect while its optional condition is active.
  * ------------------------------------------------------------------------- */
 
-/* `effect = <&fx>;` names a shared registry effect; otherwise the single nested
- * child is a private one. Exactly one of the two must be present. */
 #define KP_RGB_OVERLAY_EFFECT_ONE(node_id) DEVICE_DT_GET(node_id)
 
 #define KP_RGB_OVERLAY_EFFECT(node_id)                                         \
-  COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(node_id, effect),                                       \
-      (DEVICE_DT_GET(DT_PROP(node_id, effect))),                               \
-      (DT_FOREACH_CHILD_STATUS_OKAY(node_id, KP_RGB_OVERLAY_EFFECT_ONE)))
+  DT_FOREACH_CHILD_STATUS_OKAY(node_id, KP_RGB_OVERLAY_EFFECT_ONE)
 
 #define KP_RGB_OVERLAY_EFFECT_ASSERT(node_id)                                  \
-  COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(node_id, effect), (),                                   \
-      (BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(node_id) == 1,                    \
-                    "overlay needs exactly one effect: `effect = <&fx>;` "     \
-                    "or one nested effect child");))                           \
-  BUILD_ASSERT(                                                                \
-      !(DT_NODE_HAS_PROP(node_id, effect) &&                                   \
-        DT_CHILD_NUM_STATUS_OKAY(node_id) > 0),                                \
-      "an overlay takes either `effect = <&fx>;` or a nested effect, "         \
-      "not both");
+  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, effect),                             \
+               "overlay effect references are not supported; "                 \
+               "use a nested child");                                          \
+  BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(node_id) == 1,                         \
+               "overlay requires exactly one enabled nested effect");
 
 /* Runtime-only output gate for all local zones; default false. Does not change
  * logical ON/user intent, settings, or split commands. One external policy

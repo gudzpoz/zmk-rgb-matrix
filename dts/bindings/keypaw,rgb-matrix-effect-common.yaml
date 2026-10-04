@@ -14,7 +14,8 @@ properties:
     default: 0
     description: |
       Animation period in milliseconds; shorter means faster. Zero (the default)
-      takes the owning behavior node's `initial-duration-ms`.
+      uses the controller's `initial-duration-ms` for selectable effects, or
+      1000 ms for private overlay effects.
 
   overlays:
     type: phandles
@@ -23,13 +24,14 @@ properties:
       Overlay list to paint while this effect is active, replacing the default
       of every registered overlay in `rgb_overlays` declaration order. A
       devicetree array cannot be empty, so use `no-overlays;` for an effect
-      that wants none.
+      that wants none. Entries must be unique within this list. The same overlay
+      may be included in different selectable effects' lists.
 
   no-overlays:
     type: boolean
     description: |
-      Draw no overlays at all for this effect. Only meaningful for effects that
-      would otherwise inherit the owning behavior's list.
+      Draw no overlays at all for this effect. Allowed only on selectable
+      effects, not private overlay effects.
 
   no-cycle:
     type: boolean
