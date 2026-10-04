@@ -50,6 +50,8 @@ PRELUDE = r'''
 #include <sched.h>
 #define ARG_UNUSED(x) (void)(x)
 #define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define KP_RGB_LOCK_RETRY_MS 1
 #define K_NO_WAIT 0
 #define K_MSEC(x) (x)
 #define CONFIG_KEYPAW_RGB_MATRIX_TICK_MS 16
@@ -65,12 +67,11 @@ struct k_work {
  void (*handler)(struct k_work *); bool queued,running,scheduled;
  uint64_t due,order,deadline,schedule_order; unsigned runs;
 };
-static struct k_work kp_off_work, kp_tick_work;
-struct k_timer {
- void (*handler)(struct k_timer *); bool active; uint64_t due; uint32_t period;
-};
-static struct k_timer kp_tick_timer;
-static int timer_period,tick_submits;
+struct k_work_delayable { struct k_work work; };
+static struct k_work_delayable kp_output_work;
+static int output_submits;
+static bool kp_rgb_pass_active,kp_rgb_scene_requested;
+static int64_t kp_rgb_next_frame_ms=INT64_MAX,kp_rgb_black_deadline_ms=INT64_MAX;
 typedef _Atomic int atomic_t;
 #define atomic_get(p) atomic_load(p)
 #define atomic_set(p,v) atomic_store(p,v)
@@ -120,11 +121,13 @@ static int host_try_lock_error;
 static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
 struct k_spinlock { int unused; };
 typedef int k_spinlock_key_t;
-static struct k_spinlock kp_rgb_pending_lock;
+static struct k_spinlock kp_rgb_pending_lock,kp_rgb_schedule_lock;
+static pthread_mutex_t schedule_lock = PTHREAD_MUTEX_INITIALIZER;
+static void (*host_schedule_unlock_hook)(void);
 static bool inject_pending_press,pending_press_accepted;
 static bool kp_rgb_pending_push(const struct kp_rgb_key_event *ev);
 static int k_spin_lock(struct k_spinlock *l) {
- (void)l;
+ if(l==&kp_rgb_schedule_lock) { pthread_mutex_lock(&schedule_lock); return 0; }
  if(inject_pending_press) {
   inject_pending_press=false;
   const struct kp_rgb_key_event ev={.position=0,.pressed=true};
@@ -134,7 +137,13 @@ static int k_spin_lock(struct k_spinlock *l) {
 }
 static bool inject_after_unlock,post_release_accepted;
 static void k_spin_unlock(struct k_spinlock *l,int key) {
- (void)l; (void)key; pthread_mutex_unlock(&pending_lock);
+ (void)key;
+ if(l==&kp_rgb_schedule_lock) {
+  pthread_mutex_unlock(&schedule_lock);
+  if(host_schedule_unlock_hook) host_schedule_unlock_hook();
+  return;
+ }
+ pthread_mutex_unlock(&pending_lock);
  if(inject_after_unlock) {
   inject_after_unlock=false;
   const struct kp_rgb_key_event ev={.position=0,.pressed=true};
@@ -162,7 +171,6 @@ static uint16_t kp_rgb_board_length=100,kp_rgb_board_height=100;
 static const struct device dummy = {.name="strip"};
 static const struct device *strip=&dummy;
 static bool isr,idle;
-static bool inhibit_from_render;
 int zmk_rgb_matrix_set_inhibited(bool inhibited);
 static int polls,refreshes,dispatches,renders,feedback,writes,colored,failures,retry_delay;
 static atomic_t transfer_entered,transfer_release,block_transfer;
@@ -184,10 +192,7 @@ static void *zmk_workqueue_lowprio_work_q(void) { return NULL; }
 #if HOST_SCHEDULER
 #include "engine_scheduler.h"
 #else
-static int k_work_submit_to_queue(void *q,struct k_work *w) { (void)q;if(w==&kp_tick_work) tick_submits++;return 0; }
-static int k_work_reschedule_for_queue(void *q,struct k_work *w,int delay) { (void)q;(void)w; retry_delay=delay;return 0; }
-static void k_timer_stop(struct k_timer *t) { (void)t;timer_period=0; }
-static void k_timer_start(struct k_timer *t,int delay,int period) { (void)t;(void)delay;timer_period=period; }
+static int k_work_reschedule_for_queue(void *q,struct k_work_delayable *w,int64_t delay) { (void)q;(void)w; output_submits++;retry_delay=delay;return 0; }
 #endif
 static bool host_strip_ready = true;
 static bool device_is_ready(const struct device *d) { return d!=NULL && host_strip_ready; }
@@ -223,16 +228,14 @@ static struct host_transfer host_transfers[1024];
 static size_t host_transfer_count;
 static bool host_mutate_output = true;
 static bool host_allow_color_failure;
+static uint32_t host_transfer_ms;
+static bool host_render_animating = true;
 static bool render(const struct device *d,const struct kp_rgb_frame *f) {
  (void)d; assert(held); renders++;rendered_elapsed=f->elapsed_ms;
  assert(f->targets && !f->scratch && f->count==KP_LED_COUNT);
  for(size_t n=0;n<f->target_count;n++) f->pixels[f->targets[n]].r=17;
  if(host_render_hook) host_render_hook();
- if(inhibit_from_render) {
-  inhibit_from_render=false;
-  assert(zmk_rgb_matrix_set_inhibited(true)==0);
- }
- return true;
+ return host_render_animating;
 }
 static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) { (void)d;(void)e;assert(held);feedback++;return true; }
 static struct kp_rgb_effect_runtime runtime;
@@ -259,6 +262,7 @@ static int led_strip_update_rgb(const struct device *d,struct led_rgb *p,size_t 
  record->result = failures ? -EIO : 0;
  if(host_mutate_output) memset(p,0xa5,n*sizeof(*p));
  if(failures) { assert(!color || host_allow_color_failure); failures--; }
+ now += host_transfer_ms;
  return record->result;
 }
 static void kp_rgb_request_black_locked(void);
@@ -279,9 +283,9 @@ FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
     "kp_rgb_each_effect", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_reconcile_effect", "kp_rgb_effect_render",
-    "kp_rgb_matrix_tick_handler", "kp_start_timer",
-    "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_matrix_tick",
-    "kp_rgb_request_black_locked", "kp_rgb_matrix_off_handler",
+    "kp_rgb_schedule_locked", "kp_rgb_begin_output_pass", "kp_rgb_finish_output_pass",
+    "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_scene_pass_locked",
+    "kp_rgb_request_black_locked", "kp_rgb_attempt_black_locked", "kp_rgb_output_handler",
     "kp_rgb_reconcile_power_locked",
     "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
     "zmk_rgb_matrix_flush", "kp_rgb_pending_push",

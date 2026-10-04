@@ -29,8 +29,6 @@ struct kp_rgb_effect_api {
 };
 struct kp_rgb_overlay_api { const struct device *(*event_target)(const struct device *); };
 static struct { struct { const struct device *active_fx; } state; } kp_rgb_controller;
-static bool kp_rgb_output_allowed;
-#define atomic_get(p) (*(p))
 static bool gates[2] = {true,true};
 static bool mapped = true;
 static unsigned counts[3];
@@ -59,7 +57,6 @@ TESTS = r'''
 int main(void) {
     struct kp_rgb_effect_api base_api = {.callbacks=&callbacks,.runtime=&states[0]};
     const struct device base = {&base_api,&counts[0],NULL};
-    kp_rgb_output_allowed = true;
     kp_rgb_controller.state.active_fx = &base;
     const struct kp_rgb_key_event event = {17,true,123};
     kp_rgb_deliver_position(&event);
@@ -80,9 +77,16 @@ int main(void) {
     base_api.overlays_len = 0;
     kp_rgb_deliver_position(&event);
     assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 2);
-    kp_rgb_output_allowed = false;
+    states[0].active = false;
     kp_rgb_deliver_position(&event);
     assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 2);
+    base_api.overlays = NULL;
+    states[1].active = false;
+    kp_rgb_deliver_position(&event);
+    assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 3);
+    kp_rgb_controller.state.active_fx = NULL;
+    kp_rgb_deliver_position(&event);
+    assert(counts[0] == 4 && counts[1] == 2 && counts[2] == 3);
     puts("private effect event routing passed");
     return 0;
 }

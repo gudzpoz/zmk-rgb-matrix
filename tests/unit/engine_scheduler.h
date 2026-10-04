@@ -4,21 +4,20 @@
 #ifndef RGB_ENGINE_SCHEDULER_H
 #define RGB_ENGINE_SCHEDULER_H
 
-/* Single-worker virtual time. Callbacks consume no time unless a test advances it.
- * This models only the timer/work calls used by the extracted engine, not Zephyr's
- * priorities, tick rounding, cancellation races, or real ISR preemption.
+/* Callbacks consume no virtual time unless a test advances it. This models
+ * delayable work, not Zephyr priorities, tick rounding or real ISR preemption.
  */
-static struct k_work host_probe_work;
+static struct k_work_delayable host_probe_work;
 static struct k_work *const host_works[] = {
-    &kp_tick_work, &kp_off_work, &host_probe_work,
+    &kp_output_work.work, &host_probe_work.work,
 };
 static uint64_t host_order;
-static unsigned host_timer_fires;
+static unsigned host_reschedule_failures;
 
 static int k_work_submit_to_queue(void *queue, struct k_work *work) {
     (void)queue;
-    if (work == &kp_tick_work) {
-        tick_submits++;
+    if (work == &kp_output_work.work) {
+        output_submits++;
     }
     if (work->queued) {
         return 0;
@@ -30,8 +29,10 @@ static int k_work_submit_to_queue(void *queue, struct k_work *work) {
     return work->running ? 2 : 1;
 }
 
-static int k_work_reschedule_for_queue(void *queue, struct k_work *work, int delay) {
+static int k_work_reschedule_for_queue(void *queue, struct k_work_delayable *dwork, int64_t delay) {
+    struct k_work *work = &dwork->work;
     (void)queue;
+    if (host_reschedule_failures) { host_reschedule_failures--; return -EBUSY; }
     assert(delay >= 0 && work->handler);
     retry_delay = delay;
     work->scheduled = false;
@@ -42,34 +43,6 @@ static int k_work_reschedule_for_queue(void *queue, struct k_work *work, int del
     work->deadline = now + (uint64_t)delay;
     work->schedule_order = ++host_order;
     return 1;
-}
-
-static void k_timer_stop(struct k_timer *timer) {
-    timer->active = false;
-    timer_period = 0;
-}
-
-static void k_timer_start(struct k_timer *timer, int delay, int period) {
-    assert(delay >= 0 && period >= 0 && timer->handler);
-    timer->active = true;
-    timer->due = now + (uint64_t)delay;
-    timer->period = period;
-    timer_period = period;
-}
-
-static void host_fire_timer(void) {
-    struct k_timer *timer = &kp_tick_timer;
-    assert(timer->active && timer->due <= now);
-    if (timer->period) {
-        timer->due += timer->period;
-    } else {
-        timer->active = false;
-    }
-    bool was_isr = isr;
-    isr = true;
-    host_timer_fires++;
-    timer->handler(timer);
-    isr = was_isr;
 }
 
 static struct k_work *host_next_work(void) {
@@ -99,9 +72,6 @@ static struct k_work *host_next_scheduled(void) {
 static uint64_t host_next_deadline(void) {
     struct k_work *work = host_next_scheduled();
     uint64_t next = work ? work->deadline : UINT64_MAX;
-    if (kp_tick_timer.active && kp_tick_timer.due < next) {
-        next = kp_tick_timer.due;
-    }
     return next;
 }
 
@@ -110,21 +80,16 @@ static void host_fire_due(void) {
     while (host_next_deadline() <= now) {
         assert(budget-- > 0);
         struct k_work *work = host_next_scheduled();
-        if (kp_tick_timer.active && kp_tick_timer.due <= now &&
-            (!work || kp_tick_timer.due <= work->deadline)) {
-            host_fire_timer();
-        } else {
-            assert(work);
-            work->scheduled = false;
-            bool was_isr = isr;
-            isr = true;
-            k_work_submit_to_queue(NULL, work);
-            isr = was_isr;
-        }
+        assert(work);
+        work->scheduled = false;
+        bool was_isr = isr;
+        isr = true;
+        k_work_submit_to_queue(NULL, work);
+        isr = was_isr;
     }
 }
 
-/* Advance timer interrupts but hold the worker, simulating queue starvation. */
+/* Expire delayed work without running the queue. */
 static void host_elapse_to(uint64_t target) {
     assert(target >= now);
     unsigned budget = 100000;
@@ -155,7 +120,7 @@ static void host_run_ready(void) {
     }
 }
 
-/* Run timer and worker in timestamp order, including work due exactly at target. */
+/* Include work due exactly at target. */
 static void host_run_until(uint64_t target) {
     assert(target >= now);
     while (now < target) {

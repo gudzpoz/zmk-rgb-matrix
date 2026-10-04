@@ -187,7 +187,7 @@ BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
  * Supply that overlay's targets and scratch as the child's pixels, with the
  * child's scratch set to NULL. Initialize target pixels to black before calling;
  * this helper does not clear pixels. Supplies the child's elapsed_ms and returns
- * its render result (false when inactive or output is blocked).
+ * its render result (false when inactive).
  * Effect callbacks and application code must not call this function. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 

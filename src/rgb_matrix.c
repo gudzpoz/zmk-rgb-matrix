@@ -112,6 +112,11 @@ static atomic_t kp_rgb_inhibited;
 static bool kp_rgb_output_ready;
 static bool kp_rgb_black_pending;
 static uint32_t kp_rgb_black_retry_ms = 100;
+static int64_t kp_rgb_black_deadline_ms = INT64_MAX;
+static int64_t kp_rgb_next_frame_ms = INT64_MAX;
+static struct k_spinlock kp_rgb_schedule_lock;
+static bool kp_rgb_scene_requested;
+static bool kp_rgb_pass_active;
 
 /* A half with no strip renders nothing, but the central-only overlay and split
  * machinery still runs. */
@@ -145,8 +150,52 @@ static bool kp_rgb_matrix_lock_patiently(void) {
   return false;
 }
 
-extern struct k_work kp_tick_work;
-static void kp_rgb_matrix_tick(struct k_work *work);
+static void kp_rgb_output_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(kp_output_work, kp_rgb_output_handler);
+
+/* Scheduling lock held; no matrix lock is needed to request a pass. */
+static int kp_rgb_schedule_locked(int64_t deadline_ms) {
+  if (deadline_ms == INT64_MAX) return 0;
+  int64_t delay_ms = MAX(INT64_C(0), deadline_ms - k_uptime_get());
+  int err = k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
+                                      delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
+  if (err < 0) {
+    kp_rgb_scene_requested = true;
+    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
+                                K_MSEC(1));
+  }
+  return err;
+}
+
+void zmk_rgb_matrix_flush(void) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  kp_rgb_scene_requested = true;
+  int err = kp_rgb_pass_active ? 0 : kp_rgb_schedule_locked(k_uptime_get());
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+  if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
+}
+
+static bool kp_rgb_begin_output_pass(void) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  kp_rgb_pass_active = true;
+  bool requested = kp_rgb_scene_requested;
+  kp_rgb_scene_requested = false;
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+  return requested;
+}
+
+static void kp_rgb_finish_output_pass(int64_t deadline_ms, bool lock_retry) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  if (lock_retry) {
+    kp_rgb_scene_requested = true;
+  } else if (kp_rgb_scene_requested) {
+    deadline_ms = k_uptime_get();
+  }
+  int err = kp_rgb_schedule_locked(deadline_ms);
+  kp_rgb_pass_active = false;
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+  if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
+}
 
 /* Prioritize key handling over RGB feedback: every event is copied here and
  * delivered by the low-priority queue. Drop events if the ring fills up. */
@@ -227,7 +276,7 @@ static void kp_rgb_reconcile_effect(const struct device *dev, int64_t now_ms) {
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame) {
   const struct kp_rgb_effect_api *api = dev->api;
   struct kp_rgb_effect_runtime *state = api->runtime;
-  if (!state->active || !atomic_get(&kp_rgb_output_allowed)) return false;
+  if (!state->active) return false;
   struct kp_rgb_frame local = *frame;
   local.elapsed_ms = state->animating && frame->now_ms > state->last_render_ms
       ? (uint32_t)MIN((uint64_t)(frame->now_ms - state->last_render_ms), UINT32_MAX)
@@ -235,21 +284,6 @@ bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *f
   state->last_render_ms = frame->now_ms;
   state->animating = api->callbacks->render(dev, &local);
   return state->animating;
-}
-/* Timer ISR: the worker rechecks permission under the matrix mutex. */
-static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
-  ARG_UNUSED(timer);
-  if (atomic_get(&kp_rgb_output_allowed)) {
-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
-  }
-}
-
-K_TIMER_DEFINE(kp_tick_timer, kp_rgb_matrix_tick_handler, NULL);
-
-static void kp_start_timer(void) {
-  kp_rgb_each_effect(kp_rgb_restart_clock, 0);
-  k_timer_start(&kp_tick_timer, K_NO_WAIT,
-                K_MSEC(CONFIG_KEYPAW_RGB_MATRIX_TICK_MS));
 }
 
 /* Returns the index of the last overlay covering every LED, or SIZE_MAX when
@@ -290,21 +324,13 @@ static void kp_render_overlays(const struct kp_rgb_frame *frame,
   }
 }
 
-static void kp_rgb_matrix_tick(struct k_work *work) {
-  ARG_UNUSED(work);
-  if (!kp_rgb_matrix_lock_patiently()) {
-    LOG_WRN("Failed to obtain RGB matrix lock");
-    k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
-    return;
-  }
-
-  int64_t now_ms = k_uptime_get();
+static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
   const struct device *const *overlays = NULL;
   size_t overlay_count = 0, first = SIZE_MAX;
   kp_rgb_each_effect(kp_rgb_clear_wanted, now_ms);
 
-  if (fx != NULL && atomic_get(&kp_rgb_output_allowed)) {
+  if (fx != NULL && allowed) {
     const struct kp_rgb_effect_api *api = fx->api;
     overlays = api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
     overlay_count = api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
@@ -329,7 +355,7 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
     kp_rgb_deliver_position(&event);
   }
 
-  if (atomic_get(&kp_rgb_output_allowed)) {
+  if (paint && allowed) {
     memset(scene, 0, sizeof(scene));
     struct kp_rgb_frame frame = {
         .targets = kp_rgb_all_targets,
@@ -346,57 +372,70 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       kp_rgb_effect_render(fx, &frame);
       kp_render_overlays(&frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
     }
-    if (atomic_get(&kp_rgb_output_allowed)) {
-      uint8_t brightness = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
-                                         : kp_rgb_controller.tuning.max_brightness;
-      for (size_t i = 0; i < KP_LED_COUNT; i++) {
-        scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
-      }
-      /* Defensive copy: Zephyr LED strip drivers could modify the pixels */
-      memcpy(scratch, scene, sizeof(scene));
-      int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
-      if (err < 0) LOG_WRN("Failed to update the RGB strip (%d)", err);
+    uint8_t brightness = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
+                                      : kp_rgb_controller.tuning.max_brightness;
+    for (size_t i = 0; i < KP_LED_COUNT; i++) {
+      scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
     }
+    /* Defensive copy: Zephyr LED strip drivers could modify the pixels */
+    memcpy(scratch, scene, sizeof(scene));
+    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
+    if (err < 0) LOG_WRN("Failed to update the RGB strip (%d)", err);
   }
-  kp_rgb_matrix_unlock();
-
-  if (kp_rgb_pending_available()) zmk_rgb_matrix_flush();
-  uint32_t dropped = kp_rgb_pending_take_dropped();
-  if (dropped > 0) LOG_WRN("dropped %u RGB event(s): key-event queue full", dropped);
 }
-
-static void kp_rgb_matrix_off_handler(struct k_work *work);
-K_WORK_DELAYABLE_DEFINE(kp_off_work, kp_rgb_matrix_off_handler);
 
 static void kp_rgb_request_black_locked(void) {
-  if (!kp_rgb_output_ready || !kp_rgb_has_leds()) {
-    return;
-  }
+  if (!kp_rgb_output_ready || !kp_rgb_has_leds() || kp_rgb_black_pending) return;
   kp_rgb_black_pending = true;
+  kp_rgb_black_deadline_ms = k_uptime_get();
   kp_rgb_black_retry_ms = 100;
-  k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_off_work,
-                              K_NO_WAIT);
 }
 
-static void kp_rgb_matrix_off_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_matrix_lock();
-  if (kp_rgb_black_pending && !atomic_get(&kp_rgb_output_allowed)) {
-    /* led_strip_update_rgb() may overwrite even a failed submission. */
-    memset(scratch, 0, sizeof(scratch));
-    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
-    if (err < 0) {
-      LOG_WRN("Failed to clear the RGB strip (%d)", err);
-      k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_off_work,
-                                  K_MSEC(kp_rgb_black_retry_ms));
-      kp_rgb_black_retry_ms = MIN(kp_rgb_black_retry_ms * 2, 1000);
-    } else {
-      kp_rgb_black_pending = false;
-    }
+static void kp_rgb_attempt_black_locked(void) {
+  /* led_strip_update_rgb() may overwrite even a failed submission. */
+  memset(scratch, 0, sizeof(scratch));
+  int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
+  if (err < 0) {
+    LOG_WRN("Failed to clear the RGB strip (%d)", err);
+    kp_rgb_black_deadline_ms = k_uptime_get() + kp_rgb_black_retry_ms;
+    kp_rgb_black_retry_ms = MIN(kp_rgb_black_retry_ms * 2, 1000);
   } else {
     kp_rgb_black_pending = false;
+    kp_rgb_black_deadline_ms = INT64_MAX;
   }
+}
+
+static void kp_rgb_output_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  bool requested = kp_rgb_begin_output_pass();
+  if (!kp_rgb_matrix_lock_patiently()) {
+    LOG_WRN("Failed to obtain RGB matrix lock");
+    kp_rgb_finish_output_pass(k_uptime_get() + KP_RGB_LOCK_RETRY_MS, true);
+    return;
+  }
+
+  bool allowed = atomic_get(&kp_rgb_output_allowed);
+  int64_t now_ms = k_uptime_get();
+  bool paint = requested || kp_rgb_pending_available() || now_ms >= kp_rgb_next_frame_ms;
+  kp_rgb_scene_pass_locked(now_ms, allowed, paint);
+
+  if (allowed) {
+    int64_t finished_ms = k_uptime_get();
+    if (kp_rgb_next_frame_ms <= finished_ms) {
+      int64_t period_ms = CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;
+      kp_rgb_next_frame_ms += ((finished_ms - kp_rgb_next_frame_ms) / period_ms + 1) * period_ms;
+    }
+  } else if (kp_rgb_black_pending && k_uptime_get() >= kp_rgb_black_deadline_ms) {
+    kp_rgb_attempt_black_locked();
+  }
+
+  int64_t next_ms = allowed ? kp_rgb_next_frame_ms
+      : kp_rgb_black_pending ? kp_rgb_black_deadline_ms : INT64_MAX;
+  kp_rgb_finish_output_pass(next_ms, false);
   kp_rgb_matrix_unlock();
+
+  uint32_t dropped = kp_rgb_pending_take_dropped();
+  if (dropped > 0) LOG_WRN("dropped %u RGB event(s): key-event queue full", dropped);
 }
 
 int zmk_rgb_matrix_set_inhibited(bool inhibited) {
@@ -416,12 +455,6 @@ bool zmk_rgb_matrix_is_inhibited(void) {
   return atomic_get(&kp_rgb_inhibited) != 0;
 }
 
-K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
-
-void zmk_rgb_matrix_flush(void) {
-  k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
-}
-
 static void kp_rgb_deliver_event(const struct device *dev,
                                  const struct kp_rgb_key_event *ev) {
   const struct kp_rgb_effect_api *api = dev->api;
@@ -433,8 +466,7 @@ static void kp_rgb_deliver_event(const struct device *dev,
 /* Caller holds kp_rgb_lock. */
 static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
-  if (!atomic_get(&kp_rgb_output_allowed) || fx == NULL ||
-      kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
+  if (fx == NULL || kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
     return;
   }
   const struct kp_rgb_effect_api *api = fx->api;
@@ -474,9 +506,11 @@ void kp_rgb_reconcile_power_locked(void) {
 
   if (allowed) {
     kp_rgb_black_pending = false;
-    kp_start_timer();
+    kp_rgb_black_deadline_ms = INT64_MAX;
+    kp_rgb_each_effect(kp_rgb_restart_clock, 0);
+    kp_rgb_next_frame_ms = k_uptime_get();
   } else {
-    k_timer_stop(&kp_tick_timer);
+    kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_request_black_locked();
   }
   zmk_rgb_matrix_flush();
@@ -618,8 +652,8 @@ static int kp_rgb_matrix_init(void) {
       LOG_WRN("Failed to clear the RGB strip (%d)", err);
       kp_rgb_black_pending = true;
       kp_rgb_black_retry_ms = 200;
-      k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_off_work,
-                                  K_MSEC(100));
+      kp_rgb_black_deadline_ms = k_uptime_get() + 100;
+      zmk_rgb_matrix_flush();
     }
   }
   kp_rgb_reconcile_power_locked();

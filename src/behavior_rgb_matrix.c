@@ -455,10 +455,8 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     kp_rgb_reset_state();
     return 0;
   case RGB_OVL_STATE_CMD:
-    if (kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(binding->param2),
-                                RGB_OVL_STATE_BITS(binding->param2))) {
-      zmk_rgb_matrix_flush();
-    }
+    kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(binding->param2),
+                            RGB_OVL_STATE_BITS(binding->param2));
     return 0;
   default:
     return -ENOTSUP;

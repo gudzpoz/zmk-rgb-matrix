@@ -27,10 +27,11 @@ static void active(const struct device *d,bool value,int64_t t) {
     if(value) o->activations++; else o->deactivations++;
     record(value ? 'A' : 'D');
 }
+static void key(int64_t timestamp);
 static bool event(const struct device *d,const struct kp_rgb_key_event *e) {
     struct observation *o=d->data; o->events++; o->timestamp=e->timestamp_ms;
     assert(e->pressed); record('E');
-    if(replenishments) { replenishments--; assert(kp_rgb_pending_push(e)); }
+    if(replenishments) { replenishments--; key(e->timestamp_ms); }
     return true;
 }
 static bool paint(const struct device *d,const struct kp_rgb_frame *f) {
@@ -75,7 +76,7 @@ int main(void) {
     setup();
     if(!KP_LED_COUNT) {
         host_run_ready(); key(1); host_run_ready();
-        assert(!observations[0].resets && !observations[2].paints && !kp_tick_timer.active);
+        assert(!observations[0].resets && !observations[2].paints && kp_rgb_next_frame_ms==INT64_MAX);
         host_activity(true); return 0;
     }
     struct observation *a=&observations[0], *b=&observations[1], *c=&observations[2];
@@ -116,7 +117,6 @@ int main(void) {
     host_run_ready();
     assert(a->activations==a_activations && a->deactivations==a_deactivations && a->elapsed==0);
     a->animate=true; c->animate=false;
-    k_timer_stop(&kp_tick_timer);
     host_elapse_to(now+(uint64_t)UINT32_MAX+100); zmk_rgb_matrix_flush(); host_run_ready();
     assert(a->elapsed==UINT32_MAX && c->elapsed==0);
     now++; zmk_rgb_matrix_flush(); host_run_ready(); assert(a->elapsed==1);
@@ -127,17 +127,18 @@ int main(void) {
     zmk_rgb_matrix_flush(); host_run_ready();
     unsigned before_events=a->events, before_paints=a->paints;
     replenishments=20; key(999);
-    assert(kp_tick_work.queued); kp_tick_work.queued=false;
-    kp_rgb_matrix_tick(&kp_tick_work);
+    assert(kp_output_work.work.queued); kp_output_work.work.queued=false;
+    kp_rgb_output_handler(&kp_output_work.work);
     assert(a->events==before_events+16 && a->paints==before_paints+1);
-    assert(kp_rgb_pending_available() && kp_tick_work.queued);
+    assert(kp_rgb_pending_available() && kp_output_work.work.queued);
     host_run_ready();
-    assert(a->events==before_events+21 && a->paints==before_paints+2 && !kp_rgb_pending_available());
+    // Requests raised during the second drain survive even though it empties the ring.
+    assert(a->events==before_events+21 && a->paints==before_paints+3 && !kp_rgb_pending_available());
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
     assert(!a->runtime.active && !c->runtime.active);
-    unsigned runs=kp_tick_work.runs;
-    host_run_until(now+1000); assert(kp_tick_work.runs==runs && !kp_tick_timer.active);
+    unsigned runs=kp_output_work.work.runs;
+    host_run_until(now+1000); assert(kp_output_work.work.runs==runs && kp_rgb_next_frame_ms==INT64_MAX);
     assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(a->elapsed==0);
     host_activity(false); host_run_ready(); assert(!a->runtime.active);
     host_activity(true); host_run_ready(); assert(a->elapsed==0);
