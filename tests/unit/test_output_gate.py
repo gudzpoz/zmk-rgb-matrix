@@ -13,7 +13,7 @@ static void *setter_thread(void *unused) {
 static void *off_thread(void *unused) { (void)unused;kp_rgb_matrix_off_handler(NULL);return NULL; }
 static void *on_thread(void *unused) {
  (void)unused;atomic_set(&setter_entered,1);
- assert(zmk_rgb_matrix_on(&dummy)==0);atomic_set(&setter_done,1);return NULL;
+ assert(zmk_rgb_matrix_on()==0);atomic_set(&setter_done,1);return NULL;
 }
 int main(void) {
  pthread_mutexattr_t attributes;
@@ -24,15 +24,26 @@ int main(void) {
  assert(!zmk_rgb_matrix_is_inhibited());
  isr=true;assert(zmk_rgb_matrix_set_inhibited(true)==-EWOULDBLOCK);isr=false;
  ctx.state.on=true;ctx.state.user_on=true;ctx.state.active_fx=&fx;
- ctx.zone_valid=ctx.all_leds=true;ctx.tuning.sentinel=123;
+ ctx.tuning.sentinel=123;
+ assert(zmk_rgb_matrix_on()==0 && atomic_get(&kp_rgb_any_on));
+ zmk_rgb_matrix_flush();kp_rgb_matrix_tick(NULL);
+ assert(!kp_rgb_output_ready && !tick_submits && !renders && !writes);
+ if(KP_LED_COUNT) {
+  host_strip_ready=false;
+  assert(kp_rgb_matrix_init()==-ENODEV);
+  zmk_rgb_matrix_flush();kp_rgb_matrix_tick(NULL);
+  assert(!kp_rgb_output_ready && !tick_submits && !renders && !writes);
+  host_strip_ready=true;
+ }
  assert(zmk_rgb_matrix_set_inhibited(true)==0);
  assert(!kp_rgb_output_ready && writes==0);
  ctx.dev=&dummy;
  failures=KP_LED_COUNT?1:0;
  assert(kp_rgb_matrix_init()==0);
+ assert(kp_rgb_output_ready);
  assert(ctx.state.on && ctx.state.user_on && ctx.tuning.sentinel==123);
  assert(ctx.state.active_fx==&fx);
- bool state=false;assert(zmk_rgb_matrix_get_state(&dummy,&state)==0 && state);
+ bool state=false;assert(zmk_rgb_matrix_get_state(&state)==0 && state);
  struct zmk_position_state_changed ev={.position=0,.state=true};
  assert(!kp_rgb_pending_push(&ev));
  assert(timer_period==CONFIG_KEYPAW_RGB_MATRIX_TICK_MS);
@@ -51,10 +62,10 @@ int main(void) {
  }
  struct binding binding={.param1=RGB_TOG_CMD};
  assert(convert_toggle(&ctx,&binding)==0 && binding.param1==RGB_OFF_CMD);
- assert(zmk_rgb_matrix_off(&dummy)==0);
+ assert(zmk_rgb_matrix_off()==0);
  binding.param1=RGB_TOG_CMD;
  assert(convert_toggle(&ctx,&binding)==0 && binding.param1==RGB_ON_CMD);
- assert(zmk_rgb_matrix_on(&dummy)==0 && ctx.state.on);
+ assert(zmk_rgb_matrix_on()==0 && ctx.state.on);
  assert(zmk_rgb_matrix_is_inhibited() && !colored);
  assert(zmk_rgb_matrix_set_inhibited(false)==0);
  now+=16;kp_rgb_matrix_tick(NULL);
@@ -66,15 +77,15 @@ int main(void) {
  assert(kp_rgb_pending_push(&ev));kp_rgb_matrix_pending_handler(NULL);assert(feedback==1);
  int before=writes;kp_rgb_matrix_off_handler(NULL);assert(writes==before);
  // Normal OFF failure must retry even after the driver's buffer mutation.
- assert(zmk_rgb_matrix_off(&dummy)==0);
+ assert(zmk_rgb_matrix_off()==0);
  if(KP_LED_COUNT) {
   failures=1;kp_rgb_matrix_off_handler(NULL);assert(kp_rgb_black_pending);
   kp_rgb_matrix_off_handler(NULL);assert(!kp_rgb_black_pending);
  }
- assert(zmk_rgb_matrix_on(&dummy)==0);
+ assert(zmk_rgb_matrix_on()==0);
  // A queued normal OFF clear cannot overwrite a newer ON.
- assert(zmk_rgb_matrix_off(&dummy)==0);
- assert(zmk_rgb_matrix_on(&dummy)==0);
+ assert(zmk_rgb_matrix_off()==0);
+ assert(zmk_rgb_matrix_on()==0);
  before=writes;kp_rgb_matrix_off_handler(NULL);assert(writes==before);
  // Local idle policy remains independent of the inhibition gate.
  idle=true;kp_rgb_permission_handler(NULL);assert(!ctx.state.on && ctx.state.user_on);
@@ -96,7 +107,7 @@ int main(void) {
  if(KP_LED_COUNT) {
   // ON waits for an in-flight black transfer and suppresses its failed retry.
   pthread_t off,on;
-  zmk_rgb_matrix_set_inhibited(false);zmk_rgb_matrix_off(&dummy);
+  zmk_rgb_matrix_set_inhibited(false);zmk_rgb_matrix_off();
   atomic_set(&transfer_entered,0);atomic_set(&transfer_release,0);
   atomic_set(&setter_entered,0);atomic_set(&setter_done,0);
   atomic_set(&block_transfer,1);failures=1;
@@ -110,7 +121,7 @@ int main(void) {
  }
  if(KP_LED_COUNT) {
   zmk_rgb_matrix_set_inhibited(false);
-  assert(zmk_rgb_matrix_on(&dummy)==0);
+  assert(zmk_rgb_matrix_on()==0);
   before=colored;inhibit_from_render=true;
   kp_rgb_matrix_tick(NULL);
   assert(zmk_rgb_matrix_is_inhibited() && colored==before);
@@ -123,13 +134,17 @@ int main(void) {
  assert(kp_rgb_pending_push(&ev) && kp_rgb_pending_pop(&received));
  // Initial black failure with an already OFF controller is not lost.
  zmk_rgb_matrix_set_inhibited(false);
- zmk_rgb_matrix_off(&dummy);
+ zmk_rgb_matrix_off();
  kp_rgb_black_pending=false;failures=KP_LED_COUNT?1:0;
  assert(kp_rgb_matrix_init()==0);
  if(KP_LED_COUNT) {
   assert(kp_rgb_black_pending);kp_rgb_matrix_off_handler(NULL);assert(!kp_rgb_black_pending);
  }
  assert(!polls && !refreshes && !dispatches);
+ assert(zmk_rgb_matrix_get_state(NULL)==-EINVAL);
+ assert(zmk_rgb_matrix_off()==0);
+ assert(zmk_rgb_matrix_toggle()==0 && ctx.state.on);
+ assert(zmk_rgb_matrix_toggle()==0 && !ctx.state.on);
  puts("production-extracted output gate tests passed");
 }
 '''

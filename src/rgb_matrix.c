@@ -2,8 +2,6 @@
  * Copyright (c) 2026 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
- *
- * One physical RGB matrix engine merges the independently-owned behavior zones.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_matrix
@@ -37,6 +35,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_LAYOUT DT_PHANDLE(KP_RGB_NODE, physical_layout)
 #define KP_NKEYS DT_PROP_LEN(KP_LAYOUT, keys)
 
+BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(keypaw_behavior_rgb_matrix) == 1,
+             "RGB matrix requires exactly one enabled controller");
+BUILD_ASSERT(IS_ENABLED(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX),
+             "RGB matrix requires its control behavior");
 BUILD_ASSERT(
     DT_PROP_LEN(KP_RGB_NODE, mapping) == KP_LED_COUNT,
     "keypaw,rgb-matrix: 'mapping' must hold exactly one entry per LED");
@@ -103,10 +105,8 @@ const struct kp_rgb_coord *kp_rgb_led_coord(size_t led) {
 static const struct device *const strip =
     COND_CODE_1(KP_RGB_HAS_STRIP, (DEVICE_DT_GET(KP_RGB_STRIP)), (NULL));
 static struct led_rgb pixels[KP_LED_COUNT];
-static struct led_rgb scratch[KP_LED_COUNT];
 static uint32_t last_tick;
 static K_MUTEX_DEFINE(kp_rgb_lock);
-static bool kp_rgb_matrix_valid;
 static atomic_t kp_rgb_any_on;
 static atomic_t kp_rgb_inhibited;
 static bool kp_rgb_output_ready;
@@ -122,35 +122,11 @@ static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
 const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
-bool kp_rgb_behavior_owns_led(const struct kp_rgb_behavior_context *ctx,
-                              size_t led) {
-  if (ctx == NULL || !ctx->zone_valid || led >= KP_LED_COUNT) {
-    return false;
-  }
-  if (ctx->all_leds) {
-    return true;
-  }
-  for (size_t i = 0; i < ctx->leds_len; i++) {
-    if (ctx->leds[i] == led) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool kp_any_on_locked(void) {
-  for (size_t i = 0; i < kp_rgb_behavior_count(); i++) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(i);
-    if (ctx != NULL && ctx->state.on) {
-      return true;
-    }
-  }
-  return false;
+  return kp_rgb_controller.state.on;
 }
 
-/* Caller should hold kp_rgb_lock and has just changed a ctx->state.on.
- * Republish the lock-free mirror the timer ISR and zmk_rgb_matrix_flush()
- * read. */
+/* Caller holds kp_rgb_lock; timer ISR reads the atomic mirror. */
 static void kp_rgb_publish_any_on_locked(void) {
   bool was_on = atomic_get(&kp_rgb_any_on);
   bool on = kp_any_on_locked();
@@ -187,7 +163,7 @@ extern struct k_work kp_tick_work;
 static void kp_rgb_matrix_tick(struct k_work *work);
 /* Runs in the system timer ISR, so it must not take kp_rgb_lock (a mutex is
  * illegal in ISR context). It reads the atomic mirror; the work handler
- * re-checks the contexts authoritatively under the lock. */
+ * re-checks controller state under the lock. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
   ARG_UNUSED(timer);
   if (atomic_get(&kp_rgb_any_on)) {
@@ -242,7 +218,7 @@ static void kp_render_overlays(struct kp_rgb_frame *frame,
 
 static void kp_rgb_matrix_tick(struct k_work *work) {
   ARG_UNUSED(work);
-  if (!kp_rgb_matrix_valid || !atomic_get(&kp_rgb_any_on)) {
+  if (!kp_rgb_output_ready || !atomic_get(&kp_rgb_any_on)) {
     return;
   }
   if (!kp_rgb_has_leds()) {
@@ -261,48 +237,29 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   last_tick = now;
   any_on = kp_any_on_locked() && !atomic_get(&kp_rgb_inhibited);
   memset(pixels, 0, sizeof(pixels));
-  if (any_on) {
-    for (size_t n = 0; n < kp_rgb_behavior_count(); n++) {
-      struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(n);
-      if (ctx == NULL || !ctx->zone_valid || !ctx->state.on ||
-          ctx->state.active_fx == NULL) {
-        continue;
-      }
-      /* `pixels` direct write when ctx->all_leds. */
-      struct led_rgb *buf = ctx->all_leds ? pixels : scratch;
-      if (!ctx->all_leds) {
-        memset(scratch, 0, sizeof(scratch));
-      }
-      struct kp_rgb_frame frame = {
-          .tune = &ctx->tuning,
-          .count = KP_LED_COUNT,
-          .coords = kp_led_coords,
-          .pixels = buf,
-          .elapsed = elapsed,
-          .board_length = kp_rgb_board_length,
-          .board_height = kp_rgb_board_height,
-          .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
-      };
-      const struct kp_rgb_effect_api *api =
-          (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
-      const struct device *const *overlays =
-          api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
-      size_t overlay_count =
-          api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
-      size_t first = kp_last_covering_overlay(overlays, overlay_count);
-      if (first == SIZE_MAX) {
-        api->render(ctx->state.active_fx, &frame);
-        first = 0;
-      }
-      kp_render_overlays(&frame, overlays, overlay_count, first);
-      if (!ctx->all_leds) {
-        for (size_t led = 0; led < ctx->leds_len; led++) {
-          if (ctx->leds[led] < KP_LED_COUNT) {
-            pixels[ctx->leds[led]] = scratch[ctx->leds[led]];
-          }
-        }
-      }
+  const struct device *fx = kp_rgb_controller.state.active_fx;
+  if (any_on && fx != NULL) {
+    struct kp_rgb_frame frame = {
+        .tune = &kp_rgb_controller.tuning,
+        .count = KP_LED_COUNT,
+        .coords = kp_led_coords,
+        .pixels = pixels,
+        .elapsed = elapsed,
+        .board_length = kp_rgb_board_length,
+        .board_height = kp_rgb_board_height,
+        .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
+    };
+    const struct kp_rgb_effect_api *api = fx->api;
+    const struct device *const *overlays =
+        api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
+    size_t overlay_count =
+        api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
+    size_t first = kp_last_covering_overlay(overlays, overlay_count);
+    if (first == SIZE_MAX) {
+      api->render(fx, &frame);
+      first = 0;
     }
+    kp_render_overlays(&frame, overlays, overlay_count, first);
   }
   /* Callbacks may inhibit output while this recursive mutex is held. */
   if (any_on && !atomic_get(&kp_rgb_inhibited)) {
@@ -376,7 +333,7 @@ bool zmk_rgb_matrix_is_inhibited(void) {
 K_WORK_DEFINE(kp_tick_work, kp_rgb_matrix_tick);
 
 void zmk_rgb_matrix_flush(void) {
-  if (!kp_rgb_matrix_valid) {
+  if (!kp_rgb_output_ready) {
     return;
   }
   if (!atomic_get(&kp_rgb_any_on)) {
@@ -385,74 +342,38 @@ void zmk_rgb_matrix_flush(void) {
   k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_tick_work);
 }
 
-/* A key event reaches every effect a behavior's active view reads: the active
- * effect itself, plus the effect each active overlay composites. A composited
- * reactive/ripple effect reads state its on_event fills, so without this it
- * would never see a keystroke.
- *
- * Presses and releases are both delivered; the callback's `ev->state` separates
- * them, so an effect that only cares about presses returns early itself.
- *
- * `seen` dedups by device so an effect that is both the active effect and an
- * overlay target, or shared by two overlays, is delivered once. The cap is
- * generous (one entry per overlay plus a few active effects); past it a
- * duplicate is possible but an event is never dropped. */
-#define KP_RGB_EVENT_TARGETS_MAX (KP_RGB_OVERLAY_COUNT + 4)
-
 static void kp_rgb_deliver_event(const struct device *dev,
-                                 const struct zmk_position_state_changed *ev,
-                                 const struct device **seen, size_t *seen_len) {
-  for (size_t i = 0; i < *seen_len; i++) {
-    if (seen[i] == dev) {
-      return;
-    }
-  }
-  const struct kp_rgb_effect_api *api =
-      (const struct kp_rgb_effect_api *)dev->api;
+                                 const struct zmk_position_state_changed *ev) {
+  const struct kp_rgb_effect_api *api = dev->api;
   if (api->on_event != NULL) {
     api->on_event(dev, ev);
   }
-  if (*seen_len < KP_RGB_EVENT_TARGETS_MAX) {
-    seen[(*seen_len)++] = dev;
-  }
 }
 
-/* Delivers one position event to every effect a behavior's active view reads:
- * the active effect, plus the effect each active overlay composites. The caller
- * holds kp_rgb_lock. */
-static void
-kp_rgb_deliver_position(const struct zmk_position_state_changed *ev) {
-  size_t led = kp_rgb_led_for_position(ev->position);
-  const struct device *seen[KP_RGB_EVENT_TARGETS_MAX];
-  size_t seen_len = 0;
-  for (size_t n = 0; n < kp_rgb_behavior_count(); n++) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(n);
-    if (ctx == NULL || !ctx->state.on || ctx->state.active_fx == NULL ||
-        !kp_rgb_behavior_owns_led(ctx, led)) {
+/* Caller holds kp_rgb_lock. */
+static void kp_rgb_deliver_position(const struct zmk_position_state_changed *ev) {
+  const struct device *fx = kp_rgb_controller.state.active_fx;
+  if (!kp_rgb_controller.state.on || fx == NULL ||
+      kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
+    return;
+  }
+  const struct kp_rgb_effect_api *api = fx->api;
+  kp_rgb_deliver_event(fx, ev);
+
+  const struct device *const *overlays =
+      api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
+  size_t count = api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
+  for (size_t i = 0; i < count; i++) {
+    if (overlays[i] == NULL) {
       continue;
     }
-    const struct kp_rgb_effect_api *api =
-        (const struct kp_rgb_effect_api *)ctx->state.active_fx->api;
-    kp_rgb_deliver_event(ctx->state.active_fx, ev, seen, &seen_len);
-
-    /* Deliver only while the overlay actually renders, matching the render
-     * gate, so an inactive overlay does not accumulate stale state. */
-    const struct device *const *overlays =
-        api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
-    size_t count =
-        api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
-    for (size_t i = 0; i < count; i++) {
-      if (overlays[i] == NULL) {
-        continue;
-      }
-      const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
-      if (ovl->event_target == NULL || !kp_rgb_overlay_gate(overlays[i])) {
-        continue;
-      }
-      const struct device *target = ovl->event_target(overlays[i]);
-      if (target != NULL) {
-        kp_rgb_deliver_event(target, ev, seen, &seen_len);
-      }
+    const struct kp_rgb_overlay_api *ovl = overlays[i]->api;
+    if (ovl->event_target == NULL || !kp_rgb_overlay_gate(overlays[i])) {
+      continue;
+    }
+    const struct device *target = ovl->event_target(overlays[i]);
+    if (target != NULL) {
+      kp_rgb_deliver_event(target, ev);
     }
   }
 }
@@ -541,12 +462,8 @@ static void kp_rgb_matrix_pending_handler(struct k_work *work) {
 static void kp_rgb_permission_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_matrix_lock();
-  for (size_t n = 0; n < kp_rgb_behavior_count(); n++) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(n);
-    if (ctx != NULL) {
-      ctx->state.on = kp_rgb_effective_on(ctx->state.user_on, true);
-    }
-  }
+  kp_rgb_controller.state.on =
+      kp_rgb_effective_on(kp_rgb_controller.state.user_on, true);
   kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
   if (any_on) {
@@ -589,16 +506,12 @@ ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_position_state_changed);
 ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_activity_state_changed);
 #endif
 
-int zmk_rgb_matrix_on(const struct device *behavior) {
-  struct kp_rgb_behavior_context *ctx =
-      kp_rgb_behavior_context_from_device(behavior);
-  if (ctx == NULL)
-    return -ENODEV;
+int zmk_rgb_matrix_on(void) {
   int ret = KP_TRY_LOCK();
   if (ret < 0)
     return ret;
   bool was_on = kp_any_on_locked();
-  ctx->state.on = kp_rgb_effective_on(
+  kp_rgb_controller.state.on = kp_rgb_effective_on(
       true, IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
   kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
@@ -611,15 +524,11 @@ int zmk_rgb_matrix_on(const struct device *behavior) {
   return 0;
 }
 
-int zmk_rgb_matrix_off(const struct device *behavior) {
-  struct kp_rgb_behavior_context *ctx =
-      kp_rgb_behavior_context_from_device(behavior);
-  if (ctx == NULL)
-    return -ENODEV;
+int zmk_rgb_matrix_off(void) {
   int ret = KP_TRY_LOCK();
   if (ret < 0)
     return ret;
-  ctx->state.on = false;
+  kp_rgb_controller.state.on = false;
   kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
   if (!any_on)
@@ -628,24 +537,18 @@ int zmk_rgb_matrix_off(const struct device *behavior) {
   return 0;
 }
 
-int zmk_rgb_matrix_toggle(const struct device *behavior) {
-  struct kp_rgb_behavior_context *ctx =
-      kp_rgb_behavior_context_from_device(behavior);
-  if (ctx == NULL)
-    return -ENODEV;
+int zmk_rgb_matrix_toggle(void) {
   kp_rgb_matrix_lock();
-  bool on = ctx->state.on;
+  bool on = kp_rgb_controller.state.on;
   kp_rgb_matrix_unlock();
-  return on ? zmk_rgb_matrix_off(behavior) : zmk_rgb_matrix_on(behavior);
+  return on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on();
 }
 
-int zmk_rgb_matrix_get_state(const struct device *behavior, bool *on_off) {
-  struct kp_rgb_behavior_context *ctx =
-      kp_rgb_behavior_context_from_device(behavior);
-  if (ctx == NULL || on_off == NULL)
+int zmk_rgb_matrix_get_state(bool *on_off) {
+  if (on_off == NULL)
     return -EINVAL;
   kp_rgb_matrix_lock();
-  *on_off = ctx->state.on;
+  *on_off = kp_rgb_controller.state.on;
   kp_rgb_matrix_unlock();
   return 0;
 }
@@ -663,76 +566,10 @@ static int kp_rgb_matrix_layout_init(void) {
 SYS_INIT(kp_rgb_matrix_layout_init, POST_KERNEL,
          CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
 
-static int kp_rgb_validate_zones(void) {
-  kp_rgb_matrix_valid = true;
-  /* With no LEDs there are no zones to partition; accepting every behavior
-   * keeps the central-only machinery enabled on a strip-less half. */
-  if (!kp_rgb_has_leds()) {
-    return 0;
-  }
-  for (size_t i = 0; i < kp_rgb_behavior_count(); i++) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(i);
-    if (ctx == NULL)
-      continue;
-    ctx->zone_valid = true;
-    if (ctx->all_leds && i != 0) {
-      LOG_ERR(
-          "RGB behavior %s has an all-LED zone overlapping another behavior",
-          ctx->dev->name);
-      ctx->zone_valid = false;
-      kp_rgb_matrix_valid = false;
-    }
-    for (size_t j = 0; j < ctx->leds_len; j++) {
-      if (ctx->leds[j] >= KP_LED_COUNT) {
-        LOG_ERR("RGB behavior %s claims out-of-range LED %u", ctx->dev->name,
-                (uint32_t)ctx->leds[j]);
-        ctx->zone_valid = false;
-        kp_rgb_matrix_valid = false;
-      }
-      for (size_t k = 0; k < j; k++) {
-        if (ctx->leds[j] == ctx->leds[k]) {
-          LOG_ERR("RGB behavior %s claims LED %u more than once",
-                  ctx->dev->name, (uint32_t)ctx->leds[j]);
-          ctx->zone_valid = false;
-          kp_rgb_matrix_valid = false;
-        }
-      }
-    }
-    for (size_t prior = 0; prior < i; prior++) {
-      struct kp_rgb_behavior_context *other = kp_rgb_behavior_at(prior);
-      if (other == NULL)
-        continue;
-      bool overlap =
-          (ctx->all_leds && (other->all_leds || other->leds_len > 0)) ||
-          (other->all_leds && ctx->leds_len > 0);
-      if (!overlap && !ctx->all_leds && !other->all_leds) {
-        for (size_t a = 0; a < ctx->leds_len && !overlap; a++) {
-          for (size_t b = 0; b < other->leds_len; b++) {
-            if (ctx->leds[a] == other->leds[b])
-              overlap = true;
-          }
-        }
-      }
-      if (overlap) {
-        LOG_ERR("RGB behavior zones %s and %s overlap", ctx->dev->name,
-                other->dev->name);
-        ctx->zone_valid = false;
-        other->zone_valid = false;
-        kp_rgb_matrix_valid = false;
-      }
-    }
-  }
-  return kp_rgb_matrix_valid ? 0 : -EINVAL;
-}
-
 static int kp_rgb_matrix_init(void) {
   if (kp_rgb_has_leds() && !device_is_ready(strip)) {
     LOG_ERR("LED strip \"%s\" is not ready", strip->name);
     return -ENODEV;
-  }
-  if (kp_rgb_validate_zones() < 0) {
-    LOG_ERR("RGB matrix disabled because LED zones are invalid");
-    return -EINVAL;
   }
   kp_rgb_matrix_lock();
   kp_rgb_output_ready = true;
@@ -747,13 +584,9 @@ static int kp_rgb_matrix_init(void) {
                                   K_MSEC(100));
     }
   }
-  for (size_t n = 0; n < kp_rgb_behavior_count(); n++) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(n);
-    if (ctx != NULL) {
-      ctx->state.on = kp_rgb_effective_on(
-          ctx->state.on, IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
-    }
-  }
+  kp_rgb_controller.state.on = kp_rgb_effective_on(
+      kp_rgb_controller.state.on,
+      IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE));
   kp_rgb_publish_any_on_locked();
   bool any_on = kp_any_on_locked();
   kp_rgb_matrix_unlock();

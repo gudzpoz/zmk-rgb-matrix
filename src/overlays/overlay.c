@@ -7,10 +7,8 @@
  * renders its effect into a private layer buffer and blends the targeted LEDs
  * back onto the frame, over whatever the active effect painted.
  *
- * The effect is either nested (one child of this node: a private preset) or
- * referenced (`effect = <&fx>;`: a shared registry effect). The layer buffer is
- * shared across instances because overlay renderers run one at a time under the
- * engine lock.
+ * The layer buffer is shared across instances because overlay renderers run
+ * one at a time under the engine lock.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_overlay

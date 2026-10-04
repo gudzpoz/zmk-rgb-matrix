@@ -527,7 +527,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(node_id) == 1,                         \
                "overlay requires exactly one enabled nested effect");
 
-/* Runtime-only output gate for all local zones; default false. Does not change
+/* Runtime-only output gate for the local strip; default false. Does not change
  * logical ON/user intent, settings, or split commands. One external policy
  * aggregator must own the setter. Thread context only, including before matrix
  * initialization. Returns 0 once accepted, not once hardware is black; failed
@@ -541,16 +541,14 @@ int zmk_rgb_matrix_set_inhibited(bool inhibited);
 /* Returns the current gate state, not hardware settlement; safe from any context. */
 bool zmk_rgb_matrix_is_inhibited(void);
 
-int zmk_rgb_matrix_toggle(const struct device *behavior);
-int zmk_rgb_matrix_on(const struct device *behavior);
-int zmk_rgb_matrix_off(const struct device *behavior);
+int zmk_rgb_matrix_toggle(void);
+int zmk_rgb_matrix_on(void);
+int zmk_rgb_matrix_off(void);
 /* Returns logical ON after idle suppression; external inhibition does not alter it. */
-int zmk_rgb_matrix_get_state(const struct device *behavior, bool *on_off);
+int zmk_rgb_matrix_get_state(bool *on_off);
 
-int zmk_rgb_matrix_select_effect(const struct device *behavior,
-                                 uint16_t effect);
-int zmk_rgb_matrix_cycle_effect(const struct device *behavior,
-                                int16_t direction);
+int zmk_rgb_matrix_select_effect(uint16_t effect);
+int zmk_rgb_matrix_cycle_effect(int16_t direction);
 
 /* Schedule an immediate repaint when output is eligible. Any-context; does not
  * sample conditions or grant output permission. */

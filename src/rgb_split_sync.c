@@ -43,7 +43,8 @@ enum kp_rgb_sync_phase {
   KP_RGB_SYNC_SELECT,   /* RGB_EFS_CMD: must precede colour/period */
   KP_RGB_SYNC_COLOR,    /* RGB_COLOR_HSB_CMD on the now-active effect */
   KP_RGB_SYNC_DURATION, /* RGB_SPI_CMD on the now-active effect */
-  KP_RGB_SYNC_POWER,    /* RGB_ON_CMD / RGB_OFF_CMD, last */
+  KP_RGB_SYNC_POWER,    /* RGB_ON_CMD / RGB_OFF_CMD */
+  KP_RGB_SYNC_OVERLAYS,
 };
 
 enum kp_rgb_sync_emit {
@@ -58,7 +59,6 @@ struct kp_rgb_sync_source {
   uint8_t retry_count; /* consecutive failed sends for the in-flight command */
   uint16_t mask_word;  /* next overlay word to push this time round */
   int64_t ready_at;
-  size_t ctx_index;
   enum kp_rgb_sync_phase phase;
   /* Snapshot taken under kp_rgb_matrix_lock() at KP_RGB_SYNC_SELECT. */
   uint16_t effect_index;
@@ -127,7 +127,6 @@ static void kp_rgb_sync_refresh(void) {
       st->seen = true;
       st->pending = true;
       st->retry_count = 0;
-      st->ctx_index = 0;
       st->phase = KP_RGB_SYNC_SELECT;
       st->mask_word = 0;
       /* A peripheral is marked connected before its GATT characteristics are
@@ -145,10 +144,9 @@ static void kp_rgb_sync_refresh(void) {
 /* Absolute commands only: the peripheral does not run the central-state
  * conversion pass, so a relative command would be applied against whatever the
  * peripheral already had. */
-static bool kp_rgb_sync_send(uint8_t source, const struct device *dev, uint32_t cmd,
-                             uint32_t arg) {
+static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
   struct zmk_behavior_binding binding = {
-      .behavior_dev = dev->name,
+      .behavior_dev = kp_rgb_controller.dev->name,
       .param1 = cmd,
       .param2 = arg,
   };
@@ -172,37 +170,24 @@ static bool kp_rgb_sync_send(uint8_t source, const struct device *dev, uint32_t 
 /* Emits at most one wire command. */
 static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
                                                   struct kp_rgb_sync_source *st) {
-  while (st->ctx_index < kp_rgb_behavior_count()) {
-    struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(st->ctx_index);
-    if (ctx == NULL) {
-      st->ctx_index++;
-      st->phase = KP_RGB_SYNC_SELECT;
-      continue;
-    }
-
+  if (st->phase != KP_RGB_SYNC_OVERLAYS) {
     uint32_t cmd, arg;
     switch (st->phase) {
     case KP_RGB_SYNC_SELECT: {
-      const struct device *fx;
-      /* Snapshot under the lock rather than holding it across the split send. */
       kp_rgb_matrix_lock();
-      st->effect_index = (uint16_t)ctx->effect_index;
-      st->user_on = ctx->state.user_on;
-      fx = ctx->state.active_fx;
+      st->effect_index = (uint16_t)kp_rgb_controller.effect_index;
+      st->user_on = kp_rgb_controller.state.user_on;
+      const struct device *fx = kp_rgb_controller.state.active_fx;
       if (fx != NULL) {
         const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
         st->color = data->color;
-        /* RGB_SPI_CMD with param2 == 0 means "increase" on the receiving side,
-         * so an absolute zero period is not expressible. */
+        /* Zero means "increase" in RGB_SPI_CMD, not an absolute period. */
         st->duration_ms = (uint16_t)MAX(data->duration_ms, 1u);
       }
       kp_rgb_matrix_unlock();
-
       if (fx == NULL) {
-        LOG_WRN("%s has no active effect", ctx->dev->name);
-        st->ctx_index++;
-        st->phase = KP_RGB_SYNC_SELECT;
-        continue;
+        st->phase = KP_RGB_SYNC_POWER;
+        return KP_RGB_SYNC_EMIT_SENT;
       }
       cmd = RGB_EFS_CMD;
       arg = st->effect_index;
@@ -224,38 +209,21 @@ static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
       return KP_RGB_SYNC_EMIT_DONE;
     }
 
-    if (!kp_rgb_sync_send(source, ctx->dev, cmd, arg)) {
-      return KP_RGB_SYNC_EMIT_RETRY; /* the phase does not advance */
+    if (!kp_rgb_sync_send(source, cmd, arg)) {
+      return KP_RGB_SYNC_EMIT_RETRY;
     }
-
-    if (st->phase == KP_RGB_SYNC_POWER) {
-      st->ctx_index++;
-      st->phase = KP_RGB_SYNC_SELECT;
-    } else {
-      st->phase++;
-    }
+    st->phase++;
     return KP_RGB_SYNC_EMIT_SENT;
   }
 
-  /* The overlay state is not per-context, so it goes after them, one word per
-   * work item (this function already paces at KP_RGB_SYNC_STEP_DELAY_MS).
-   * Without it a peripheral that connects while a layer is already held would
-   * stay dark until the next change. */
   if (st->mask_word < kp_rgb_overlay_word_count()) {
-    struct kp_rgb_behavior_context *first = kp_rgb_behavior_at(0);
-    if (first == NULL) {
-      st->mask_word = kp_rgb_overlay_word_count();
-      LOG_WRN("No RGB behavior to push the overlay state through");
-    } else {
-      uint16_t word = st->mask_word;
-      if (!kp_rgb_sync_send(
-              source, first->dev, RGB_OVL_STATE_CMD,
-              RGB_OVL_STATE_VAL(word, kp_rgb_overlay_get_word(word)))) {
-        return KP_RGB_SYNC_EMIT_RETRY; /* the word does not advance */
-      }
-      st->mask_word++;
-      return KP_RGB_SYNC_EMIT_SENT;
+    uint16_t word = st->mask_word;
+    if (!kp_rgb_sync_send(source, RGB_OVL_STATE_CMD,
+                          RGB_OVL_STATE_VAL(word, kp_rgb_overlay_get_word(word)))) {
+      return KP_RGB_SYNC_EMIT_RETRY;
     }
+    st->mask_word++;
+    return KP_RGB_SYNC_EMIT_SENT;
   }
 
   LOG_INF("Complete for source %u", source);

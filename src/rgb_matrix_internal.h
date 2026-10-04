@@ -25,22 +25,18 @@ static inline bool kp_rgb_effective_on(bool intent, bool apply_idle) {
   return intent && (!apply_idle || active);
 }
 
-/* State is owned by one keypaw,behavior-rgb-matrix device. The physical matrix
- * engine is shared, but these values are deliberately not global. */
 struct kp_rgb_state {
   bool on;
   bool user_on;
   const struct device *active_fx;
 };
 
-/* One effect's devicetree defaults, baked at build time so a settings reset
- * restores exactly what a fresh flash would show. */
 struct kp_rgb_effect_defaults {
   struct kp_rgb_hsb color; /* b is overwritten by initial_brightness */
-  uint16_t duration_ms;    /* 0 -> the behavior's initial_duration_ms */
+  uint16_t duration_ms;    /* 0 -> initial_duration_ms */
 };
 
-struct kp_rgb_behavior_context {
+struct kp_rgb_controller {
   const struct device *dev;
   struct kp_rgb_state state;
   struct kp_rgb_tuning tuning;
@@ -49,46 +45,27 @@ struct kp_rgb_behavior_context {
   const uint8_t *no_cycle;
   size_t effect_count;
   size_t effect_index;
-  const uint32_t *leds;
-  size_t leds_len;
-  bool all_leds;
-  bool zone_valid;
-  /* Boot defaults, re-applied by a settings reset. Raw devicetree values. */
   bool initial_on;
   int32_t initial_brightness;
   int32_t initial_duration_ms;
   uint16_t initial_effect;
-#if IS_ENABLED(CONFIG_SETTINGS)
-  struct k_work_delayable save_work;
-#endif
 };
 
-struct kp_rgb_behavior_context *
-kp_rgb_behavior_context_from_device(const struct device *dev);
-size_t kp_rgb_behavior_count(void);
-struct kp_rgb_behavior_context *kp_rgb_behavior_at(size_t index);
-bool kp_rgb_behavior_owns_led(const struct kp_rgb_behavior_context *ctx,
-                              size_t led);
+extern struct kp_rgb_controller kp_rgb_controller;
 
-/* Guards the shared physical output and all behavior contexts. Never hold it
- * across settings_save_one(), which can block on flash I/O. */
+/* Never hold the matrix lock across flash I/O. */
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
-/* Behavior registry and context-local command helpers. */
-int kp_rgb_resolve_active(struct kp_rgb_behavior_context *ctx);
-uint16_t kp_rgb_calc_effect_index(const struct kp_rgb_behavior_context *ctx,
-                                  uint16_t current, int16_t delta);
-int kp_rgb_select_effect(struct kp_rgb_behavior_context *ctx, uint16_t index);
+int kp_rgb_resolve_active(void);
+uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
+int kp_rgb_select_effect(uint16_t index);
 
 /* refresh() runs on the control worker; dispatch() is central-only. */
 bool kp_rgb_overlay_gate(const struct device *dev);
-/* True when the overlay is `all-leds` at full opacity. */
 bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
-/* Every registered overlay, in container order. The default paint list for an
- * effect with no `overlays`/`no-overlays` override. */
 const struct device *const *kp_rgb_overlay_list(void);
 size_t kp_rgb_overlay_count(void);
 uint16_t kp_rgb_overlay_word_count(void);
@@ -115,51 +92,34 @@ static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
 static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
 
-/* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word as
- * (word << 16) | bits. */
+/* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word. */
 #define RGB_OVL_STATE_VAL(word, value)                                         \
   (((uint32_t)(word) << 16) | ((uint32_t)(value) & 0xFFFFu))
 #define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
 #define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
 
-/* Largest effect registry the engine accepts: the persisted blob holds one fixed
- * entry per effect. Without persistence the effect index byte is the limit. */
 #if IS_ENABLED(CONFIG_SETTINGS)
 #define KP_RGB_MAX_REGISTRY_EFFECTS KP_RGB_PERSIST_MAX_EFFECTS
 #else
 #define KP_RGB_MAX_REGISTRY_EFFECTS UINT8_MAX
 #endif
 
-size_t kp_rgb_effect_count(const struct kp_rgb_behavior_context *ctx);
-const struct device *kp_rgb_effect_at(const struct kp_rgb_behavior_context *ctx,
-                                      size_t index);
-size_t kp_rgb_selected_effect(const struct kp_rgb_behavior_context *ctx);
+size_t kp_rgb_effect_count(void);
+const struct device *kp_rgb_effect_at(size_t index);
+size_t kp_rgb_selected_effect(void);
+int kp_rgb_save_state(void);
 
-int kp_rgb_save_state(struct kp_rgb_behavior_context *ctx);
-
-/* Restore the devicetree defaults (power intent, every effect's preset
- * colour/period, the selected effect). Does not start or stop the tick timer;
- * the caller applies power with zmk_rgb_matrix_on()/off(). Returns the
- * resolve result: < 0 when no initial effect is available. */
-int kp_rgb_apply_defaults(struct kp_rgb_behavior_context *ctx);
-
-/* Clear this half's persisted RGB state and restore the defaults. Safe from a
- * behavior handler: the flash work runs off the low-priority queue. */
+/* Restore presets and user intent. The caller applies effective power. */
+int kp_rgb_apply_defaults(void);
 void kp_rgb_reset_state(void);
 
-int kp_rgb_calc_effect(struct kp_rgb_behavior_context *ctx, int16_t direction);
-struct kp_rgb_hsb kp_rgb_calc_hue(const struct kp_rgb_behavior_context *ctx,
-                                  int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_sat(const struct kp_rgb_behavior_context *ctx,
-                                  int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_brt(const struct kp_rgb_behavior_context *ctx,
-                                  int8_t direction);
-int kp_rgb_change_hue(struct kp_rgb_behavior_context *ctx, int8_t direction);
-int kp_rgb_change_sat(struct kp_rgb_behavior_context *ctx, int8_t direction);
-int kp_rgb_change_brt(struct kp_rgb_behavior_context *ctx, int8_t direction);
-int kp_rgb_set_hsb(struct kp_rgb_behavior_context *ctx,
-                   struct kp_rgb_hsb color);
-int kp_rgb_change_duration(struct kp_rgb_behavior_context *ctx,
-                           int16_t direction);
-int kp_rgb_set_duration(struct kp_rgb_behavior_context *ctx,
-                        uint32_t duration_ms);
+int kp_rgb_calc_effect(int16_t direction);
+struct kp_rgb_hsb kp_rgb_calc_hue(int8_t direction);
+struct kp_rgb_hsb kp_rgb_calc_sat(int8_t direction);
+struct kp_rgb_hsb kp_rgb_calc_brt(int8_t direction);
+int kp_rgb_change_hue(int8_t direction);
+int kp_rgb_change_sat(int8_t direction);
+int kp_rgb_change_brt(int8_t direction);
+int kp_rgb_set_hsb(struct kp_rgb_hsb color);
+int kp_rgb_change_duration(int16_t direction);
+int kp_rgb_set_duration(uint32_t duration_ms);

@@ -273,8 +273,7 @@ static int kp_sim_apply(void) {
   }
 
   if (requested_effect != UINT32_MAX) {
-    const int err = zmk_rgb_matrix_select_effect(
-        DEVICE_DT_GET(DT_NODELABEL(kprgb)), (uint16_t)requested_effect);
+    const int err = zmk_rgb_matrix_select_effect((uint16_t)requested_effect);
     if (err < 0) {
       printk("keypaw-rgb-sim: effect %u unavailable (%d)\n",
              (unsigned int)requested_effect, err);

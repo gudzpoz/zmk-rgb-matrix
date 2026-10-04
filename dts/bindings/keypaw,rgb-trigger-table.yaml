@@ -11,12 +11,13 @@ compatible: "keypaw,rgb-trigger-table"
 
 child-binding:
   description: |
-    Independent one-shot RGB actions on condition edges. At least one of
-    on-enter and on-exit must contain a binding. Supported targets are RGB
-    controllers, registered RGB effect behaviors, and RGB latch behaviors;
-    arbitrary keyboard behaviors and held presses are not supported.
-    Both lists invoke commands, not key-release handlers. Global commands use
-    central conversion and split transport once. Invalid condition snapshots
+    Independent actions on condition edges. At least one of on-enter and on-exit
+    must contain a binding. Each action receives one pressed invocation; no
+    matching release is sent. Use only behaviors that complete without a release,
+    including third-party one-shot behaviors. The user must ensure this; action
+    targets are not restricted to an allowlist. on-exit invokes its own actions,
+    not releases for on-enter actions. Global commands use central conversion and
+    split transport once. Invalid condition snapshots
     disable the rule without an exit action. Unsettled feedback chains are
     limited to eight passes and participating rules are disabled until reboot.
   properties:

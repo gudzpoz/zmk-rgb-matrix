@@ -34,52 +34,20 @@ MOCKS = r'''
 #define LOG_MODULE_DECLARE(...)
 static void test_log(const char *format, ...) { (void)format; }
 #define LOG_ERR(...) test_log(__VA_ARGS__)
-#define LOG_WRN(...) test_log(__VA_ARGS__)
+static unsigned warnings;
+static char last_warning[128];
+static void test_warning(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vsnprintf(last_warning, sizeof(last_warning), format, args);
+    va_end(args);
+    warnings++;
+}
+#define LOG_WRN(...) test_warning(__VA_ARGS__)
 struct zmk_behavior_binding { const char *behavior_dev; uint32_t param1, param2; };
 struct zmk_behavior_binding_event { int64_t timestamp; };
-struct behavior_driver_api {
-    int (*binding_convert_central_state_dependent_params)(
-        struct zmk_behavior_binding *, struct zmk_behavior_binding_event);
-};
-struct device { const void *api; bool ready; };
-static int kp_rgb_effect_convert_central_state_dependent_params(
-    struct zmk_behavior_binding *b, struct zmk_behavior_binding_event e) {
-    (void)b; (void)e; return 0;
-}
-static const struct behavior_driver_api effect_api = {
-    kp_rgb_effect_convert_central_state_dependent_params
-};
-static const struct behavior_driver_api keyboard_api = {0};
-static struct device controller = {&keyboard_api, true};
-static struct device effect = {&effect_api, true};
-static struct device latch = {&keyboard_api, true};
-static struct device keyboard = {&keyboard_api, true};
-static struct device private_effect = {&effect_api, true};
+struct device { int unused; };
 static struct device conditions[4];
-struct kp_rgb_behavior_context { const struct device *dev; };
-static struct kp_rgb_behavior_context context = {&controller};
-static size_t kp_rgb_behavior_count(void) { return 1; }
-static struct kp_rgb_behavior_context *kp_rgb_behavior_at(size_t i) {
-    assert(i == 0); return &context;
-}
-static size_t kp_rgb_effect_count(const struct kp_rgb_behavior_context *ctx) {
-    assert(ctx == &context); return 2;
-}
-static const struct device *kp_rgb_effect_at(
-    const struct kp_rgb_behavior_context *ctx, size_t i) {
-    assert(ctx == &context && i < 2);
-    /* An arbitrary behavior in the registry must not pass effect validation. */
-    return i == 0 ? &effect : &keyboard;
-}
-static const struct device *zmk_behavior_get_binding(const char *name) {
-    if (!strcmp(name, "rgb")) return &controller;
-    if (!strcmp(name, "fx")) return &effect;
-    if (!strcmp(name, "latch")) return &latch;
-    if (!strcmp(name, "key")) return &keyboard;
-    if (!strcmp(name, "private")) return &private_effect;
-    return NULL;
-}
-static bool device_is_ready(const struct device *dev) { return dev->ready; }
 static bool sampled, values[4], valid[4], required_ok[4];
 static unsigned requires[4], reads, validity_reads;
 static bool kp_rgb_condition_require(const struct device *dev) {
@@ -104,6 +72,10 @@ static int zmk_behavior_invoke_binding(const struct zmk_behavior_binding *bindin
                                      bool pressed) {
     assert(sampled && pressed && event.timestamp == expected_time);
     assert(action_count < ARRAY_SIZE(actions));
+    if (binding->param1 == 25 || binding->param1 == 26) {
+        assert(!strcmp(binding->behavior_dev, "third-party"));
+        assert(binding->param2 == 77);
+    }
     actions[action_count++] = binding->param1;
     if (action_hook) action_hook(binding->param1);
     return dispatch_error;
@@ -111,22 +83,22 @@ static int zmk_behavior_invoke_binding(const struct zmk_behavior_binding *bindin
 '''
 
 FIXTURE = r'''
-#define ACTION(name, code, is_latch) \
-    { .binding = {name, code, 0}, .latch = is_latch }
-static const struct kp_trig_action enter0[] = { ACTION("rgb", 10, false) };
-static const struct kp_trig_action exit0[] = { ACTION("rgb", 11, false) };
-static const struct kp_trig_action enter1[] = { ACTION("fx", 20, false) };
-static const struct kp_trig_action exit1[] = { ACTION("fx", 21, false) };
-static const struct kp_trig_action enter2[] = { ACTION("latch", 25, true) };
-static const struct kp_trig_action exit2[] = { ACTION("latch", 26, true) };
-static const struct kp_trig_action constant[] = { ACTION("rgb", 30, false) };
-static const struct kp_trig_action shared[] = { ACTION("rgb", 40, false) };
-static const struct kp_trig_action shared_exit[] = { ACTION("rgb", 41, false) };
-static const struct kp_trig_action exit_only[] = { ACTION("rgb", 50, false) };
+#define ACTION(name, code) \
+    { .binding = {name, code, 0} }
+static const struct kp_trig_action enter0[] = { ACTION("rgb", 10) };
+static const struct kp_trig_action exit0[] = { ACTION("rgb", 11) };
+static const struct kp_trig_action enter1[] = { ACTION("fx", 20) };
+static const struct kp_trig_action exit1[] = { ACTION("fx", 21) };
+static const struct kp_trig_action enter2[] = { { .binding = {"third-party", 25, 77} } };
+static const struct kp_trig_action exit2[] = { { .binding = {"third-party", 26, 77} } };
+static const struct kp_trig_action constant[] = { ACTION("rgb", 30) };
+static const struct kp_trig_action shared[] = { ACTION("rgb", 40) };
+static const struct kp_trig_action shared_exit[] = { ACTION("rgb", 41) };
+static const struct kp_trig_action exit_only[] = { ACTION("rgb", 50) };
 static const struct kp_trig kp_triggers[] = {
     {"enter", &conditions[0], enter0, 1, exit0, 1, false},
     {"baseline", &conditions[1], enter1, 1, exit1, 1, true},
-    {"latch", &conditions[2], enter2, 1, exit2, 1, false},
+    {"third-party", &conditions[2], enter2, 1, exit2, 1, false},
     {"constant", NULL, constant, 1, NULL, 0, false},
     {"shared", &conditions[0], shared, 1, shared_exit, 1, false},
     {"exit-only", &conditions[3], NULL, 0, exit_only, 1, false},
@@ -147,7 +119,7 @@ static void reset(void) {
     for (size_t i = 0; i < 4; i++) valid[i] = required_ok[i] = true;
     sampled = false; reads = validity_reads = action_count = 0;
     expected_time = 1000; action_hook = NULL; dispatch_error = 0;
-    controller.ready = effect.ready = latch.ready = true;
+    warnings = 0; last_warning[0] = '\0';
 }
 static void initialize(void) {
     assert(!evaluate()); /* No premature source access or startup dispatch. */
@@ -251,25 +223,29 @@ static void quarantine(void) {
     kp_rgb_triggers_quarantine();
     assert(kp_trigger_state[0].disabled && kp_trigger_state[4].disabled);
 }
-static void supported_actions(void) {
-    reset();
-    const struct kp_trig_action good[] = {
-        ACTION("rgb", 0, false), ACTION("fx", 0, false), ACTION("latch", 0, true)
+static void third_party_actions(void) {
+    neutral_start();
+    values[2] = true; dispatch_error = -5;
+    assert(evaluate() && action_count == 1 && actions[0] == 25);
+    assert(warnings == 1 && strstr(last_warning, "err -5"));
+    assert(!kp_trigger_state[2].disabled && kp_trigger_state[2].participant);
+    assert(!evaluate() && action_count == 1 && warnings == 1); /* No retry/release. */
+    values[2] = false; dispatch_error = 1;
+    assert(evaluate() && action_count == 2 && actions[1] == 26);
+    assert(warnings == 1); /* Nonnegative behavior returns are not errors. */
+    assert(!evaluate() && action_count == 2);
+
+    const struct kp_trig_action actions_to_run[] = {
+        ACTION("third-party-a", 60), ACTION("third-party-b", 61)
     };
-    assert(kp_trig_actions_valid(good, ARRAY_SIZE(good)));
-    const char *bad_names[] = {"key", "private", "missing"};
-    for (size_t i = 0; i < ARRAY_SIZE(bad_names); i++) {
-        struct kp_trig_action bad = {.binding = {bad_names[i], 0, 0}};
-        assert(!kp_trig_actions_valid(&bad, 1));
-    }
-    effect.ready = false;
-    assert(!kp_trig_actions_valid(good, ARRAY_SIZE(good)));
-    kp_rgb_triggers_init(); sampled = true;
-    assert(kp_trigger_state[1].disabled);
-    assert(evaluate() && action_count == 1 && actions[0] == 30);
+    dispatch_error = -7;
+    kp_triggers_run(&kp_triggers[2], actions_to_run, ARRAY_SIZE(actions_to_run), expected_time);
+    assert(action_count == 4 && actions[2] == 60 && actions[3] == 61);
+    assert(warnings == 3 && strstr(last_warning, "binding 1") &&
+           strstr(last_warning, "err -7")); /* Continue after a failed binding. */
 }
 int main(void) {
-    startup(); capture_before_dispatch(); faulty_roots(); quarantine(); supported_actions();
+    startup(); capture_before_dispatch(); faulty_roots(); quarantine(); third_party_actions();
     puts("production-extracted central/standalone trigger tests passed");
     return 0;
 }

@@ -1,22 +1,13 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Keypaw RGB Matrix control
+description: Whole-strip RGB matrix controller (single instance)
 
 compatible: "keypaw,behavior-rgb-matrix"
 
 include: two_param.yaml
 
 properties:
-  leds:
-    type: array
-    required: false
-    description: |
-      Local LED chain indices owned by this behavior. Entries must be unique
-      and within the strip chain length. When omitted, this behavior owns the
-      complete physical matrix for backward compatibility; multiple behaviors
-      therefore must provide disjoint `leds` lists.
-
   max-brightness:
     type: int
     default: 40

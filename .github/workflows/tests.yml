@@ -74,6 +74,16 @@ jobs:
           west init -l app
           west update --fetch-opt=--filter=tree:0
 
+      - name: Devicetree enum helper tests
+        run: python3 tests/unit/test_dt_enum.py
+
+      - name: Singleton and private effect tests
+        run: |
+          python3 tests/unit/test_singleton.py
+          python3 tests/unit/test_singleton_settings.py
+          python3 tests/unit/test_singleton_split.py
+          python3 tests/unit/test_private_events.py
+
       - name: Output gate tests
         run: python3 tests/unit/test_output_gate.py
 
@@ -98,3 +108,8 @@ jobs:
           ZMK_WS: ${{ github.workspace }}/zmk-ws
         # Invoked through bash so the executable bit is not load-bearing.
         run: bash tests/sim/run-smoke.sh
+
+      - name: Configuration contracts
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        run: python3 tests/sim/test_configuration.py

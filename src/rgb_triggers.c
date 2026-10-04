@@ -12,7 +12,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
-#include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/rgb_matrix.h>
 
@@ -25,7 +24,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct kp_trig_action {
   struct zmk_behavior_binding binding;
-  bool latch;
 };
 
 struct kp_trig {
@@ -46,9 +44,7 @@ struct kp_trig {
                    (DT_PHA_BY_IDX(node_id, prop, idx, param1))),               \
                .param2 = COND_CODE_0(                                          \
                    DT_PHA_HAS_CELL_AT_IDX(node_id, prop, idx, param2), (0),    \
-                   (DT_PHA_BY_IDX(node_id, prop, idx, param2)))},              \
-   .latch = DT_NODE_HAS_COMPAT(DT_PHANDLE_BY_IDX(node_id, prop, idx),          \
-                               keypaw_behavior_rgb_overlay_toggle)}
+                   (DT_PHA_BY_IDX(node_id, prop, idx, param2)))}}
 
 #define KP_TRIG_ACTIONS(node_id, prop)                                         \
   COND_CODE_1(                                                                 \
@@ -91,56 +87,16 @@ static struct {
 } kp_trigger_state[ARRAY_SIZE(kp_triggers)];
 static bool kp_triggers_ready;
 
-static bool kp_trig_actions_valid(const struct kp_trig_action *actions, size_t len) {
-  for (size_t i = 0; i < len; i++) {
-    const struct device *dev = zmk_behavior_get_binding(actions[i].binding.behavior_dev);
-    if (dev == NULL || !device_is_ready(dev)) {
-      return false;
-    }
-    if (actions[i].latch) {
-      continue;
-    }
-    bool supported = false;
-    for (size_t j = 0; j < kp_rgb_behavior_count(); j++) {
-      const struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(j);
-      if (ctx->dev == dev) {
-        supported = true;
-        break;
-      }
-      for (size_t k = 0; k < kp_rgb_effect_count(ctx); k++) {
-        const struct behavior_driver_api *api = dev->api;
-        if (kp_rgb_effect_at(ctx, k) == dev && api != NULL &&
-            api->binding_convert_central_state_dependent_params ==
-                kp_rgb_effect_convert_central_state_dependent_params) {
-          supported = true;
-          break;
-        }
-      }
-      if (supported) {
-        break;
-      }
-    }
-    if (!supported) {
-      return false;
-    }
-  }
-  return true;
-}
-
 void kp_rgb_triggers_init(void) {
   if (kp_triggers_ready) {
     return;
   }
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];
-    bool valid = kp_trig_actions_valid(t->enter, t->enter_len) &&
-                 kp_trig_actions_valid(t->exit, t->exit_len);
-    if (valid && t->condition != NULL) {
-      valid = kp_rgb_condition_require(t->condition);
-    }
+    bool valid = t->condition == NULL || kp_rgb_condition_require(t->condition);
     kp_trigger_state[i].disabled = !valid;
     if (!valid) {
-      LOG_ERR("RGB trigger %s disabled: invalid action or condition", t->name);
+      LOG_ERR("RGB trigger %s disabled: invalid condition", t->name);
     }
   }
   kp_triggers_ready = true;

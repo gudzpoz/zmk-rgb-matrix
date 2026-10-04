@@ -27,7 +27,8 @@ def function(name):
 TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD: \{\n.*?^  \}\n", BEHAVIOR_SOURCE, re.M | re.S)
 assert TOGGLE_CASE, "RGB toggle conversion"
 TOGGLE_FUNCTION = """
-static int convert_toggle(struct kp_rgb_behavior_context *ctx, struct binding *binding) {
+static int convert_toggle(struct kp_rgb_controller *ctx, struct binding *binding) {
+    (void)ctx;
     switch (binding->param1) {
 """ + TOGGLE_CASE.group() + """
     default: return -EINVAL;
@@ -89,16 +90,13 @@ struct kp_rgb_effect_api {
  const struct device *const *overlays; size_t overlays_len;
 };
 struct kp_rgb_overlay_api { void (*render)(const struct device *,struct kp_rgb_frame *); };
-struct kp_rgb_behavior_context {
+struct kp_rgb_controller {
  const struct device *dev;
  struct { bool on,user_on; const struct device *active_fx; } state;
- bool zone_valid,all_leds; const uint32_t *leds; size_t leds_len;
  struct kp_rgb_tuning tuning;
 };
-static struct kp_rgb_behavior_context ctx;
-static size_t kp_rgb_behavior_count(void) { return 1; }
-static struct kp_rgb_behavior_context *kp_rgb_behavior_at(size_t n) { return n?NULL:&ctx; }
-static struct kp_rgb_behavior_context *kp_rgb_behavior_context_from_device(const struct device *d) { return d?&ctx:NULL; }
+static struct kp_rgb_controller kp_rgb_controller;
+#define ctx kp_rgb_controller
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;
 static void kp_rgb_matrix_lock(void) { pthread_mutex_lock(&lock); held++; }
@@ -129,10 +127,10 @@ static struct zmk_position_state_changed kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
 static uint8_t kp_rgb_pending_head,kp_rgb_pending_tail;
 static uint32_t kp_rgb_pending_dropped;
 static atomic_t kp_rgb_any_on,kp_rgb_inhibited;
-static bool kp_rgb_matrix_valid,kp_rgb_output_ready,kp_rgb_black_pending;
+static bool kp_rgb_output_ready,kp_rgb_black_pending;
 static uint32_t kp_rgb_black_retry_ms=100,last_tick;
 static uint64_t now;
-static struct led_rgb pixels[KP_LED_COUNT],scratch[KP_LED_COUNT];
+static struct led_rgb pixels[KP_LED_COUNT];
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
 static uint16_t kp_rgb_board_length=100,kp_rgb_board_height=100;
 static const struct device dummy = {.name="strip"};
@@ -160,8 +158,8 @@ static int k_work_reschedule_for_queue(void *q,struct k_work *w,int delay) { (vo
 static void k_timer_stop(struct k_timer *t) { (void)t;timer_period=0; }
 static void k_timer_start(struct k_timer *t,int delay,int period) { (void)t;(void)delay;timer_period=period; }
 #endif
-static bool device_is_ready(const struct device *d) { return d!=NULL; }
-static int kp_rgb_validate_zones(void) { kp_rgb_matrix_valid=true;return 0; }
+static bool host_strip_ready = true;
+static bool device_is_ready(const struct device *d) { return d!=NULL && host_strip_ready; }
 void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
 bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
 void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
@@ -221,7 +219,7 @@ FUNCTIONS = [
     "zmk_rgb_matrix_flush", "kp_rgb_pending_purge", "kp_rgb_pending_push",
     "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_matrix_pending_handler",
     "kp_rgb_permission_handler", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
-    "zmk_rgb_matrix_get_state", "kp_rgb_matrix_init",
+    "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "kp_rgb_matrix_init",
 ]
 
 

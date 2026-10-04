@@ -24,11 +24,10 @@ static void fixture(bool on, bool inhibit) {
     ctx.dev = &dummy;
     ctx.state.on = ctx.state.user_on = on;
     ctx.state.active_fx = &fx;
-    ctx.zone_valid = ctx.all_leds = true;
     assert(zmk_rgb_matrix_set_inhibited(inhibit) == 0);
     assert(kp_rgb_matrix_init() == 0);
     bool effective;
-    assert(zmk_rgb_matrix_get_state(&dummy, &effective) == 0 && effective == on);
+    assert(zmk_rgb_matrix_get_state(&effective) == 0 && effective == on);
     struct binding binding = {.param1 = RGB_TOG_CMD};
     assert(convert_toggle(&ctx, &binding) == 0);
     assert(binding.param1 == (on ? RGB_OFF_CMD : RGB_ON_CMD));
@@ -82,14 +81,14 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name, "off")) {
         fixture(true, false);
         host_run_ready();
-        assert(zmk_rgb_matrix_off(&dummy) == 0);
+        assert(zmk_rgb_matrix_off() == 0);
         host_run_ready();
         int before = polls;
         host_run_until(160);
         assert(!kp_tick_timer.active && polls == before);
         assert(writes == (KP_LED_COUNT ? 3 : 0));
         if (KP_LED_COUNT) assert_pixels(host_transfer_count - 1, 0);
-        assert(zmk_rgb_matrix_on(&dummy) == 0);
+        assert(zmk_rgb_matrix_on() == 0);
         host_run_ready();
         idle = true;
         kp_rgb_permission_handler(NULL);
@@ -238,7 +237,7 @@ int main(int argc, char **argv) {
         host_run_until(250);
         assert(host_probe_work.runs == 7 && !host_next_scheduled());
         host_mutate_output = false;
-        assert(zmk_rgb_matrix_on(&dummy) == 0);
+        assert(zmk_rgb_matrix_on() == 0);
         host_run_ready();
         if (KP_LED_COUNT) assert(pixels[0].r == 17);
         host_lock_failures = 1;

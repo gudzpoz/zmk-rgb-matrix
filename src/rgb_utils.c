@@ -182,14 +182,6 @@ bool kp_rgb_overlay_refresh(void) {
 
 void kp_rgb_overlay_dispatch(void) {
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
-  /* Any behavior node works: the command is BEHAVIOR_LOCALITY_GLOBAL and reads
-   * no context state, so this reaches every peripheral. Only words that differ
-   * from the last broadcast are sent. */
-  struct kp_rgb_behavior_context *ctx = kp_rgb_behavior_at(0);
-  if (ctx == NULL) {
-    return;
-  }
-
   struct zmk_behavior_binding_event event = {.timestamp = k_uptime_get()};
   for (uint16_t w = 0; w < KP_RGB_OVERLAY_WORDS; w++) {
     uint16_t bits = kp_rgb_overlay_get_word(w);
@@ -198,7 +190,7 @@ void kp_rgb_overlay_dispatch(void) {
     }
 
     struct zmk_behavior_binding binding = {
-        .behavior_dev = ctx->dev->name,
+        .behavior_dev = kp_rgb_controller.dev->name,
         .param1 = RGB_OVL_STATE_CMD,
         .param2 = RGB_OVL_STATE_VAL(w, bits),
     };
