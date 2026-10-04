@@ -56,15 +56,15 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
   struct kp_eff_ripple_data *data = dev->data;
   const struct kp_eff_ripple_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
   bool evolving = false;
 
   struct kp_rgb_hsb bg = base;
   bg.b = KP_RGB_SCALE(base.b, cfg->background_brightness);
-  struct led_rgb bg_rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(bg, pct));
-  for (size_t i = 0; i < f->count; i++) {
+  struct led_rgb bg_rgb = kp_rgb_hsb_to_rgb(bg);
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     f->pixels[i] = bg_rgb;
   }
 
@@ -96,7 +96,8 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
                        ? 255u
                        : (uint8_t)(255u * (period - age) / fade_window);
 
-    for (size_t i = 0; i < f->count; i++) {
+    for (size_t target = 0; target < f->target_count; target++) {
+      size_t i = f->targets[target];
       int32_t dx = (int32_t)f->coords[i].x - trigger->x;
       int32_t dy = (int32_t)f->coords[i].y - trigger->y;
       /* Linear distance, as every other spatial effect uses: comparing a squared
@@ -116,7 +117,7 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
       hsb.h = (uint16_t)((hsb.h + (uint32_t)radius * KP_RGB_HUE_MAX / f->board_length) %
                          KP_RGB_HUE_MAX);
       hsb.b = (uint8_t)((uint32_t)base.b * amp / 255u);
-      kp_eff_ripple_add(&f->pixels[i], kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct)));
+      kp_eff_ripple_add(&f->pixels[i], kp_rgb_hsb_to_rgb(hsb));
     }
   }
   return evolving;

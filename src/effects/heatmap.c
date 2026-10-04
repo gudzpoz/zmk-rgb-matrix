@@ -69,7 +69,6 @@ static bool kp_eff_heatmap_render(const struct device *dev,
   return false;
 #else
   struct kp_eff_heatmap_data *data = dev->data;
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
   int64_t end_ms = MAX(f->now_ms, 0);
@@ -86,8 +85,12 @@ static bool kp_eff_heatmap_render(const struct device *dev,
   bool evolving = false;
 
   for (size_t i = 0; i < f->count; i++) {
+    evolving |= data->temp[i] != 0;
+  }
+
+  for (size_t target = 0; target < f->target_count; target++) {
+    size_t i = f->targets[target];
     uint8_t t = data->temp[i];
-    evolving |= t != 0;
     if (t == 0) {
       f->pixels[i] = (struct led_rgb){0, 0, 0};
       continue;
@@ -98,7 +101,7 @@ static bool kp_eff_heatmap_render(const struct device *dev,
         .s = KP_RGB_SAT_MAX,
         .b = (uint8_t)((uint32_t)base.b * t / 255u),
     };
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
   return evolving;
 #endif /* KP_LED_COUNT > 0 */

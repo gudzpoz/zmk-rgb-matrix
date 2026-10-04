@@ -55,7 +55,6 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   uint16_t cy = bh / 2;
   bool dual = cfg->direction == DT_ENUM_CONST(direction, dual);
   bool rainbow = cfg->palette == DT_ENUM_CONST(palette, rainbow);
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
   /* Farthest distance from the (single or nearer dual) center to a corner. */
@@ -77,7 +76,8 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   }
   uint32_t phase01_eff = kp_rgb_arm_phase(phase01, arms);
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint16_t x = f->coords[i].x;
     uint16_t y = f->coords[i].y;
     uint32_t spatial;
@@ -150,7 +150,7 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
       /* Solid palette: a travelling brightness band keeps the sweep visible. */
       hsb.b = (uint8_t)((uint32_t)base.b * (32768u + pos / 2) / 65536u);
     }
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
 
   return true;

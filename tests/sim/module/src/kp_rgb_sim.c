@@ -127,6 +127,8 @@ static int capture_update_rgb(const struct device *dev, struct led_rgb *pixels,
     capture_write(rgb, sizeof(rgb));
   }
 
+  /* Zephyr permits drivers to overwrite the transfer buffer. */
+  memset(pixels, 0xa5, num_pixels * sizeof(*pixels));
   return 0;
 }
 

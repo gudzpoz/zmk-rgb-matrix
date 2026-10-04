@@ -124,7 +124,6 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
   }
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
-  uint8_t pct = kp_rgb_brightness_pct(f);
   /* Tail length in layout units, capped at the board height so a short board
    * fades across its full height instead of glowing uniformly. */
   uint16_t trail = MIN(KP_DIGITAL_RAIN_TRAIL_ROWS * KP_RGB_KEY_UNIT,
@@ -168,7 +167,8 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
     data->speed_q8[c] = speed;
   }
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint8_t c = data->col_of_led[i];
     int32_t d = KP_RAIN_FROM_Q8(data->head_q8[c]) - (int32_t)f->coords[i].y;
     /* Only the trail above the falling head glows; the rest is dark. */
@@ -184,7 +184,7 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
     /* Whiter at the head, full preset hue toward the tail. */
     hsb.s = (uint8_t)((255u - b) * KP_RGB_SAT_MAX / 255u);
     hsb.b = (uint8_t)((uint32_t)base.b * b / 255u);
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
 #endif /* KP_LED_COUNT > 0 */
   return true;

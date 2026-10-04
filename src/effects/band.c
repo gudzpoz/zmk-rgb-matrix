@@ -72,10 +72,10 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   uint32_t max_r = MAX(kp_rgb_isqrt((uint32_t)cx * cx + (uint32_t)cy * cy), 1u);
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint32_t s01 = kp_band_spatial(cfg->shape, f->coords[i].x, f->coords[i].y, bl, bh,
                                    max_r);
     /* Distance of this LED from the moving band front, wrapped to [-0.5, 0.5]. */
@@ -96,7 +96,7 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
       hsb.b = (uint8_t)((uint32_t)base.b * amp / 255u);
       hsb.s = base.s;
     }
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
 
   return true;

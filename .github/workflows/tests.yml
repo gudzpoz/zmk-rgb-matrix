@@ -90,6 +90,11 @@ jobs:
           python3 tests/unit/test_lifecycle.py
           python3 tests/unit/test_overlay_gate.py
 
+      - name: Target-aware composition tests
+        run: |
+          python3 tests/unit/test_scene_composition.py
+          python3 tests/unit/test_battery_targets.py
+
       - name: Output gate tests
         run: python3 tests/unit/test_output_gate.py
 

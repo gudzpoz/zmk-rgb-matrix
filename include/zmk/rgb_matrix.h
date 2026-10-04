@@ -64,11 +64,6 @@
 /* Resolve a DT enum name to its named constant. */
 #define DT_ENUM_CONST(prop, val) CONCAT(DT_DRV_COMPAT, _, prop, _, val)
 
-struct kp_rgb_tuning {
-  uint8_t max_brightness;
-  uint8_t idle_brightness;
-};
-
 struct kp_rgb_coord {
   uint16_t x;
   uint16_t y;
@@ -87,17 +82,20 @@ size_t kp_rgb_led_for_position(uint32_t position);
  * the frame publishes as `coords` -- or NULL when `led` is out of range. */
 const struct kp_rgb_coord *kp_rgb_led_coord(size_t led);
 
-/* A animation frame to be rendered. Units are all in layout units (standard key
- * width = standard key height = 100). */
+/* Layout units use 100 for a standard key's width and height. Do not retain
+ * frame pointers or their arrays after the callback. */
 struct kp_rgb_frame {
-  const struct kp_rgb_tuning *tune;
-  /* The number of LEDs on this split half / this non-split keyboard, and also
-   * the length of `coords` and `pixels` */
+  /* Full local strip size; coords and pixels use physical LED indices. */
   size_t count;
-  /* Each LED's center coordinates, in layout units */
   const struct kp_rgb_coord *coords;
-  /* Output pixels for each LED */
   struct led_rgb *pixels;
+  /* Always non-NULL; target_count unique indices below count. Zero is empty.
+   * target_count == count permits painting in physical-index order. */
+  const size_t *targets;
+  size_t target_count;
+  /* Overlay-only temporary storage for at least count pixels, independent of
+   * pixels, with unspecified contents. NULL in effect callbacks. */
+  struct led_rgb *scratch;
   /* One monotonic uptime shared by this worker pass. */
   int64_t now_ms;
   /* Active animation time since this instance's previous render, saturated at
@@ -126,8 +124,10 @@ struct kp_rgb_key_event {
  * (power, inhibition, selection, overlay enablement, or user parameters), even
  * indirectly through synchronous event dispatch.
  *
- * Effect pixels start black. Return true from render while another timed update
- * is needed; return false only after painting a valid static/terminal image.
+ * Paint only targets, which start black; leave other pixels untouched. Paint
+ * intrinsic colors before controller brightness. Simulation and geometry remain
+ * full-strip. Return true from render while another timed update is needed;
+ * return false only after painting a valid static/terminal image.
  * False does not deactivate the effect. Rendering remains periodic for now.
  * Return true from on_event when the event requires a repaint. Input is copied,
  * best effort, and routed to effects active at delivery, not capture time.
@@ -183,11 +183,13 @@ BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
              "kp_rgb_effect_api.behavior must be first: the effect api is "
              "reached as a struct behavior_driver_api *");
 
-/* The brightness a renderer should apply this frame. */
-static inline uint8_t kp_rgb_brightness_pct(const struct kp_rgb_frame *frame) {
-  return frame->is_idle ? frame->tune->idle_brightness
-                        : frame->tune->max_brightness;
-}
+/* Call only from an overlay render callback for its declared event_target.
+ * Supply that overlay's targets and scratch as the child's pixels, with the
+ * child's scratch set to NULL. Initialize target pixels to black before calling;
+ * this helper does not clear pixels. Supplies the child's elapsed_ms and returns
+ * its render result (false when inactive or output is blocked).
+ * Effect callbacks and application code must not call this function. */
+bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 
 int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
@@ -400,10 +402,17 @@ bool kp_rgb_condition_value(const struct device *condition);
 
 struct kp_rgb_overlay_api {
   const struct device *condition; /* NULL = unconditional */
-  void (*render)(const struct device *dev, struct kp_rgb_frame *frame);
+  /* Paint only frame targets over existing pixels, before controller brightness.
+   * Use common.opacity (0..100) as blend strength. The effect callback's thread,
+   * lifetime and scene-control restrictions also apply here. */
+  void (*render)(const struct device *dev, const struct kp_rgb_frame *frame);
   /* Return the overlay's private effect for lifecycle, clocks and input routing,
    * or NULL when the overlay does not delegate to an effect. */
   const struct device *(*event_target)(const struct device *dev);
+  /* Set true only when opacity 100 replaces every target independently of its
+   * incoming color. Full-strip coverage then allows earlier layers to be skipped.
+   * Filters must set false. */
+  bool replaces_target;
 };
 
 /* Kind-agnostic part of an overlay's config. */
@@ -413,8 +422,7 @@ struct kp_rgb_overlay_common_config {
   const uint32_t *leds; /* raw chain indices, or NULL */
   size_t leds_len;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
-  /* Paint every LED rather than the resolved targets; at `opacity` 100 this
-   * lets the engine skip the effect and the overlays below it. */
+  /* Use every local LED instead of the keys/leds lists. */
   bool all_leds;
 };
 
@@ -452,18 +460,14 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
                               const uint32_t *leds, size_t leds_len,
                               size_t *out, size_t out_max);
 
-/* Paint `color` onto `leds` at `strength` percent: the colour is scaled by the
- * frame's brightness, then mixed over the existing pixels. */
-void kp_rgb_overlay_paint(struct kp_rgb_frame *frame, const size_t *leds,
+/* Blend intrinsic color over existing pixels at strength 0..100. Pass
+ * frame->targets and frame->target_count, or a subset of those targets. */
+void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
                           size_t led_count, struct led_rgb color,
                           uint8_t strength);
 
-/* `kp_rgb_overlay_paint` generalised from one flat colour to a per-pixel
- * source indexed the same way as frame->pixels: `src[led]` is mixed over
- * `frame->pixels[led]` at `strength` percent for each targeted LED. This is the
- * compositor overlay's blit primitive, used to flatten a sub-effect's layer
- * buffer back onto the frame. */
-void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
+/* As above, taking each source color from src[led] in physical-index order. */
+void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t *leds,
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength);
 
@@ -492,7 +496,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
  * allocates the instance's target storage, so a kind must declare its device
  * here rather than with DEVICE_DT_DEFINE directly. `event_fn` exposes the
  * effect the kind composites, or NULL; the engine delivers input events to it. */
-#define KP_RGB_OVERLAY_DEFINE(inst, render_fn, event_fn, cfg_inst)             \
+#define KP_RGB_OVERLAY_DEFINE(inst, render_fn, event_fn, replaces, cfg_inst)   \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
                    (const void *)&cfg_inst##_cfg ==                            \
@@ -534,6 +538,7 @@ void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
       .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .render = render_fn,                                                     \
       .event_target = event_fn,                                                \
+      .replaces_target = replaces,                                             \
   };                                                                           \
   /* Init resolves `keys` through the engine's key -> LED table, which the     \
    * engine fills from its own POST_KERNEL init at the OBJECTS priority, ahead \

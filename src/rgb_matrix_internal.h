@@ -19,6 +19,11 @@
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
 
+struct kp_rgb_tuning {
+  uint8_t max_brightness;
+  uint8_t idle_brightness;
+};
+
 struct kp_rgb_state {
   bool user_on;
   const struct device *active_fx;
@@ -51,12 +56,15 @@ void kp_rgb_matrix_unlock(void);
 
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);
-void kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 void kp_rgb_request_runtime_reset_locked(void);
 
 int kp_rgb_resolve_active(void);
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
 int kp_rgb_select_effect(uint16_t index);
+
+extern const size_t kp_rgb_all_targets[MAX(1, KP_LED_COUNT)];
+const size_t *kp_rgb_overlay_targets(const struct device *dev);
+size_t kp_rgb_overlay_target_count(const struct device *dev);
 
 /* refresh() runs on the control worker; dispatch() is central-only. */
 bool kp_rgb_overlay_gate(const struct device *dev);

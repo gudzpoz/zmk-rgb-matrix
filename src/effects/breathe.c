@@ -67,20 +67,20 @@ static bool kp_eff_breathe_render(const struct device *dev,
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
   data->phase_ms = phase;
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
   if (cfg->mode == DT_ENUM_CONST(mode, hue) ||
       cfg->mode == DT_ENUM_CONST(mode, pendulum) ||
       cfg->mode == DT_ENUM_CONST(mode, wave)) {
     uint16_t span = MAX(f->board_length, 1u);
-    for (size_t i = 0; i < f->count; i++) {
+    for (size_t t = 0; t < f->target_count; t++) {
+      size_t i = f->targets[t];
       uint16_t offset = kp_breathe_hue_offset(phase, period, f->coords[i].x,
                                               span, cfg->mode,
                                               cfg->hue_amplitude);
       struct kp_rgb_hsb hsb = base;
       hsb.h = (uint16_t)((base.h + offset) % KP_RGB_HUE_MAX);
-      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+      f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
     }
     return true;
   }
@@ -88,12 +88,13 @@ static bool kp_eff_breathe_render(const struct device *dev,
   if (cfg->mode == DT_ENUM_CONST(mode, river)) {
     /* RIVERFLOW: brightness wave offset by x position, so the pulse travels. */
     uint16_t span = MAX(f->board_length, 1u);
-    for (size_t i = 0; i < f->count; i++) {
+    for (size_t t = 0; t < f->target_count; t++) {
+      size_t i = f->targets[t];
       uint32_t local = (phase + (uint32_t)f->coords[i].x * period / span) % period;
       uint8_t b = (uint8_t)((uint32_t)base.b * kp_breathe_wave(local, period) / 255u);
       struct kp_rgb_hsb hsb = base;
       hsb.b = b;
-      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+      f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
     }
     return true;
   }
@@ -102,8 +103,9 @@ static bool kp_eff_breathe_render(const struct device *dev,
   uint8_t wave = (uint8_t)kp_breathe_wave(phase, period);
   struct kp_rgb_hsb hsb = base;
   hsb.b = (uint8_t)((uint32_t)base.b * wave / 255u);
-  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
-  for (size_t i = 0; i < f->count; i++) {
+  struct led_rgb rgb = kp_rgb_hsb_to_rgb(hsb);
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     f->pixels[i] = rgb;
   }
 

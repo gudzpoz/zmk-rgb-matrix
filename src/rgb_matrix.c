@@ -104,7 +104,8 @@ const struct kp_rgb_coord *kp_rgb_led_coord(size_t led) {
 
 static const struct device *const strip =
     COND_CODE_1(KP_RGB_HAS_STRIP, (DEVICE_DT_GET(KP_RGB_STRIP)), (NULL));
-static struct led_rgb pixels[KP_LED_COUNT];
+static struct led_rgb scene[KP_LED_COUNT];
+static struct led_rgb scratch[KP_LED_COUNT];
 static K_MUTEX_DEFINE(kp_rgb_lock);
 static atomic_t kp_rgb_output_allowed;
 static atomic_t kp_rgb_inhibited;
@@ -223,16 +224,17 @@ static void kp_rgb_reconcile_effect(const struct device *dev, int64_t now_ms) {
   }
 }
 
-void kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame) {
+bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame) {
   const struct kp_rgb_effect_api *api = dev->api;
   struct kp_rgb_effect_runtime *state = api->runtime;
-  if (!state->active || !atomic_get(&kp_rgb_output_allowed)) return;
+  if (!state->active || !atomic_get(&kp_rgb_output_allowed)) return false;
   struct kp_rgb_frame local = *frame;
   local.elapsed_ms = state->animating && frame->now_ms > state->last_render_ms
       ? (uint32_t)MIN((uint64_t)(frame->now_ms - state->last_render_ms), UINT32_MAX)
       : 0;
   state->last_render_ms = frame->now_ms;
   state->animating = api->callbacks->render(dev, &local);
+  return state->animating;
 }
 /* Timer ISR: the worker rechecks permission under the matrix mutex. */
 static void kp_rgb_matrix_tick_handler(struct k_timer *timer) {
@@ -268,7 +270,7 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
   return last;
 }
 
-static void kp_render_overlays(struct kp_rgb_frame *frame,
+static void kp_render_overlays(const struct kp_rgb_frame *frame,
                                const struct device *const *overlays,
                                size_t count, size_t first) {
   for (size_t i = first; i < count; i++) {
@@ -280,7 +282,11 @@ static void kp_render_overlays(struct kp_rgb_frame *frame,
     if (!kp_rgb_overlay_gate(dev)) {
       continue;
     }
-    ovl->render(dev, frame);
+    struct kp_rgb_frame local = *frame;
+    local.targets = kp_rgb_overlay_targets(dev);
+    local.target_count = kp_rgb_overlay_target_count(dev);
+    local.scratch = scratch;
+    ovl->render(dev, &local);
   }
 }
 
@@ -324,12 +330,13 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
   }
 
   if (atomic_get(&kp_rgb_output_allowed)) {
-    memset(pixels, 0, sizeof(pixels));
+    memset(scene, 0, sizeof(scene));
     struct kp_rgb_frame frame = {
-        .tune = &kp_rgb_controller.tuning,
+        .targets = kp_rgb_all_targets,
+        .target_count = KP_LED_COUNT,
         .count = KP_LED_COUNT,
         .coords = kp_led_coords,
-        .pixels = pixels,
+        .pixels = scene,
         .now_ms = now_ms,
         .board_length = kp_rgb_board_length,
         .board_height = kp_rgb_board_height,
@@ -340,7 +347,14 @@ static void kp_rgb_matrix_tick(struct k_work *work) {
       kp_render_overlays(&frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
     }
     if (atomic_get(&kp_rgb_output_allowed)) {
-      int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+      uint8_t brightness = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
+                                         : kp_rgb_controller.tuning.max_brightness;
+      for (size_t i = 0; i < KP_LED_COUNT; i++) {
+        scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
+      }
+      /* Defensive copy: Zephyr LED strip drivers could modify the pixels */
+      memcpy(scratch, scene, sizeof(scene));
+      int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
       if (err < 0) LOG_WRN("Failed to update the RGB strip (%d)", err);
     }
   }
@@ -369,8 +383,8 @@ static void kp_rgb_matrix_off_handler(struct k_work *work) {
   kp_rgb_matrix_lock();
   if (kp_rgb_black_pending && !atomic_get(&kp_rgb_output_allowed)) {
     /* led_strip_update_rgb() may overwrite even a failed submission. */
-    memset(pixels, 0, sizeof(pixels));
-    int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+    memset(scratch, 0, sizeof(scratch));
+    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
     if (err < 0) {
       LOG_WRN("Failed to clear the RGB strip (%d)", err);
       k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_off_work,
@@ -598,8 +612,8 @@ static int kp_rgb_matrix_init(void) {
   kp_rgb_matrix_lock();
   kp_rgb_output_ready = true;
   if (kp_rgb_has_leds()) {
-    memset(pixels, 0, sizeof(pixels));
-    int err = led_strip_update_rgb(strip, pixels, KP_LED_COUNT);
+    memset(scratch, 0, sizeof(scratch));
+    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
     if (err < 0) {
       LOG_WRN("Failed to clear the RGB strip (%d)", err);
       kp_rgb_black_pending = true;

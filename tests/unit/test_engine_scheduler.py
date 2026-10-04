@@ -241,7 +241,7 @@ int main(int argc, char **argv) {
         host_mutate_output = false;
         assert(zmk_rgb_matrix_on() == 0);
         host_run_ready();
-        if (KP_LED_COUNT) assert(pixels[0].r == 17);
+        if (KP_LED_COUNT) assert(scene[0].r == 17);
         host_lock_failures = 1;
         zmk_rgb_matrix_flush();
         host_run_ready();

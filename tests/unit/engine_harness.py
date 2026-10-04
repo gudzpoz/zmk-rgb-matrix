@@ -78,9 +78,9 @@ struct device { const void *api; const char *name; void *data; const void *confi
 typedef void (*effect_visitor)(const struct device *dev, int64_t now_ms);
 struct led_rgb { uint8_t r,g,b; };
 struct kp_rgb_coord { uint16_t x,y; };
-struct kp_rgb_tuning { int sentinel; };
+struct kp_rgb_tuning { uint8_t max_brightness,idle_brightness; };
 struct kp_rgb_frame {
- const struct kp_rgb_tuning *tune; size_t count;
+ size_t count; const size_t *targets; size_t target_count; struct led_rgb *scratch;
  const struct kp_rgb_coord *coords; struct led_rgb *pixels;
  int64_t now_ms; uint32_t elapsed_ms; uint16_t board_length,board_height; bool is_idle;
 };
@@ -98,13 +98,13 @@ struct kp_rgb_effect_api {
  struct kp_rgb_effect_runtime *runtime;
  const struct device *const *overlays; size_t overlays_len;
 };
-struct kp_rgb_overlay_api { void (*render)(const struct device *,struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); };
+struct kp_rgb_overlay_api { void (*render)(const struct device *,const struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); bool replaces_target; };
 struct kp_rgb_controller {
  const struct device *dev;
  struct { bool user_on; const struct device *active_fx; } state;
  struct kp_rgb_tuning tuning;
 };
-static struct kp_rgb_controller kp_rgb_controller;
+static struct kp_rgb_controller kp_rgb_controller={.tuning={100,100}};
 #define ctx kp_rgb_controller
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;
@@ -148,7 +148,15 @@ static atomic_t kp_rgb_output_allowed,kp_rgb_inhibited;
 static bool kp_rgb_output_ready,kp_rgb_black_pending;
 static uint32_t kp_rgb_black_retry_ms=100;
 static uint64_t now;
-static struct led_rgb pixels[KP_LED_COUNT];
+static struct led_rgb scene[KP_LED_COUNT],scratch[KP_LED_COUNT];
+static const size_t kp_rgb_all_targets[KP_LED_COUNT ? KP_LED_COUNT : 1]={0
+#if KP_LED_COUNT > 1
+,1
+#endif
+};
+static struct led_rgb kp_rgb_rgb_scale(struct led_rgb c,uint8_t p) {
+ c.r=c.r*p/100; c.g=c.g*p/100; c.b=c.b*p/100; return c;
+}
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
 static uint16_t kp_rgb_board_length=100,kp_rgb_board_height=100;
 static const struct device dummy = {.name="strip"};
@@ -186,7 +194,16 @@ static bool device_is_ready(const struct device *d) { return d!=NULL && host_str
 void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
 bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
 void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
-struct host_overlay { const struct device *child; bool gate,cover; };
+struct host_overlay {
+ const struct device *child; bool gate,cover;
+ const size_t *targets; size_t target_count;
+};
+static size_t kp_rgb_overlay_target_count(const struct device *d) {
+ const struct host_overlay *o=d->data; return o->targets ? o->target_count : KP_LED_COUNT;
+}
+static const size_t *kp_rgb_overlay_targets(const struct device *d) {
+ const struct host_overlay *o=d->data; return o->targets ? o->targets : kp_rgb_all_targets;
+}
 static const struct device *host_overlays[8];
 static size_t host_overlay_count;
 static const struct device *const *kp_rgb_overlay_list(void) { return host_overlays; }
@@ -208,7 +225,8 @@ static bool host_mutate_output = true;
 static bool host_allow_color_failure;
 static bool render(const struct device *d,const struct kp_rgb_frame *f) {
  (void)d; assert(held); renders++;rendered_elapsed=f->elapsed_ms;
- for(size_t n=0;n<f->count;n++) f->pixels[n].r=17;
+ assert(f->targets && !f->scratch && f->count==KP_LED_COUNT);
+ for(size_t n=0;n<f->target_count;n++) f->pixels[f->targets[n]].r=17;
  if(host_render_hook) host_render_hook();
  if(inhibit_from_render) {
   inhibit_from_render=false;

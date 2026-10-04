@@ -34,12 +34,12 @@ static bool kp_eff_spectrum_render(const struct device *dev, const struct kp_rgb
   uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
   data->phase_ms = phase;
   struct kp_rgb_hsb hsb = data->common.color;
-  uint8_t pct = kp_rgb_brightness_pct(f);
 
   hsb.h = (uint16_t)((hsb.h + phase * KP_RGB_HUE_MAX / period) % KP_RGB_HUE_MAX);
   hsb.s = KP_RGB_SAT_MAX;
-  struct led_rgb rgb = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
-  for (size_t i = 0; i < f->count; i++) {
+  struct led_rgb rgb = kp_rgb_hsb_to_rgb(hsb);
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     f->pixels[i] = rgb;
   }
 

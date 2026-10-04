@@ -134,14 +134,17 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
   kp_eff_reactive_advance(dev, (uint32_t)(end_ms - cursor));
   data->pending_count = 0;
   bool evolving = false;
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
   uint16_t span = MAX(f->board_length, 1u);
 
   for (size_t i = 0; i < f->count; i++) {
+    evolving |= data->levels[i] != 0;
+  }
+
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint8_t level = data->levels[i];
-    evolving |= level != 0;
     uint16_t hue = base.h;
     if (cfg->palette == DT_ENUM_CONST(palette, gradient)) {
       hue = (uint16_t)((base.h + (uint32_t)f->coords[i].x * KP_RGB_HUE_MAX / span) %
@@ -153,7 +156,7 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
     }
     struct kp_rgb_hsb hsb = {.h = hue, .s = base.s};
     hsb.b = MAX((uint8_t)((uint32_t)base.b * level / 255u), floor_b);
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
   return evolving;
 #endif /* KP_LED_COUNT > 0 */

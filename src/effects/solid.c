@@ -28,12 +28,11 @@ static bool kp_eff_solid_render(const struct device *dev, const struct kp_rgb_fr
   const struct kp_eff_solid_data *data = dev->data;
   const struct kp_eff_solid_config *cfg = dev->config;
   struct kp_rgb_hsb base = data->common.color;
-  uint8_t pct = kp_rgb_brightness_pct(f);
 
   if (cfg->axis == DT_ENUM_CONST(axis, none)) {
-    struct led_rgb rgb =
-        kp_rgb_rgb_scale(kp_rgb_hsb_to_rgb(base), pct);
-    for (size_t i = 0; i < f->count; i++) {
+    struct led_rgb rgb = kp_rgb_hsb_to_rgb(base);
+    for (size_t t = 0; t < f->target_count; t++) {
+      size_t i = f->targets[t];
       f->pixels[i] = rgb;
     }
     return false;
@@ -43,12 +42,13 @@ static bool kp_eff_solid_render(const struct device *dev, const struct kp_rgb_fr
   uint16_t span = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->board_height
                                                              : f->board_length;
   span = MAX(span, 1u);
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint32_t pos = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->coords[i].y
                                                               : f->coords[i].x;
     struct kp_rgb_hsb hsb = base;
     hsb.h = (uint16_t)((base.h + pos * KP_RGB_HUE_MAX / span) % KP_RGB_HUE_MAX);
-    f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+    f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
   return false;
 }

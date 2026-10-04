@@ -6,6 +6,26 @@
 
 #include "rgb_matrix_internal.h"
 
+#if KP_LED_COUNT > 0
+#define KP_RGB_IDENTITY_INDEX(i, _) i
+const size_t kp_rgb_all_targets[KP_LED_COUNT] = {
+    LISTIFY(KP_LED_COUNT, KP_RGB_IDENTITY_INDEX, (,), _)};
+#else
+const size_t kp_rgb_all_targets[1] = {0};
+#endif
+
+const size_t *kp_rgb_overlay_targets(const struct device *dev) {
+  const struct kp_rgb_overlay_common_config *cfg = dev->config;
+  const struct kp_rgb_overlay_common_data *data = dev->data;
+  return cfg->all_leds ? kp_rgb_all_targets : data->leds;
+}
+
+size_t kp_rgb_overlay_target_count(const struct device *dev) {
+  const struct kp_rgb_overlay_common_config *cfg = dev->config;
+  const struct kp_rgb_overlay_common_data *data = dev->data;
+  return cfg->all_leds ? KP_LED_COUNT : data->led_count;
+}
+
 /* Appends `led` unless it is already present, so an LED named twice (or by both
  * the key and raw-LED lists) is painted once. */
 static void kp_rgb_target_add(size_t *out, size_t *n, size_t out_max,
@@ -44,22 +64,18 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
   return n;
 }
 
-void kp_rgb_overlay_paint(struct kp_rgb_frame *frame, const size_t *leds,
+void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
                           size_t led_count, struct led_rgb color, uint8_t strength) {
-  struct led_rgb painted = kp_rgb_rgb_scale(color, kp_rgb_brightness_pct(frame));
-
   for (size_t i = 0; i < led_count; i++) {
     if (leds[i] < frame->count) {
-      frame->pixels[leds[i]] = kp_rgb_rgb_mix(frame->pixels[leds[i]], painted, strength);
+      frame->pixels[leds[i]] = kp_rgb_rgb_mix(frame->pixels[leds[i]], color, strength);
     }
   }
 }
 
-void kp_rgb_overlay_paint_pixels(struct kp_rgb_frame *frame, const size_t *leds,
+void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t *leds,
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength) {
-  /* The source is already at frame scale: a composited effect dims itself by
-   * the frame brightness. */
   for (size_t i = 0; i < led_count; i++) {
     if (leds[i] < frame->count) {
       frame->pixels[leds[i]] =
@@ -123,15 +139,15 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word) {
 
 bool kp_rgb_overlay_covers_all(const struct device *dev) {
   const struct kp_rgb_overlay_common_config *cfg = dev->config;
-  /* `all-leds` at `opacity` 100 replaces every pixel, so the engine may skip
-   * what is painted below. */
-  return cfg->all_leds && cfg->opacity >= 100;
+  const struct kp_rgb_overlay_api *api = dev->api;
+  return api->replaces_target && cfg->opacity == 100 && KP_LED_COUNT > 0 &&
+         kp_rgb_overlay_target_count(dev) == KP_LED_COUNT;
 }
 
 bool kp_rgb_overlay_gate(const struct device *dev) {
   const struct kp_rgb_overlay_common_data *data = dev->data;
   const struct kp_rgb_overlay_common_config *cfg = dev->config;
-  if (cfg->opacity == 0 || (!cfg->all_leds && data->led_count == 0)) return false;
+  if (cfg->opacity == 0 || kp_rgb_overlay_target_count(dev) == 0) return false;
 
   if (data->local) {
     return data->gate;

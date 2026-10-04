@@ -34,6 +34,7 @@ static bool event(const struct device *d,const struct kp_rgb_key_event *e) {
     return true;
 }
 static bool paint(const struct device *d,const struct kp_rgb_frame *f) {
+    assert(!f->scratch && f->targets && f->target_count==KP_LED_COUNT);
     struct observation *o=d->data; o->paints++; o->elapsed=f->elapsed_ms; record('P');
     return o->animate;
 }
@@ -43,7 +44,13 @@ static struct observation observations[3];
 static struct kp_rgb_effect_api apis[3];
 static struct device devices[3];
 static const struct device *target(const struct device *d) { return ((struct host_overlay *)d->data)->child; }
-static void overlay_paint(const struct device *d,struct kp_rgb_frame *f) { kp_rgb_effect_render(target(d),f); }
+static void overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
+    assert(f->pixels==scene && f->scratch==scratch && f->targets);
+    struct kp_rgb_frame child=*f;
+    child.pixels=f->scratch; child.scratch=NULL;
+    memset(child.pixels,0,child.count*sizeof(*child.pixels));
+    kp_rgb_effect_render(target(d),&child);
+}
 static const struct kp_rgb_overlay_api overlay_api={.render=overlay_paint,.event_target=target};
 static struct host_overlay overlay_state;
 static struct device overlay={.api=&overlay_api,.data=&overlay_state};

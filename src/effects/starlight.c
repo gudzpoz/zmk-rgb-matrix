@@ -72,7 +72,6 @@ static bool kp_eff_starlight_render(const struct device *dev, const struct kp_rg
   struct kp_eff_starlight_data *data = dev->data;
   const struct kp_eff_starlight_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
 
   uint64_t elapsed = (uint64_t)data->step_remainder_ms + f->elapsed_ms;
@@ -113,7 +112,8 @@ static bool kp_eff_starlight_render(const struct device *dev, const struct kp_rg
     kp_eff_starlight_advance(data, f->count, remaining_ms, period);
   }
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     if (data->cur[i] > 0) {
       int16_t h = (int16_t)base.h + (cfg->dual_hue ? data->hue_off[i] : 0);
       h %= (int16_t)KP_RGB_HUE_MAX;
@@ -127,7 +127,7 @@ static bool kp_eff_starlight_render(const struct device *dev, const struct kp_rg
           .s = (uint8_t)s,
           .b = (uint8_t)((uint32_t)base.b * data->cur[i] / 255u),
       };
-      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+      f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
     } else {
       f->pixels[i] = (struct led_rgb){0, 0, 0};
     }

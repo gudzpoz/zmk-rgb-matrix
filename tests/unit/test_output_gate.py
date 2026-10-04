@@ -24,7 +24,7 @@ int main(void) {
  assert(!zmk_rgb_matrix_is_inhibited());
  isr=true;assert(zmk_rgb_matrix_set_inhibited(true)==-EWOULDBLOCK);isr=false;
  ctx.state.user_on=true;ctx.state.active_fx=&fx;
- ctx.tuning.sentinel=123;
+ ctx.tuning.idle_brightness=23;
  assert(zmk_rgb_matrix_on()==0 && !atomic_get(&kp_rgb_output_allowed));
  host_try_lock_error=-EBUSY;
  assert(zmk_rgb_matrix_off()==-EBUSY && ctx.state.user_on);
@@ -52,7 +52,7 @@ int main(void) {
  failures=KP_LED_COUNT?1:0;
  assert(kp_rgb_matrix_init()==0);
  assert(kp_rgb_output_ready);
- assert(ctx.state.user_on && ctx.tuning.sentinel==123);
+ assert(ctx.state.user_on && ctx.tuning.idle_brightness==23);
  assert(ctx.state.active_fx==&fx);
  bool state=false;assert(zmk_rgb_matrix_get_state(&state)==0 && state);
  assert(!kp_rgb_pending_push(&ev));

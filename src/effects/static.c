@@ -59,12 +59,12 @@ struct kp_eff_static_data {
 
 static bool kp_eff_static_render(const struct device *dev, const struct kp_rgb_frame *f) {
   const struct kp_eff_static_config *cfg = dev->config;
-  uint8_t pct = kp_rgb_brightness_pct(f);
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint32_t hex = (i < cfg->colors_len) ? cfg->colors[i] : 0;
     struct led_rgb rgb = kp_hex_to_rgb(hex);
-    f->pixels[i] = kp_rgb_rgb_scale(rgb, pct);
+    f->pixels[i] = rgb;
   }
   return false;
 }

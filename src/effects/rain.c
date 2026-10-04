@@ -96,7 +96,6 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
   struct kp_eff_rain_data *data = dev->data;
   const struct kp_eff_rain_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint8_t pct = kp_rgb_brightness_pct(f);
   struct kp_rgb_hsb base = data->common.color;
   uint16_t bl = MAX(f->board_length, 1u);
 
@@ -153,7 +152,8 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
         ((uint64_t)data->step_remainder_ms + remaining) % interval;
   }
 
-  for (size_t i = 0; i < f->count; i++) {
+  for (size_t t = 0; t < f->target_count; t++) {
+    size_t i = f->targets[t];
     uint8_t v = data->val[i];
 
     if (cfg->mode == DT_ENUM_CONST(mode, fractal)) {
@@ -182,7 +182,7 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
         hsb.s = data->sat[i];
       }
       hsb.b = (uint8_t)((uint32_t)base.b * v / 255u);
-      f->pixels[i] = kp_rgb_hsb_to_rgb(kp_rgb_hsb_scale(hsb, pct));
+      f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
     } else {
       f->pixels[i] = (struct led_rgb){0, 0, 0};
     }

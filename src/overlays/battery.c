@@ -20,6 +20,11 @@
 #include <zmk/battery.h>
 #include <zmk/rgb_matrix.h>
 
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+#include <zmk/event_manager.h>
+#include <zmk/events/battery_state_changed.h>
+#endif
+
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 struct kp_ovl_battery_config {
@@ -86,22 +91,19 @@ static size_t kp_ovl_battery_order_buf[KP_LED_COUNT];
 #endif /* KP_LED_COUNT > 0 */
 
 static void kp_ovl_battery_render(const struct device *dev,
-                                  struct kp_rgb_frame *frame) {
+                                  const struct kp_rgb_frame *frame) {
 #if KP_LED_COUNT == 0
   ARG_UNUSED(dev);
   ARG_UNUSED(frame);
 #else
   const struct kp_ovl_battery_config *cfg = dev->config;
-  const struct kp_ovl_battery_data *data = dev->data;
-  const bool all = cfg->common.all_leds;
-
-  const size_t count = all ? frame->count : data->common.led_count;
+  const size_t count = frame->target_count;
   if (count == 0) {
     return;
   }
   size_t *order = kp_ovl_battery_order_buf;
   for (size_t i = 0; i < count; i++) {
-    order[i] = all ? i : data->common.leds[i];
+    order[i] = frame->targets[i];
   }
   kp_ovl_battery_order(frame, order, count, cfg->reverse);
 
@@ -112,18 +114,26 @@ static void kp_ovl_battery_render(const struct device *dev,
   soc = MIN(soc, 100);
   const size_t lit = (count * soc + 50u) / 100u; /* rounded */
 
-  const struct led_rgb on =
-      kp_rgb_rgb_scale(kp_hex_to_rgb(cfg->color), kp_rgb_brightness_pct(frame));
-  const struct led_rgb off = kp_rgb_rgb_scale(
-      kp_hex_to_rgb(cfg->background_color), kp_rgb_brightness_pct(frame));
+  const struct led_rgb on = kp_hex_to_rgb(cfg->color);
+  const struct led_rgb off = kp_hex_to_rgb(cfg->background_color);
 
-  /* At opacity 100 this is a replace, which the all-leds cover skip relies on. */
   for (size_t i = 0; i < count; i++) {
     frame->pixels[order[i]] = kp_rgb_rgb_mix(
         frame->pixels[order[i]], i < lit ? on : off, cfg->common.opacity);
   }
 #endif /* KP_LED_COUNT > 0 */
 }
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+static int kp_rgb_battery_overlay_listener(const zmk_event_t *eh) {
+  ARG_UNUSED(eh);
+  zmk_rgb_matrix_flush();
+  return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(kp_rgb_battery_overlay, kp_rgb_battery_overlay_listener);
+ZMK_SUBSCRIPTION(kp_rgb_battery_overlay, zmk_battery_state_changed);
+#endif
 
 #define KP_OVL_BATTERY_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_NODE_HAS_PROP(DT_DRV_INST(inst), all_leds) ||                \
@@ -141,7 +151,8 @@ static void kp_ovl_battery_render(const struct device *dev,
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
   static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
-  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_render, NULL, kp_ovl_battery_##inst)
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_render, NULL, true,               \
+                        kp_ovl_battery_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_BATTERY_DEFINE)
 

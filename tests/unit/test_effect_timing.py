@@ -43,6 +43,9 @@ struct kp_rgb_frame {
     int64_t now_ms;
     uint32_t elapsed_ms;
     size_t count;
+    const size_t *targets;
+    size_t target_count;
+    struct led_rgb *scratch;
     const struct kp_rgb_coord *coords;
     struct led_rgb *pixels;
     uint16_t board_length,board_height;
@@ -54,6 +57,7 @@ struct kp_rgb_effect_callbacks {
     void (*set_active)(const struct device*,bool,int64_t);
     void (*reset)(const struct device*,int64_t);
 };
+static const size_t kp_rgb_all_targets[4]={0,1,2,3};
 static struct kp_rgb_coord coords[4]={{0,0},{100,100},{200,200},{300,300}};
 static uint32_t rng=1, calls;
 static uint32_t sys_rand32_get(void) {
@@ -62,10 +66,6 @@ static uint32_t sys_rand32_get(void) {
 }
 static uint32_t kp_rgb_effect_period(const struct device *d) {
     return ((struct kp_rgb_effect_common_data*)d->data)->duration_ms;
-}
-static uint8_t kp_rgb_brightness_pct(const struct kp_rgb_frame *f) {
-    (void)f;
-    return 100;
 }
 static struct kp_rgb_hsb kp_rgb_hsb_scale(struct kp_rgb_hsb c,uint8_t p) {
     c.b=c.b*p/100;
@@ -125,6 +125,51 @@ def provider_source(path):
     return re.sub(r"DEFINE_DT_ENUM\((.*?)\);", enum, text)
 
 
+def target_tests(name):
+    return f'''
+    const size_t selections[4][4]={{{{0,1,2,3}},{{3,1,2,0}},{{3,1,0,0}},{{0,0,0,0}}}};
+    const size_t lengths[4]={{KP_LED_COUNT,KP_LED_COUNT,KP_LED_COUNT ? 2 : 0,0}};
+    struct kp_eff_{name}_data reference={{0}};
+    struct led_rgb expected_pixels[4];
+    uint32_t expected_rng=0, expected_calls=0;
+    bool expected_running=false;
+    for (size_t selection=0;selection<4;selection++) {{
+        memset(&data,0,sizeof(data)); data.common=common; rng=1; calls=0;
+        if(cb->reset) cb->reset(&dev,0);
+        if(cb->set_active) cb->set_active(&dev,true,0);
+        f.targets=selections[selection]; f.target_count=lengths[selection];
+        for(size_t step=0;step<12;step++) {{
+            if(cb->on_event && KP_LED_COUNT) {{
+                struct kp_rgb_key_event ev={{step%(KP_LED_COUNT ? KP_LED_COUNT : 1),true,step*32}};
+                cb->on_event(&dev,&ev);
+            }}
+            memset(pixels,0xa5,sizeof(pixels));
+            for(size_t j=0;j<f.target_count;j++) pixels[f.targets[j]]=(struct led_rgb){{0}};
+            f.now_ms=step*32; f.elapsed_ms=step ? 32 : 0;
+            running=cb->render(&dev,&f);
+            for(size_t led=0;led<4;led++) {{
+                bool selected=false;
+                for(size_t j=0;j<f.target_count;j++) selected |= f.targets[j]==led;
+                if(!selected) assert(pixels[led].r==0xa5 && pixels[led].g==0xa5 && pixels[led].b==0xa5);
+            }}
+        }}
+        if(!selection) {{
+            reference=data; expected_rng=rng; expected_calls=calls; expected_running=running;
+            memcpy(expected_pixels,pixels,sizeof(pixels));
+        }} else {{
+            assert(memcmp(&reference,&data,sizeof(data))==0);
+            assert(rng==expected_rng && calls==expected_calls && running==expected_running);
+            for(size_t j=0;j<f.target_count;j++) {{
+                size_t led=f.targets[j];
+                assert(memcmp(&pixels[led],&expected_pixels[led],sizeof(pixels[led]))==0);
+            }}
+        }}
+    }}
+    f.targets=kp_rgb_all_targets; f.target_count=KP_LED_COUNT;
+    memset(&data,0,sizeof(data)); data.common=common;
+'''
+
+
 def test_body(name, count, variant):
     expected = ("false" if name in ("solid", "static") else
                 "(KP_LED_COUNT>0)" if name in ("heatmap", "reactive", "ripple") else "true")
@@ -138,7 +183,8 @@ int main(void) {{
     struct kp_rgb_effect_common_data common=data.common;
     struct led_rgb pixels[4]={{0}}, saved[4];
     struct kp_rgb_frame f={{.now_ms=100,.count=KP_LED_COUNT,.coords=coords,
-        .pixels=pixels,.board_length=300,.board_height=300}};
+        .pixels=pixels,.targets=kp_rgb_all_targets,.target_count=KP_LED_COUNT,
+        .scratch=NULL,.board_length=300,.board_height=300}};
     if (cb->reset) cb->reset(&dev,100);
     assert(memcmp(&common,&data.common,sizeof(common))==0);
     if (cb->set_active) cb->set_active(&dev,true,100);
@@ -164,6 +210,7 @@ int main(void) {{
     assert(memcmp(saved,pixels,sizeof(saved))==0);
     assert(calls==oldcalls);
 '''
+    body += target_tests(name)
     if count and name in ("heatmap", "reactive"):
         array = "temp" if name == "heatmap" else "levels"
         fresh, cooled, older = (32, 31, 28) if name == "heatmap" else (255, 249, 230)
