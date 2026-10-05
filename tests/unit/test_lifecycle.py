@@ -8,7 +8,6 @@ from test_engine_scheduler import TESTS as SCHEDULER_TESTS
 FIXTURE = SCHEDULER_TESTS[:SCHEDULER_TESTS.index('static void assert_pixels')]
 TESTS = r'''
 struct observation {
-    struct kp_rgb_effect_runtime runtime;
     unsigned resets, activations, deactivations, events, paints;
     uint32_t elapsed;
     int64_t timestamp;
@@ -19,6 +18,7 @@ static unsigned replenishments;
 static char order[2048];
 static size_t order_len;
 static void record(char c) { assert(held); assert(order_len < sizeof(order)-1); order[order_len++]=c; }
+static void clear_order(void) { memset(order,0,sizeof(order)); order_len=0; }
 static void reset(const struct device *d,int64_t t) {
     (void)t; struct observation *o=d->data; o->resets++; record('R');
 }
@@ -44,6 +44,10 @@ static const struct kp_rgb_effect_callbacks optional={.render=paint};
 static struct observation observations[3];
 static struct kp_rgb_effect_api apis[3];
 static struct device devices[3];
+static const struct kp_rgb_effect_config configs[3]={{.index=0},{.index=1},{.index=7}};
+#define a_state (kp_rgb_effect_scenes[0].state)
+#define b_state (kp_rgb_effect_scenes[1].state)
+#define c_state (kp_rgb_overlay_scenes[0].state)
 static const struct device *target(const struct device *d) { return ((struct host_overlay *)d->data)->child; }
 static bool overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
     assert(f->pixels==scene && f->scratch==scratch && f->targets);
@@ -52,14 +56,18 @@ static bool overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
     memset(child.pixels,0,child.count*sizeof(*child.pixels));
     return kp_rgb_effect_render(target(d),&child);
 }
-static const struct kp_rgb_overlay_api overlay_api={.render=overlay_paint,.event_target=target};
+static void overlay_reset(const struct device *d,int64_t t) { reset(target(d),t); }
+static void overlay_active(const struct device *d,bool v,int64_t t) { active(target(d),v,t); }
+static bool overlay_event(const struct device *d,const struct kp_rgb_key_event *e) { return event(target(d),e); }
+static const struct kp_rgb_effect_callbacks overlay_callbacks={.render=overlay_paint,.reset=overlay_reset,.set_active=overlay_active,.on_event=overlay_event};
+static const struct kp_rgb_overlay_api overlay_api={.callbacks=&overlay_callbacks};
 static struct host_overlay overlay_state;
 static struct device overlay={.api=&overlay_api,.data=&overlay_state};
 static void setup(void) {
     fixture(true,false);
     for(size_t i=0;i<3;i++) {
-        apis[i]=(struct kp_rgb_effect_api){.callbacks=&cb,.runtime=&observations[i].runtime};
-        devices[i]=(struct device){.api=&apis[i],.data=&observations[i]};
+        apis[i]=(struct kp_rgb_effect_api){.callbacks=&cb};
+        devices[i]=(struct device){.api=&apis[i],.data=&observations[i],.config=&configs[i]};
         observations[i].parameter=123+(int)i;
     }
     host_effects[0]=&devices[0]; host_effects[1]=&devices[1]; host_effect_count=2;
@@ -81,9 +89,9 @@ int main(void) {
     }
     struct observation *a=&observations[0], *b=&observations[1], *c=&observations[2];
     key(-123); host_run_ready();
-    assert(!strcmp(order,"RARAEEPP"));
+    assert(!strcmp(order,"RRAAEEPP"));
     assert(a->timestamp==-123 && c->timestamp==-123 && a->elapsed==0 && c->elapsed==0);
-    assert(!b->runtime.initialized);
+    assert(!b_state.initialized && !kp_rgb_effect_scenes[7].state.initialized);
     host_run_until(32);
     assert(a->paints==1 && c->paints==1 && a->elapsed==0 && c->elapsed==0);
     a->animate=true; host_run_until(48); zmk_rgb_matrix_flush(); host_run_ready();
@@ -108,7 +116,7 @@ int main(void) {
     // Optional callbacks and independent private instance storage.
     apis[0].callbacks=&optional; ctx.state.active_fx=&devices[0];
     overlay_state.gate=true; overlay_state.cover=false; zmk_rgb_matrix_flush(); host_run_ready();
-    assert(a->runtime.active && c->runtime.active && !b->runtime.active);
+    assert(a_state.active && c_state.active && !b_state.active);
     unsigned a_events=a->events, c_events=c->events;
     key(222); host_run_ready();
     assert(a->events==a_events && c->events==c_events+1);
@@ -117,6 +125,7 @@ int main(void) {
     host_run_ready();
     assert(a->activations==a_activations && a->deactivations==a_deactivations && a->elapsed==0);
     a->animate=true; c->animate=false;
+    zmk_rgb_matrix_flush(); host_run_ready();
     host_elapse_to(now+(uint64_t)UINT32_MAX+100); zmk_rgb_matrix_flush(); host_run_ready();
     assert(a->elapsed==UINT32_MAX && c->elapsed==0);
     now++; zmk_rgb_matrix_flush(); host_run_ready(); assert(a->elapsed==1);
@@ -135,12 +144,23 @@ int main(void) {
     assert(a->events==before_events+21 && a->paints==before_paints+2 && !kp_rgb_pending_available());
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
-    assert(!a->runtime.active && !c->runtime.active);
+    assert(!a_state.active && !c_state.active);
     unsigned runs=kp_output_work.work.runs;
     host_run_until(now+1000); assert(kp_output_work.work.runs==runs && kp_rgb_next_frame_ms==INT64_MAX);
     assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(a->elapsed==0);
-    host_activity(false); host_run_ready(); assert(!a->runtime.active);
+    host_activity(false); host_run_ready(); assert(!a_state.active);
     host_activity(true); host_run_ready(); assert(a->elapsed==0);
+    clear_order(); ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    assert(!strcmp(order,"DAP"));
+    // Reverse registry order must still deactivate before activating.
+    clear_order(); ctx.state.active_fx=&devices[0]; zmk_rgb_matrix_flush(); host_run_ready();
+    assert(!strcmp(order,"DAP"));
+    ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); ctx.state.active_fx=&devices[0];
+    overlay_state.gate=true; overlay_state.cover=false;
+    kp_rgb_matrix_lock(); kp_rgb_request_runtime_reset_locked(); kp_rgb_matrix_unlock();
+    host_run_ready();
+    assert(!strcmp(order,"DRRRAAPP"));
     puts("lifecycle ordering, independent clocks, delivery and bounded input passed");
 }
 '''

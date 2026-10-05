@@ -38,6 +38,31 @@ CASES = {
 &kprgb { external_example { compatible = "keypaw,rgb-matrix-example";
     #binding-cells = <0>; }; };
 '''),
+    "arbitrary-effect-parent": (True, '''
+/ { arbitrary_effect_parent { nested_effect { compatible = "keypaw,rgb-matrix-rainbow";
+    #binding-cells = <0>; duration = <321>; }; }; };
+'''),
+    "two-child-overlay": (True, '''
+&rgb_overlays { fixture_pair: fixture_pair {
+    compatible = "keypaw,rgb-overlay-pair";
+    condition = <&fixture_always>;
+    all-leds;
+    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+        color = <0x20ff40>; duration = <700>; };
+    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
+        duration = <1800>; };
+}; };
+'''),
+    "two-child-private-parameters": (True, '''
+&rgb_overlays { fixture_pair: fixture_pair {
+    compatible = "keypaw,rgb-overlay-pair";
+    all-leds;
+    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+        color = <0xa040ff>; duration = <900>; };
+    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
+        duration = <2300>; };
+}; };
+'''),
     "no-controller": (False, '&kprgb { status = "disabled"; };'),
     "two-controllers": (False, '''
 / { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";

@@ -9,17 +9,18 @@ from test_engine_scheduler import TESTS as SCHEDULER_TESTS
 FIXTURE = SCHEDULER_TESTS[:SCHEDULER_TESTS.index('static void assert_pixels')]
 MOCKS = r'''
 struct kp_rgb_overlay_common_config { bool all_leds; uint8_t opacity; };
-struct kp_rgb_overlay_common_data { size_t leds[2],led_count; };
 struct kp_ovl_config { struct kp_rgb_overlay_common_config common; const struct device *effect; };
 struct kp_ovl_data { struct kp_rgb_overlay_common_data common; };
 '''
 TESTS = r'''
-static struct kp_rgb_effect_runtime child_runtime;
+#define child_state (kp_rgb_overlay_scenes[0].state)
 static const size_t *expected_child_targets;
 static size_t expected_child_count;
 static unsigned paint_order;
+static bool check_raw_elapsed;
 static bool child_paint(const struct device *d,const struct kp_rgb_frame *f) {
     (void)d;
+    if(check_raw_elapsed) assert(f->elapsed_ms==37);
     assert(f->pixels==scratch && f->scratch==NULL && f->targets);
     if(expected_child_targets) {
         assert(f->targets==expected_child_targets && f->target_count==expected_child_count);
@@ -33,11 +34,12 @@ static bool child_paint(const struct device *d,const struct kp_rgb_frame *f) {
     return false;
 }
 static const struct kp_rgb_effect_callbacks child_cb={.render=child_paint};
-static const struct kp_rgb_effect_api child_api={.callbacks=&child_cb,.runtime=&child_runtime};
+static const struct kp_rgb_effect_api child_api={.callbacks=&child_cb};
 static const struct device child={.api=&child_api};
-static const struct kp_rgb_overlay_api ov_api={.render=kp_ovl_render,.event_target=kp_ovl_event_target,.replaces_target=true};
+static const struct kp_rgb_effect_callbacks ov_callbacks={.render=kp_ovl_render,.reset=kp_ovl_reset,.set_active=kp_ovl_set_active,.on_event=kp_ovl_on_event};
+static const struct kp_rgb_overlay_api ov_api={.callbacks=&ov_callbacks,.replaces_target=true};
 
-static struct kp_rgb_effect_runtime second_runtime;
+#define second_state_runtime (kp_rgb_overlay_scenes[1].state)
 static const size_t *expected_second_targets;
 static size_t expected_second_count;
 static bool leave_last_black;
@@ -56,7 +58,7 @@ static bool second_paint(const struct device *d,const struct kp_rgb_frame *f) {
     return false;
 }
 static const struct kp_rgb_effect_callbacks second_cb={.render=second_paint};
-static const struct kp_rgb_effect_api second_api={.callbacks=&second_cb,.runtime=&second_runtime};
+static const struct kp_rgb_effect_api second_api={.callbacks=&second_cb};
 static const struct device second_child={.api=&second_api};
 static unsigned filter_paints;
 static bool filter_paint(const struct device *d,const struct kp_rgb_frame *f) {
@@ -69,7 +71,8 @@ static bool filter_paint(const struct device *d,const struct kp_rgb_frame *f) {
     filter_paints++;
     return false;
 }
-static const struct kp_rgb_overlay_api filter_api={.render=filter_paint,.replaces_target=false};
+static const struct kp_rgb_effect_callbacks filter_callbacks={.render=filter_paint};
+static const struct kp_rgb_overlay_api filter_api={.callbacks=&filter_callbacks,.replaces_target=false};
 static void expect_output(struct led_rgb first,struct led_rgb second) {
     const struct led_rgb expected[2]={first,second};
     assert(host_transfer_count);
@@ -84,20 +87,24 @@ static void test_engine_composition(void) {
     struct kp_ovl_config first_cfg={.common={.opacity=37},.effect=&child};
     struct kp_ovl_config second_cfg={.common={.opacity=61},.effect=&second_child};
     struct host_overlay first_state={.child=&child,.gate=true,.targets=sparse,.target_count=1};
-    struct host_overlay second_state={.child=&second_child,.gate=true,.targets=reordered,.target_count=2};
+    struct host_overlay second_state={.common={.index=1},.child=&second_child,.gate=true,.targets=reordered,.target_count=2};
     struct device first={.api=&ov_api,.config=&first_cfg,.data=&first_state};
     struct device second={.api=&ov_api,.config=&second_cfg,.data=&second_state};
-    struct host_overlay filter_state={.cover=false,.targets=sparse,.target_count=1};
+    struct host_overlay filter_state={.common={.index=2},.cover=false,.targets=sparse,.target_count=1};
     struct device filter={.api=&filter_api,.data=&filter_state};
     expected_child_targets=sparse; expected_child_count=1;
     expected_second_targets=reordered; expected_second_count=2;
     host_overlays[0]=&first; host_overlays[1]=&second;
     host_overlays[2]=&filter; host_overlay_count=3;
     host_activity(true); assert(zmk_rgb_matrix_on()==0); host_run_ready();
-    assert(paint_order==12 && child_runtime.active && second_runtime.active && runtime.active);
+    assert(paint_order==12 && child_state.active && second_state_runtime.active && runtime.active);
     expect_output((struct led_rgb){55,10,2},(struct led_rgb){60,14,9});
 
-    host_overlays[0]=&second; host_overlays[1]=&first;
+    const struct device *ordered[]={&second,&first,&filter};
+    struct kp_rgb_effect_api reordered_api=api;
+    reordered_api.overlays=ordered; reordered_api.overlays_len=3;
+    struct device composed_fx=fx; composed_fx.api=&reordered_api;
+    host_effects[0]=&composed_fx; ctx.state.active_fx=&composed_fx;
     paint_order=0; zmk_rgb_matrix_flush(); host_run_ready();
     assert(paint_order==21);
     expect_output((struct led_rgb){55,10,2},(struct led_rgb){51,18,17});
@@ -109,7 +116,7 @@ static void test_engine_composition(void) {
     second_cfg.common.opacity=100; leave_last_black=true;
     memset(scratch,0xa5,sizeof(scratch));
     paint_order=0; zmk_rgb_matrix_flush(); host_run_ready();
-    assert(paint_order==2 && !child_runtime.active && second_runtime.active && runtime.active);
+    assert(paint_order==2 && !child_state.active && second_state_runtime.active && runtime.active);
     expect_output((struct led_rgb){7,0,0},(struct led_rgb){0,0,0});
     second_state.targets=reordered; second_state.target_count=2; second_state.cover=true;
     expected_second_targets=reordered; expected_second_count=2;
@@ -121,9 +128,9 @@ static void test_engine_composition(void) {
     second_state.gate=false; filter_state.gate=true;
     int before=renders;
     zmk_rgb_matrix_flush(); host_run_ready();
-    assert(filter_paints==1 && runtime.active && renders==before+1 && !second_runtime.active);
+    assert(filter_paints==1 && runtime.active && renders==before+1 && !second_state_runtime.active);
     expect_output((struct led_rgb){7,0,0},(struct led_rgb){21,10,3});
-    host_overlay_count=0;
+    host_overlay_count=0; host_effects[0]=&fx; ctx.state.active_fx=&fx;
     expected_child_targets=NULL;
 }
 int main(void) {
@@ -163,7 +170,8 @@ int main(void) {
     /* A terminal callback paints caller-cleared targets without touching other pixels. */
     kp_rgb_matrix_lock();
     size_t target=1;
-    struct kp_rgb_frame f={.count=KP_LED_COUNT,.targets=&target,.target_count=1,.pixels=scratch,.now_ms=now};
+    struct kp_rgb_frame f={.count=KP_LED_COUNT,.targets=&target,.target_count=1,.pixels=scratch,.now_ms=now,.elapsed_ms=37};
+    check_raw_elapsed=true;
     memset(scratch,0xa5,sizeof(scratch));
     scratch[target]=(struct led_rgb){0};
     assert(!kp_rgb_effect_render(&child,&f));
@@ -185,6 +193,7 @@ int main(void) {
     f.target_count=0; memset(destination,0xa5,sizeof(destination));
     kp_ovl_render(&ov,&f);
     assert(destination[0].r==0xa5 && destination[1].r==0xa5);
+    check_raw_elapsed=false;
     kp_rgb_matrix_unlock();
 
     failures=2; assert(zmk_rgb_matrix_off()==0); host_run_ready();
@@ -207,6 +216,6 @@ if __name__ == '__main__':
     production = function(color, 'kp_rgb_rgb_mix') + '\n'
     production += '\n'.join(function(utils, name) for name in (
         'kp_rgb_overlay_paint', 'kp_rgb_overlay_paint_pixels'))
-    production += '\n' + function(overlay, 'kp_ovl_event_target')
-    production += '\n' + function(overlay, 'kp_ovl_render')
+    production += '\n' + '\n'.join(function(overlay, name) for name in (
+        'kp_ovl_effect', 'kp_ovl_reset', 'kp_ovl_set_active', 'kp_ovl_on_event', 'kp_ovl_render'))
     run_tests(MOCKS + production + FIXTURE + TESTS, scheduler=True, auto_off_idle=False)

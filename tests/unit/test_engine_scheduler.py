@@ -309,9 +309,7 @@ int main(int argc, char **argv) {
         host_render_red=91; kp_rgb_effect_invalidate(&fx); host_run_ready();
         assert(renders==before_renders+(KP_LED_COUNT?1:0));
         if(KP_LED_COUNT) assert(scene[0].r==91);
-        static struct kp_rgb_effect_runtime embedded_runtime;
-        static const struct kp_rgb_effect_api embedded_api={
-            .callbacks=&callbacks,.runtime=&embedded_runtime};
+        static const struct kp_rgb_effect_api embedded_api={.callbacks=&callbacks};
         static const struct device embedded_fx={.api=&embedded_api};
         before_renders=renders;
         host_render_red=117; kp_rgb_effect_invalidate(&embedded_fx); host_run_ready();

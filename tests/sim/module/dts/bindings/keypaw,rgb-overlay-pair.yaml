@@ -1,0 +1,14 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Native-sim two-child RGB overlay fixture
+
+compatible: "keypaw,rgb-overlay-pair"
+
+include: ["keypaw,rgb-overlay-common.yaml"]
+
+properties:
+  condition:
+    type: phandle
+    required: false
+

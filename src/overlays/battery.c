@@ -136,6 +136,10 @@ ZMK_LISTENER(kp_rgb_battery_overlay, kp_rgb_battery_overlay_listener);
 ZMK_SUBSCRIPTION(kp_rgb_battery_overlay, zmk_battery_state_changed);
 #endif
 
+static const struct kp_rgb_effect_callbacks kp_ovl_battery_callbacks = {
+    .render = kp_ovl_battery_render,
+};
+
 #define KP_OVL_BATTERY_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_NODE_HAS_PROP(DT_DRV_INST(inst), all_leds) ||                \
                    DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||           \
@@ -152,7 +156,7 @@ ZMK_SUBSCRIPTION(kp_rgb_battery_overlay, zmk_battery_state_changed);
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
   static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
-  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_render, NULL, true,               \
+  KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_battery_callbacks, true,                 \
                         kp_ovl_battery_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_BATTERY_DEFINE)

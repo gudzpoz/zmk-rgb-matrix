@@ -26,9 +26,27 @@ struct kp_ovl_data {
   struct kp_rgb_overlay_common_data common;
 };
 
-static const struct device *kp_ovl_event_target(const struct device *dev) {
+static const struct device *kp_ovl_effect(const struct device *dev) {
   const struct kp_ovl_config *cfg = dev->config;
   return cfg->effect;
+}
+
+static void kp_ovl_reset(const struct device *dev, int64_t now_ms) {
+  const struct device *effect = kp_ovl_effect(dev);
+  const struct kp_rgb_effect_api *api = effect->api;
+  if (api->callbacks->reset != NULL) api->callbacks->reset(effect, now_ms);
+}
+
+static void kp_ovl_set_active(const struct device *dev, bool active, int64_t now_ms) {
+  const struct device *effect = kp_ovl_effect(dev);
+  const struct kp_rgb_effect_api *api = effect->api;
+  if (api->callbacks->set_active != NULL) api->callbacks->set_active(effect, active, now_ms);
+}
+
+static bool kp_ovl_on_event(const struct device *dev, const struct kp_rgb_key_event *event) {
+  const struct device *effect = kp_ovl_effect(dev);
+  const struct kp_rgb_effect_api *api = effect->api;
+  return api->callbacks->on_event != NULL && api->callbacks->on_event(effect, event);
 }
 
 static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *frame) {
@@ -43,6 +61,13 @@ static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *f
   return animating;
 }
 
+static const struct kp_rgb_effect_callbacks kp_ovl_callbacks = {
+    .render = kp_ovl_render,
+    .on_event = kp_ovl_on_event,
+    .set_active = kp_ovl_set_active,
+    .reset = kp_ovl_reset,
+};
+
 #define KP_OVL_DEFINE(inst)                                                    \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_ovl_##inst);                           \
   KP_RGB_OVERLAY_EFFECT_ASSERT(DT_DRV_INST(inst))                              \
@@ -51,8 +76,7 @@ static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *f
       .effect = KP_RGB_OVERLAY_EFFECT(DT_DRV_INST(inst)),                      \
   };                                                                           \
   static struct kp_ovl_data kp_ovl_##inst##_data;                              \
-  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_render, kp_ovl_event_target, true,        \
-                        kp_ovl_##inst)
+  KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_callbacks, true, kp_ovl_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_DEFINE)
 

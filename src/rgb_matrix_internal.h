@@ -50,6 +50,28 @@ struct kp_rgb_controller {
 
 extern struct kp_rgb_controller kp_rgb_controller;
 
+struct kp_rgb_scene_runtime {
+  struct kp_rgb_callback_state state;
+  bool wanted;
+  bool reset_pending;
+};
+
+void kp_rgb_callbacks_set_active(const struct device *dev,
+                                const struct kp_rgb_effect_callbacks *callbacks,
+                                struct kp_rgb_callback_state *state,
+                                bool active, int64_t now_ms);
+void kp_rgb_callbacks_reset(const struct device *dev,
+                           const struct kp_rgb_effect_callbacks *callbacks,
+                           struct kp_rgb_callback_state *state, int64_t now_ms);
+bool kp_rgb_callbacks_on_event(const struct device *dev,
+                              const struct kp_rgb_effect_callbacks *callbacks,
+                              const struct kp_rgb_callback_state *state,
+                              const struct kp_rgb_key_event *event);
+bool kp_rgb_callbacks_render(const struct device *dev,
+                            const struct kp_rgb_effect_callbacks *callbacks,
+                            struct kp_rgb_callback_state *state,
+                            const struct kp_rgb_frame *frame);
+
 /* Never hold the matrix lock across flash I/O. */
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);

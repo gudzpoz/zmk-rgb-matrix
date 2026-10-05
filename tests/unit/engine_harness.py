@@ -9,20 +9,21 @@ import subprocess
 import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "src/rgb_matrix.c").read_text()
+INSTANCE_SOURCE = (ROOT / "src/rgb_instance.c").read_text()
 BEHAVIOR_SOURCE = (ROOT / "src/behavior_rgb_matrix.c").read_text()
 
 
-def function(name):
-    match = re.search(r"^(?:static )?(?:inline )?[\w *]+\b" + name + r"\([^;]*?\) \{", SOURCE, re.M)
+def function(name, source=SOURCE):
+    match = re.search(r"^(?:static )?(?:inline )?[\w *]+\b" + name + r"\([^;]*?\) \{", source, re.M)
     assert match, name
     start = match.start()
-    pos = SOURCE.index("{", match.start())
+    pos = source.index("{", match.start())
     depth = 1
     end = pos + 1
     while depth:
-        depth += (SOURCE[end] == "{") - (SOURCE[end] == "}")
+        depth += (source[end] == "{") - (source[end] == "}")
         end += 1
-    return SOURCE[start:end]
+    return source[start:end]
 
 TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD: \{\n.*?^  \}\n", BEHAVIOR_SOURCE, re.M | re.S)
 assert TOGGLE_CASE, "RGB toggle conversion"
@@ -86,7 +87,7 @@ typedef _Atomic int atomic_t;
 #define atomic_get(p) atomic_load(p)
 #define atomic_set(p,v) atomic_store(p,v)
 struct device { const void *api; const char *name; void *data; const void *config; };
-typedef void (*effect_visitor)(const struct device *dev, int64_t now_ms);
+
 struct led_rgb { uint8_t r,g,b; };
 struct kp_rgb_coord { uint16_t x,y; };
 struct kp_rgb_tuning { uint8_t max_brightness,idle_brightness; };
@@ -97,7 +98,14 @@ struct kp_rgb_frame {
 };
 struct zmk_position_state_changed { uint32_t position; bool state; int64_t timestamp; };
 struct kp_rgb_key_event { uint32_t position; bool pressed; int64_t timestamp_ms; };
-struct kp_rgb_effect_runtime { int64_t last_render_ms; bool initialized,active,wanted,animating,reset_pending; };
+struct kp_rgb_callback_state { int64_t last_render_ms; bool initialized,active,animating; };
+struct kp_rgb_effect_instance { const struct device *effect; struct kp_rgb_callback_state state; };
+#define KP_RGB_EFFECT_INSTANCE_INIT(dev) {.effect=(dev)}
+struct kp_rgb_scene_runtime { struct kp_rgb_callback_state state; bool wanted,reset_pending; };
+static struct kp_rgb_scene_runtime kp_rgb_effect_scenes[8],kp_rgb_overlay_scenes[8];
+struct kp_rgb_effect_config { size_t index; };
+static const struct kp_rgb_effect_config *kp_rgb_effect_cfg(const struct device *d) { return d->config; }
+struct kp_rgb_overlay_common_data { size_t index; };
 struct kp_rgb_effect_callbacks {
  bool (*render)(const struct device *,const struct kp_rgb_frame *);
  bool (*on_event)(const struct device *,const struct kp_rgb_key_event *);
@@ -106,10 +114,10 @@ struct kp_rgb_effect_callbacks {
 };
 struct kp_rgb_effect_api {
  const struct kp_rgb_effect_callbacks *callbacks;
- struct kp_rgb_effect_runtime *runtime;
  const struct device *const *overlays; size_t overlays_len;
 };
-struct kp_rgb_overlay_api { bool (*render)(const struct device *,const struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); bool replaces_target; };
+struct kp_rgb_overlay_api { const struct kp_rgb_effect_callbacks *callbacks; bool replaces_target; };
+typedef void (*scene_visitor)(const struct device *,const struct kp_rgb_effect_callbacks *,struct kp_rgb_scene_runtime *,int64_t);
 struct kp_rgb_controller {
  const struct device *dev;
  uint16_t effect_index;
@@ -211,6 +219,7 @@ void kp_rgb_triggers_poll(void) { assert(!held); polls++; }
 bool kp_rgb_overlay_refresh(void) { assert(!held); refreshes++; return true; }
 void kp_rgb_overlay_dispatch(void) { assert(!held); dispatches++; }
 struct host_overlay {
+ struct kp_rgb_overlay_common_data common;
  const struct device *child; bool gate,cover;
  const size_t *targets; size_t target_count;
 };
@@ -253,10 +262,10 @@ static bool host_event_repaint=true;
 static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) {
  (void)d;assert(held);feedback++;return e->pressed && host_event_repaint;
 }
-static struct kp_rgb_effect_runtime runtime;
 static const struct kp_rgb_effect_callbacks callbacks={.render=render,.on_event=on_event};
-static const struct kp_rgb_effect_api api={.callbacks=&callbacks,.runtime=&runtime};
-static const struct device fx={.api=&api};
+static const struct kp_rgb_effect_api api={.callbacks=&callbacks};
+static const struct kp_rgb_effect_config fx_config={.index=0};
+static const struct device fx={.api=&api,.config=&fx_config};
 static const struct device *host_effects[8]={&fx};
 static size_t host_effect_count=1;
 static size_t kp_rgb_effect_count(void) { return host_effect_count; }
@@ -304,8 +313,8 @@ static void host_activity(bool active) {
 
 FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
-    "kp_rgb_each_effect", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
-    "kp_rgb_request_runtime_reset_locked", "kp_rgb_reconcile_effect", "kp_rgb_effect_render",
+    "kp_rgb_effect_scene", "kp_rgb_overlay_scene", "kp_rgb_each_scene", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
+    "kp_rgb_request_runtime_reset_locked", "kp_rgb_deactivate_scene", "kp_rgb_reset_scene", "kp_rgb_activate_scene",
     "kp_rgb_schedule_locked", "kp_rgb_request_output_pass", "kp_rgb_effect_invalidate", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
     "kp_rgb_finish_output_pass", "kp_rgb_conditions_refreshed",
     "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_scene_pass_locked",
@@ -315,7 +324,7 @@ FUNCTIONS = [
     "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
     "zmk_rgb_matrix_flush", "kp_rgb_pending_push",
     "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_pending_available",
-    "kp_rgb_deliver_event", "kp_rgb_deliver_position",
+    "kp_rgb_deliver_position",
     "kp_rgb_matrix_event_listener", "kp_rgb_set_user_on", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
     "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "zmk_rgb_matrix_get_user_state", "kp_rgb_matrix_init",
 ]
@@ -329,8 +338,14 @@ def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True, allo
             source.write_text(
                 f"#define KP_LED_COUNT {leds}\n#define HOST_SCHEDULER {int(scheduler)}\n"
                 f"#define CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE {int(auto_off_idle)}\n"
-                + PRELUDE + "\n".join(map(function, FUNCTIONS))
-                + TOGGLE_FUNCTION + ACTIVITY_FUNCTION + tests
+                + PRELUDE + "\n".join(function(name, INSTANCE_SOURCE) for name in (
+                    'kp_rgb_callbacks_reset', 'kp_rgb_callbacks_set_active',
+                    'kp_rgb_callbacks_on_event', 'kp_rgb_callbacks_render', 'kp_rgb_effect_render',
+                    'kp_rgb_instance_callbacks', 'kp_rgb_effect_instance_set_active',
+                    'kp_rgb_effect_instance_reset', 'kp_rgb_effect_instance_on_event',
+                    'kp_rgb_effect_instance_render', 'kp_rgb_effect_instance_restart_clock'))
+                + "\n".join(map(function, FUNCTIONS))
+                + TOGGLE_FUNCTION + ACTIVITY_FUNCTION + '\n#define runtime (kp_rgb_effect_scenes[0].state)\n' + tests
             )
             binary = pathlib.Path(directory) / "engine"
             subprocess.run(

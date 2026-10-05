@@ -15,7 +15,8 @@ CASES = (
 
 TESTS = (function(BEHAVIOR_SOURCE, "kp_rgb_select_effect")
          + SCHEDULER_TESTS.split("static void flush_from_render(", 1)[0]) + r'''
-static struct kp_rgb_effect_runtime selected_runtime;
+#define selected_runtime (kp_rgb_effect_scenes[1].state)
+static const struct kp_rgb_effect_config selected_config={.index=1};
 static unsigned selected_paints;
 static bool selected_render(const struct device *dev, const struct kp_rgb_frame *frame) {
     (void)dev;
@@ -26,8 +27,8 @@ static bool selected_render(const struct device *dev, const struct kp_rgb_frame 
     return true;
 }
 static const struct kp_rgb_effect_callbacks selected_callbacks={.render=selected_render};
-static const struct kp_rgb_effect_api selected_api={.callbacks=&selected_callbacks,.runtime=&selected_runtime};
-static const struct device selected_fx={.api=&selected_api};
+static const struct kp_rgb_effect_api selected_api={.callbacks=&selected_callbacks};
+static const struct device selected_fx={.api=&selected_api,.config=&selected_config};
 static void assert_debt(enum kp_rgb_output_kind kind, int64_t deadline, uint32_t delay) {
     assert(kp_rgb_output_pending == kind);
     assert(kp_rgb_output_retry_deadline_ms == deadline);
