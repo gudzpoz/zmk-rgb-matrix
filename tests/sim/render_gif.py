@@ -17,6 +17,8 @@ integers little-endian, matching the host native_sim runs on.
 """
 
 import argparse
+from fractions import Fraction
+import math
 import shutil
 import struct
 import subprocess
@@ -25,7 +27,7 @@ import tempfile
 
 MAGIC = b"KPRC"
 VERSION = 1
-DEFAULT_FPS = 31.25  # the module's 32 ms tick
+DEFAULT_FPS = 100  # GIF delays have 10 ms resolution
 DEFAULT_TILE = 32
 
 
@@ -84,16 +86,37 @@ def infer_cell(coords):
     return 100
 
 
-def infer_fps(frames):
-    if len(frames) < 2:
-        return DEFAULT_FPS
-    deltas = sorted(
-        b[0] - a[0] for a, b in zip(frames, frames[1:]) if b[0] > a[0]
-    )
-    if not deltas:
-        return DEFAULT_FPS
-    median = deltas[len(deltas) // 2]
-    return 1000.0 / median if median > 0 else DEFAULT_FPS
+def resample_frames(frames, fps=DEFAULT_FPS, end_ms=None):
+    """Hold the latest source image at each sample, starting at the first timestamp.
+
+    The absolute end is exclusive; round partial sampling intervals up. Without
+    an end, hold the last image for one interval. Equal timestamps use the last
+    image. A zero-length window still produces one image for GIF encoding.
+    """
+    if not math.isfinite(fps) or fps <= 0:
+        raise ValueError("sampling rate must be finite and positive")
+    if not frames:
+        raise ValueError("capture file contains no frames")
+    if any(b[0] < a[0] for a, b in zip(frames, frames[1:])):
+        raise ValueError("capture timestamps must not decrease")
+    interval = Fraction(1000) / Fraction(str(fps))
+    if end_ms is None:
+        end = frames[-1][0] + interval
+    else:
+        if not math.isfinite(end_ms) or end_ms < frames[-1][0]:
+            raise ValueError("end must be finite and not before the last timestamp")
+        end = Fraction(str(end_ms))
+    count = max(1, math.ceil((end - frames[0][0]) / interval))
+
+    def samples():
+        source = 0
+        for index in range(count):
+            timestamp = frames[0][0] + index * interval
+            while source + 1 < len(frames) and frames[source + 1][0] <= timestamp:
+                source += 1
+            yield frames[source]
+
+    return samples()
 
 
 def rasterize(coords, frames, cell, tile, gap):
@@ -115,20 +138,21 @@ def rasterize(coords, frames, cell, tile, gap):
         ((c[0] // cell) * tile + pad, (c[1] // cell) * tile + pad) for c in coords
     ]
 
-    stream = bytearray()
-    for _, pixels in frames:
-        canvas = bytearray(width * height * 3)
-        for led, (px, py) in enumerate(rects):
-            r = pixels[led * 3]
-            g = pixels[led * 3 + 1]
-            b = pixels[led * 3 + 2]
-            row = bytes((r, g, b)) * inner
-            for y in range(py, py + inner):
-                start = (y * width + px) * 3
-                canvas[start : start + inner * 3] = row
-        stream += canvas
+    def images():
+        previous = None
+        canvas = None
+        for _, pixels in frames:
+            if pixels != previous:
+                canvas = bytearray(width * height * 3)
+                for led, (px, py) in enumerate(rects):
+                    row = pixels[led * 3 : led * 3 + 3] * inner
+                    for y in range(py, py + inner):
+                        start = (y * width + px) * 3
+                        canvas[start : start + inner * 3] = row
+                previous = pixels
+            yield canvas
 
-    return width, height, bytes(stream)
+    return width, height, images()
 
 
 def encode_gif(raw_path, width, height, fps, out_path):
@@ -154,7 +178,7 @@ def encode_gif(raw_path, width, height, fps, out_path):
             "-video_size",
             f"{width}x{height}",
             "-framerate",
-            f"{fps:.6f}",
+            str(fps),
             "-i",
             raw_path,
             "-filter_complex",
@@ -195,8 +219,12 @@ def main():
     parser.add_argument(
         "--fps",
         type=float,
-        default=None,
-        help="override the frame rate inferred from the frame timestamps",
+        default=DEFAULT_FPS,
+        help="output sampling rate, not playback speed (default: 100 Hz)",
+    )
+    parser.add_argument(
+        "--end-ms", type=float,
+        help="absolute capture-window end in ms (default: last timestamp + one sample)",
     )
     args = parser.parse_args()
 
@@ -205,24 +233,28 @@ def main():
 
     try:
         coords, frames = read_capture(args.capture)
+        samples = resample_frames(frames, args.fps, args.end_ms)
     except (OSError, ValueError) as err:
         sys.exit(f"error: {args.capture}: {err}")
 
     cell = infer_cell(coords)
-    fps = args.fps if args.fps else infer_fps(frames)
+    fps = args.fps
     gap = args.gap if args.gap is not None else max(1, args.tile // 8)
-    width, height, stream = rasterize(coords, frames, cell, args.tile, gap)
+    width, height, images = rasterize(coords, samples, cell, args.tile, gap)
 
     with tempfile.NamedTemporaryFile(suffix=".rgb") as raw:
-        raw.write(stream)
+        output_frames = 0
+        for image in images:
+            raw.write(image)
+            output_frames += 1
         raw.flush()
         encode_gif(raw.name, width, height, fps, args.output)
 
-    duration = (frames[-1][0] - frames[0][0]) / 1000.0
+    duration = output_frames / fps
     distinct = len({pixels for _, pixels in frames})
     print(
-        f"{args.output}: {len(frames)} frames, {distinct} distinct, "
-        f"{width}x{height}, {fps:.1f} fps, {duration:.1f}s of simulated time"
+        f"{args.output}: {len(frames)} source frames, {distinct} distinct, "
+        f"{width}x{height}, {fps:g} Hz sampling, {duration:.3f}s output"
     )
 
     if 0 < args.min_distinct and distinct < args.min_distinct:

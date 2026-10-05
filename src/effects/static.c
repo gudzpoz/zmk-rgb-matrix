@@ -51,7 +51,8 @@ struct kp_eff_static_data {
           {                                                                    \
               .color = KP_RGB_HSB_FROM_HEX(                                    \
                   DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
+              .duration_ms = MIN(                                              \
+                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
           },                                                                   \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_static_callbacks,            \

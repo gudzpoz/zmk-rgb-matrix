@@ -41,7 +41,7 @@ BUILD_ASSERT(DT_CHILD_NUM(KP_CONTROLLER) <= UINT8_MAX,
               (NULL, ))
 #define KP_RGB_EFFECT_DEFAULT_ONE(node_id)                                     \
   {.color = KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),                \
-   .duration_ms = (uint16_t)DT_PROP_OR(node_id, duration, 0)},
+   .duration_ms = DT_PROP_OR(node_id, duration, 0)},
 
 static const struct device *const kp_rgb_effects[KP_RGB_MAX_EFFECTS] = {
     DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_DEVICE)};
@@ -189,28 +189,46 @@ int kp_rgb_apply_defaults(void) {
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
     data->color = def->color;
     data->color.b = brightness;
-    data->duration_ms = def->duration_ms != 0 ? def->duration_ms : duration;
+    data->duration_ms =
+        def->duration_ms != 0
+            ? (uint16_t)CLAMP(def->duration_ms,
+                              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+                              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
+            : duration;
   }
   kp_rgb_controller.effect_index = kp_rgb_controller.initial_effect;
   int ret = kp_rgb_resolve_active();
   kp_rgb_reconcile_power_locked();
+  zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();
   return ret;
 }
 
-int kp_rgb_select_effect(uint16_t index) {
+static int kp_rgb_select_effect_locked(uint16_t index) {
   if (index >= kp_rgb_effect_count()) {
     return -EINVAL;
   }
-  if (kp_rgb_effect_at(index) == NULL) {
+  const struct device *fx = kp_rgb_effect_at(index);
+  if (fx == NULL) {
     return -ENOENT;
   }
-  kp_rgb_matrix_lock();
-  kp_rgb_controller.effect_index = index;
-  kp_rgb_controller.state.active_fx = kp_rgb_effect_at(index);
-  zmk_rgb_matrix_flush();
-  kp_rgb_matrix_unlock();
+  if (kp_rgb_controller.effect_index != index ||
+      kp_rgb_controller.state.active_fx != fx) {
+    kp_rgb_controller.effect_index = index;
+    kp_rgb_controller.state.active_fx = fx;
+    zmk_rgb_matrix_flush();
+  }
   return 0;
+}
+
+int kp_rgb_select_effect(uint16_t index) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_select_effect_locked(index);
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 int zmk_rgb_matrix_select_effect(uint16_t index) {
@@ -218,104 +236,213 @@ int zmk_rgb_matrix_select_effect(uint16_t index) {
 }
 
 int zmk_rgb_matrix_cycle_effect(int16_t direction) {
-  return kp_rgb_select_effect(
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_select_effect_locked(
       kp_rgb_calc_effect_index(kp_rgb_controller.effect_index, direction));
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 int kp_rgb_calc_effect(int16_t direction) {
-  return (int)kp_rgb_calc_effect_index(kp_rgb_controller.effect_index,
-                                       direction);
+  kp_rgb_matrix_lock();
+  int index = kp_rgb_calc_effect_index(kp_rgb_controller.effect_index, direction);
+  kp_rgb_matrix_unlock();
+  return index;
+}
+
+static bool kp_rgb_parameter_target_ready(const struct device *fx) {
+  return fx != NULL && device_is_ready(fx);
+}
+
+static int kp_rgb_set_color_locked(const struct device *fx,
+                                   const struct kp_rgb_hsb *color) {
+  if (!kp_rgb_parameter_target_ready(fx)) {
+    return -ENODEV;
+  }
+  if (color == NULL || color->h > KP_RGB_HUE_MAX ||
+      color->s > KP_RGB_SAT_MAX || color->b > KP_RGB_BRT_MAX) {
+    return -EINVAL;
+  }
+  struct kp_rgb_hsb next = *color;
+  next.h %= KP_RGB_HUE_MAX;
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+  if (data->color.h != next.h || data->color.s != next.s ||
+      data->color.b != next.b) {
+    data->color = next;
+    zmk_rgb_matrix_flush();
+  }
+  return 0;
+}
+
+static int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
+  if (!kp_rgb_parameter_target_ready(fx)) {
+    return -ENODEV;
+  }
+  if (period_ms < CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS ||
+      period_ms > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS) {
+    return -EINVAL;
+  }
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+  if (data->duration_ms != period_ms) {
+    data->duration_ms = (uint16_t)period_ms;
+    zmk_rgb_matrix_flush();
+  }
+  return 0;
+}
+
+int zmk_rgb_matrix_set_color(const struct device *fx,
+                             const struct kp_rgb_hsb *color) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_color_locked(fx, color);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+int zmk_rgb_matrix_set_period(const struct device *fx, uint32_t period_ms) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_period_locked(fx, period_ms);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+int kp_rgb_set_hsb(struct kp_rgb_hsb color) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_color_locked(kp_rgb_controller.state.active_fx, &color);
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 static struct kp_rgb_hsb kp_active_hsb(void) {
-  if (kp_rgb_controller.state.active_fx == NULL) {
+  if (!kp_rgb_parameter_target_ready(kp_rgb_controller.state.active_fx)) {
     return (struct kp_rgb_hsb){
         .h = 0, .s = 0, .b = kp_rgb_controller.tuning.max_brightness};
   }
   return kp_rgb_effect_data(kp_rgb_controller.state.active_fx)->color;
 }
 
-int kp_rgb_set_hsb(struct kp_rgb_hsb color) {
-  if (kp_rgb_controller.state.active_fx == NULL) {
-    return -ENODEV;
-  }
-  if (color.h > KP_RGB_HUE_MAX || color.s > KP_RGB_SAT_MAX ||
-      color.b > KP_RGB_BRT_MAX) {
-    return -EINVAL;
-  }
-  kp_rgb_matrix_lock();
-  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_rgb_controller.state.active_fx);
-  if (data->color.h != color.h || data->color.s != color.s || data->color.b != color.b) {
-    data->color = color;
-    zmk_rgb_matrix_flush();
-  }
-  kp_rgb_matrix_unlock();
-  return 0;
+static struct kp_rgb_hsb kp_rgb_calc_hue_locked(int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb();
+  int64_t hue = ((int64_t)color.h +
+                 (int64_t)direction * CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) %
+                KP_RGB_HUE_MAX;
+  color.h = (uint16_t)(hue < 0 ? hue + KP_RGB_HUE_MAX : hue);
+  return color;
 }
 
 struct kp_rgb_hsb kp_rgb_calc_hue(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-  color.h = (color.h + KP_RGB_HUE_MAX +
-             (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) %
-            KP_RGB_HUE_MAX;
-  return color;
-}
-
-struct kp_rgb_hsb kp_rgb_calc_sat(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-  color.s = (uint8_t)CLAMP((int)color.s + (int)direction *
-                                              CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP,
-                           0, KP_RGB_SAT_MAX);
-  return color;
-}
-
-struct kp_rgb_hsb kp_rgb_calc_brt(int8_t direction) {
-  struct kp_rgb_hsb color = kp_active_hsb();
-  color.b = (uint8_t)CLAMP((int)color.b + (int)direction *
-                                              CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP,
-                           0, KP_RGB_BRT_MAX);
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_hue_locked(direction);
+  kp_rgb_matrix_unlock();
   return color;
 }
 
 int kp_rgb_change_hue(int8_t direction) {
-  return kp_rgb_set_hsb(kp_rgb_calc_hue(direction));
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_hue_locked(direction);
+  int ret = kp_rgb_set_color_locked(kp_rgb_controller.state.active_fx, &color);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+static struct kp_rgb_hsb kp_rgb_calc_sat_locked(int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb();
+  color.s = (uint8_t)CLAMP((int64_t)color.s + (int64_t)direction *
+                                                  CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP,
+                           0, KP_RGB_SAT_MAX);
+  return color;
+}
+
+struct kp_rgb_hsb kp_rgb_calc_sat(int8_t direction) {
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_sat_locked(direction);
+  kp_rgb_matrix_unlock();
+  return color;
 }
 
 int kp_rgb_change_sat(int8_t direction) {
-  return kp_rgb_set_hsb(kp_rgb_calc_sat(direction));
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_sat_locked(direction);
+  int ret = kp_rgb_set_color_locked(kp_rgb_controller.state.active_fx, &color);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+static struct kp_rgb_hsb kp_rgb_calc_brt_locked(int8_t direction) {
+  struct kp_rgb_hsb color = kp_active_hsb();
+  color.b = (uint8_t)CLAMP((int64_t)color.b + (int64_t)direction *
+                                                  CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP,
+                           0, KP_RGB_BRT_MAX);
+  return color;
+}
+
+struct kp_rgb_hsb kp_rgb_calc_brt(int8_t direction) {
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_brt_locked(direction);
+  kp_rgb_matrix_unlock();
+  return color;
 }
 
 int kp_rgb_change_brt(int8_t direction) {
-  return kp_rgb_set_hsb(kp_rgb_calc_brt(direction));
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  struct kp_rgb_hsb color = kp_rgb_calc_brt_locked(direction);
+  int ret = kp_rgb_set_color_locked(kp_rgb_controller.state.active_fx, &color);
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 static uint32_t kp_active_duration(void) {
-  return kp_rgb_controller.state.active_fx == NULL
+  return !kp_rgb_parameter_target_ready(kp_rgb_controller.state.active_fx)
              ? 0
              : kp_rgb_effect_period(kp_rgb_controller.state.active_fx);
 }
 
+static uint32_t kp_rgb_calc_duration_locked(int16_t direction) {
+  int64_t next = (int64_t)kp_active_duration() +
+                 (int64_t)direction * CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
+  return (uint32_t)CLAMP(next, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+                        CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+}
+
 int kp_rgb_set_duration(uint32_t duration_ms) {
-  if (kp_rgb_controller.state.active_fx == NULL) {
-    return -ENODEV;
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
   }
-  int32_t duration = CLAMP((int32_t)duration_ms,
-                           (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                           (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   kp_rgb_matrix_lock();
-  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_rgb_controller.state.active_fx);
-  if (data->duration_ms != (uint16_t)duration) {
-    data->duration_ms = (uint16_t)duration;
-    zmk_rgb_matrix_flush();
-  }
+  int ret = kp_rgb_set_period_locked(kp_rgb_controller.state.active_fx, duration_ms);
   kp_rgb_matrix_unlock();
-  return 0;
+  return ret;
 }
 
 int kp_rgb_change_duration(int16_t direction) {
-  int32_t next = (int32_t)kp_active_duration() +
-                 (int32_t)direction * CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
-  return kp_rgb_set_duration((uint32_t)MAX(next, 0));
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_period_locked(kp_rgb_controller.state.active_fx,
+                                     kp_rgb_calc_duration_locked(direction));
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 int kp_rgb_effect_convert_central_state_dependent_params(
@@ -323,7 +450,7 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
   const struct device *fx = zmk_behavior_get_binding(binding->behavior_dev);
-  if (fx == NULL) {
+  if (!kp_rgb_parameter_target_ready(fx)) {
     return -ENODEV;
   }
   const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(fx);
@@ -340,11 +467,13 @@ static int on_keymap_binding_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
   switch (binding->param1) {
   case RGB_TOG_CMD: {
-    kp_rgb_matrix_lock();
     binding->param1 = kp_rgb_controller.state.user_on ? RGB_OFF_CMD : RGB_ON_CMD;
-    kp_rgb_matrix_unlock();
     break;
   }
   case RGB_BRI_CMD:
@@ -356,22 +485,22 @@ static int on_keymap_binding_convert_central_state_dependent_params(
     struct kp_rgb_hsb color;
     switch (binding->param1) {
     case RGB_BRI_CMD:
-      color = kp_rgb_calc_brt(1);
+      color = kp_rgb_calc_brt_locked(1);
       break;
     case RGB_BRD_CMD:
-      color = kp_rgb_calc_brt(-1);
+      color = kp_rgb_calc_brt_locked(-1);
       break;
     case RGB_HUI_CMD:
-      color = kp_rgb_calc_hue(1);
+      color = kp_rgb_calc_hue_locked(1);
       break;
     case RGB_HUD_CMD:
-      color = kp_rgb_calc_hue(-1);
+      color = kp_rgb_calc_hue_locked(-1);
       break;
     case RGB_SAI_CMD:
-      color = kp_rgb_calc_sat(1);
+      color = kp_rgb_calc_sat_locked(1);
       break;
     default:
-      color = kp_rgb_calc_sat(-1);
+      color = kp_rgb_calc_sat_locked(-1);
       break;
     }
     binding->param1 = RGB_COLOR_HSB_CMD;
@@ -380,27 +509,26 @@ static int on_keymap_binding_convert_central_state_dependent_params(
   }
   case RGB_EFR_CMD:
     binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)kp_rgb_calc_effect(-1);
+    binding->param2 = (uint32_t)kp_rgb_calc_effect_index(
+        kp_rgb_controller.effect_index, -1);
     break;
   case RGB_EFF_CMD:
     binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)kp_rgb_calc_effect(1);
+    binding->param2 = (uint32_t)kp_rgb_calc_effect_index(
+        kp_rgb_controller.effect_index, 1);
     break;
   case RGB_SPI_CMD:
   case RGB_SPD_CMD: {
-    int32_t step = binding->param1 == RGB_SPI_CMD ? 1 : -1;
-    int32_t duration =
-        CLAMP((int32_t)kp_active_duration() +
-                  step * (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP,
-              (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-              (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+    uint32_t duration = kp_rgb_calc_duration_locked(
+        binding->param1 == RGB_SPI_CMD ? 1 : -1);
     binding->param1 = RGB_SPI_CMD;
     binding->param2 = (uint32_t)duration;
     break;
   }
   default:
-    return 0;
+    break;
   }
+  kp_rgb_matrix_unlock();
   return 0;
 }
 

@@ -56,8 +56,10 @@ static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device 
     return dev->data;
 }
 static unsigned held, lock_entries, flushes, locked_flushes;
+static bool isr;
+static bool k_is_in_isr(void) { return isr; }
 static void zmk_rgb_matrix_flush(void) { flushes++; if(held) locked_flushes++; }
-static void kp_rgb_matrix_lock(void) { if (!held) lock_entries++; held++; }
+static void kp_rgb_matrix_lock(void) { assert(!isr); if (!held) lock_entries++; held++; }
 static void kp_rgb_matrix_unlock(void) { assert(held); held--; }
 '''
 
@@ -69,7 +71,7 @@ int main(void) {
         {&data[2], "base-two"}, {&data[3], "private-overlay"}
     };
     const struct device *effects[] = {&devices[0], &devices[1], NULL, &devices[2]};
-    const struct kp_rgb_effect_defaults defaults[] = {
+    struct kp_rgb_effect_defaults defaults[] = {
         {{10, 20, 30}, 0}, {{40, 50, 60}, 700}, {{0}, 0}, {{70, 80, 90}, 0}
     };
     kp_rgb_controller.effects = effects;
@@ -82,6 +84,7 @@ int main(void) {
     data[3].color.h = 321;
     data[3].duration_ms = 456;
     assert(kp_rgb_apply_defaults() == 0);
+    assert(flushes == 1 && locked_flushes == 1);
     assert(kp_rgb_controller.state.user_on);
     assert(kp_rgb_controller.state.active_fx == &devices[0]);
     assert(data[0].color.h == 10 && data[0].color.b == 100);
@@ -100,6 +103,15 @@ int main(void) {
     assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 0);
     assert(zmk_rgb_matrix_select_effect(1) == 0 && kp_rgb_selected_effect() == 1);
     unsigned before=flushes, locked_before=locked_flushes;
+    assert(zmk_rgb_matrix_select_effect(1) == 0 && flushes == before);
+    assert(zmk_rgb_matrix_cycle_effect(0) == 0 && flushes == before);
+    isr = true;
+    assert(zmk_rgb_matrix_select_effect(0) == -EWOULDBLOCK);
+    assert(zmk_rgb_matrix_cycle_effect(1) == -EWOULDBLOCK);
+    assert(kp_rgb_set_duration(100) == -EWOULDBLOCK);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){0,0,0}) == -EWOULDBLOCK);
+    assert(flushes == before && !held);
+    isr = false;
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
     assert(flushes==before+1 && locked_flushes==locked_before+1);
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
@@ -113,12 +125,16 @@ int main(void) {
     assert(kp_rgb_set_duration(1234) == 0);
     assert(flushes==before+1 && locked_flushes==locked_before+1);
     assert(kp_rgb_set_duration(1234) == 0 && flushes==before+1);
-    assert(kp_rgb_set_duration(0) == 0);
+    assert(kp_rgb_set_duration(0) == -EINVAL);
+    assert(kp_rgb_set_duration(1) == -EINVAL);
+    assert(kp_rgb_set_duration(20000) == -EINVAL);
+    assert(kp_rgb_set_duration(10001) == -EINVAL);
+    assert(kp_rgb_set_duration(UINT32_MAX) == -EINVAL);
+    assert(data[1].duration_ms==1234 && flushes==before+1);
+    assert(kp_rgb_set_duration(100) == 0);
     assert(data[1].duration_ms==100 && flushes==before+2);
-    assert(kp_rgb_set_duration(1) == 0 && flushes==before+2);
-    assert(kp_rgb_set_duration(20000) == 0);
+    assert(kp_rgb_set_duration(10000) == 0);
     assert(data[1].duration_ms==10000 && flushes==before+3);
-    assert(kp_rgb_set_duration(10001) == 0 && flushes==before+3);
     assert(kp_rgb_set_duration(1234) == 0);
     assert(flushes==before+4 && locked_flushes==locked_before+4);
     before=flushes;
@@ -138,6 +154,20 @@ int main(void) {
     assert(kp_rgb_apply_defaults() == 0);
     assert(kp_rgb_selected_effect() == 0 && !kp_rgb_controller.state.user_on);
     assert(data[1].color.h == 40 && data[3].color.h == 321);
+    before=flushes; locked_before=locked_flushes;
+    assert(kp_rgb_apply_defaults() == 0);
+    assert(flushes==before+1 && locked_flushes==locked_before+1);
+    defaults[0].duration_ms = 65536u + 700u;
+    defaults[1].duration_ms = UINT32_MAX;
+    defaults[3].duration_ms = 1;
+    assert(kp_rgb_apply_defaults() == 0);
+    assert(data[0].duration_ms==10000 && data[1].duration_ms==10000);
+    assert(data[2].duration_ms==100 && data[3].duration_ms==456);
+    defaults[0].duration_ms = 0;
+    kp_rgb_controller.initial_duration_ms = UINT32_MAX;
+    assert(kp_rgb_apply_defaults() == 0 && data[0].duration_ms==10000);
+    kp_rgb_controller.initial_duration_ms = -1;
+    assert(kp_rgb_apply_defaults() == 0 && data[0].duration_ms==100);
     assert(held == 0);
     puts("singleton selection/defaults/private parameter isolation passed");
     return 0;
@@ -152,6 +182,10 @@ def fixture_code():
         "kp_rgb_state", "kp_rgb_effect_defaults", "kp_rgb_controller"))
     code += r'''
 static struct kp_rgb_controller kp_rgb_controller;
+static bool device_is_ready(const struct device *dev) {
+    assert(dev != NULL);
+    return true;
+}
 static unsigned reconciles;
 static bool reconciled_user_on;
 static void kp_rgb_reconcile_power_locked(void) {
@@ -163,7 +197,9 @@ static void kp_rgb_reconcile_power_locked(void) {
     code += "\n".join(function(source, name) for name in (
         "kp_rgb_effect_count", "kp_rgb_effect_at", "kp_rgb_selected_effect",
         "kp_rgb_calc_effect_index", "kp_rgb_resolve_active",
-        "kp_rgb_apply_defaults", "kp_rgb_select_effect", "zmk_rgb_matrix_select_effect",
+        "kp_rgb_apply_defaults", "kp_rgb_select_effect_locked", "kp_rgb_select_effect",
+        "zmk_rgb_matrix_select_effect", "kp_rgb_parameter_target_ready",
+        "kp_rgb_set_color_locked", "kp_rgb_set_period_locked",
         "zmk_rgb_matrix_cycle_effect", "kp_rgb_set_hsb", "kp_rgb_set_duration"))
     return code
 

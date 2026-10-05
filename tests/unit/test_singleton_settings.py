@@ -80,6 +80,7 @@ int main(void) {
     kp_rgb_controller.initial_duration_ms = 1000;
     assert(kp_rgb_apply_defaults() == 0);
     assert(lock_entries == 1 && reconciles == 1 && reconciled_user_on && !held);
+    assert(flushes == 1 && locked_flushes == 1);
     assert(!pending && !saves);
     assert(!strcmp(registered_subtree, "keypaw/rgb_matrix"));
     struct kp_rgb_persist_blob blob;
@@ -96,6 +97,11 @@ int main(void) {
     assert(reconciled_user_on && kp_rgb_controller.state.user_on && !held);
     assert(!pending && !saves);
     assert(kp_rgb_selected_effect() == 1 && data[0].color.h == 100 && data[1].color.h == 200);
+    /* Unchanged selection and permission must still repaint restored parameters. */
+    flushes_before=flushes;locked_before=locked_flushes;
+    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
+    assert(flushes==flushes_before+1 && locked_flushes==locked_before+1);
+    assert(!pending && !saves && !held);
     blob.selected_index=99;blob.effects[1].h=201;
     flushes_before=flushes;locked_before=locked_flushes;
     assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
@@ -132,7 +138,10 @@ int main(void) {
     assert(kp_rgb_save_state() == 0 && pending);
     locks_before = lock_entries; reconciles_before = reconciles;
     unsigned saves_before = saves;
+    flushes_before=flushes;locked_before=locked_flushes;
     kp_rgb_reset_state();
+    /* Defaults repaint even when power reconciliation itself changes nothing. */
+    assert(flushes==flushes_before+2 && locked_flushes==locked_before+2);
     assert(lock_entries == locks_before + 1 && reconciles == reconciles_before + 1);
     assert(saves == saves_before && !held);
     assert(!pending && !strcmp(deleted_path,"keypaw/rgb_matrix/state"));

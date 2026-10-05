@@ -79,6 +79,7 @@ jobs:
 
       - name: Singleton and private effect tests
         run: |
+          python3 tests/unit/test_parameter_controls.py
           python3 tests/unit/test_singleton.py
           python3 tests/unit/test_singleton_settings.py
           python3 tests/unit/test_singleton_split.py
@@ -98,8 +99,13 @@ jobs:
       - name: Output gate tests
         run: python3 tests/unit/test_output_gate.py
 
-      - name: Deterministic engine scheduling tests
-        run: python3 tests/unit/test_engine_scheduler.py
+      - name: Deterministic engine scheduling and retry tests
+        run: |
+          python3 tests/unit/test_engine_scheduler.py
+          python3 tests/unit/test_output_retry.py
+
+      - name: Timestamp-aware preview tests
+        run: python3 tests/unit/test_preview_timing.py
 
       - name: Deterministic condition control tests
         run: python3 tests/unit/test_conditions.py

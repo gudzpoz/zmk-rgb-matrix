@@ -59,7 +59,7 @@ static const struct kp_rgb_effect_callbacks second_cb={.render=second_paint};
 static const struct kp_rgb_effect_api second_api={.callbacks=&second_cb,.runtime=&second_runtime};
 static const struct device second_child={.api=&second_api};
 static unsigned filter_paints;
-static void filter_paint(const struct device *d,const struct kp_rgb_frame *f) {
+static bool filter_paint(const struct device *d,const struct kp_rgb_frame *f) {
     const struct host_overlay *o=d->data;
     assert(f->pixels==scene && f->scratch==scratch && f->targets==o->targets);
     assert(f->target_count==1 && f->targets[0]==1 && runtime.active);
@@ -67,6 +67,7 @@ static void filter_paint(const struct device *d,const struct kp_rgb_frame *f) {
         assert(f->pixels[i].r==17 && !f->pixels[i].g && !f->pixels[i].b);
     f->pixels[f->targets[0]]=(struct led_rgb){51,25,9};
     filter_paints++;
+    return false;
 }
 static const struct kp_rgb_overlay_api filter_api={.render=filter_paint,.replaces_target=false};
 static void expect_output(struct led_rgb first,struct led_rgb second) {

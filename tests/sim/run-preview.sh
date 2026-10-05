@@ -44,6 +44,7 @@ fi
 BUILD_DIR=$SIM_DIR/build
 OUT_DIR=${OUT_DIR:-$SIM_DIR/out}
 DURATION=${DURATION:-4}
+END_MS=$(python3 -c 'import sys; print(float(sys.argv[1]) * 1000)' "$DURATION")
 TILE=${TILE:-32}
 # Fail when a preview never changes; a static capture is nearly always a bug.
 # The legitimately-static effects (solid/static) pass 0 below.
@@ -171,7 +172,7 @@ for i in "${!indices[@]}"; do
     esac
     python3 "$SIM_DIR/render_gif.py" "$work_dir/capture.bin" \
         -o "$OUT_DIR/$slug.gif" --tile "$TILE" \
-        --min-distinct "$min" 2>>"$warn_log"
+        --end-ms "$END_MS" --min-distinct "$min" 2>>"$warn_log"
     printf '%s\t%s\n' "$slug" "$name" >>"$manifest"
     rendered=$((rendered + 1))
 done

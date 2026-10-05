@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name,"color-backoff")) {
         host_render_animating=false;host_allow_color_failure=true;failures=7;
         host_run_until(7);zmk_rgb_matrix_flush();host_run_ready();
+        int terminal_paints=renders;
         const uint64_t due[]={107,307,707,1507,2507,3507,4507};
         const uint32_t delays[]={200,400,800,1000,1000,1000,1000};
         for(size_t i=0;i<7;i++) {
@@ -95,7 +96,7 @@ int main(int argc, char **argv) {
             host_run_until(due[i]);assert(writes==(int)i+4 && renders==painted);
             assert_pixels(host_transfer_count-1,17);assert_scene(17);
         }
-        assert(renders>200 && !runtime.animating);
+        assert(renders==terminal_paints && !runtime.animating);
         assert_debt(KP_RGB_OUTPUT_NONE,0,100);
     } else if (!strcmp(name,"latest-scene")) {
         host_allow_color_failure=true;failures=1;ctx.tuning.max_brightness=50;
@@ -194,7 +195,7 @@ int main(int argc, char **argv) {
         host_lock_failures=2;host_run_until(107);assert(writes==3);
         assert(kp_output_work.work.deadline==108);
         host_run_until(108);assert(writes==3 && kp_output_work.work.deadline==109);
-        host_run_until(109);assert(writes==4 && renders==painted+1);
+        host_run_until(109);assert(writes==4 && renders==painted);
         assert(!kp_rgb_scene_requested && kp_rgb_next_frame_ms==112);
         assert_debt(KP_RGB_OUTPUT_NONE,0,100);
     } else if (!strcmp(name,"mutation-before-lock")) {

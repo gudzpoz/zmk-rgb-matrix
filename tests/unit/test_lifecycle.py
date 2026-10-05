@@ -45,12 +45,12 @@ static struct observation observations[3];
 static struct kp_rgb_effect_api apis[3];
 static struct device devices[3];
 static const struct device *target(const struct device *d) { return ((struct host_overlay *)d->data)->child; }
-static void overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
+static bool overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
     assert(f->pixels==scene && f->scratch==scratch && f->targets);
     struct kp_rgb_frame child=*f;
     child.pixels=f->scratch; child.scratch=NULL;
     memset(child.pixels,0,child.count*sizeof(*child.pixels));
-    kp_rgb_effect_render(target(d),&child);
+    return kp_rgb_effect_render(target(d),&child);
 }
 static const struct kp_rgb_overlay_api overlay_api={.render=overlay_paint,.event_target=target};
 static struct host_overlay overlay_state;
@@ -84,10 +84,10 @@ int main(void) {
     assert(!strcmp(order,"RARAEEPP"));
     assert(a->timestamp==-123 && c->timestamp==-123 && a->elapsed==0 && c->elapsed==0);
     assert(!b->runtime.initialized);
-    // Static effects remain periodic, with settled clocks at zero.
     host_run_until(32);
-    assert(a->paints==3 && c->paints==3 && a->elapsed==0 && c->elapsed==0);
-    a->animate=true; host_run_until(48); assert(a->elapsed==0);
+    assert(a->paints==1 && c->paints==1 && a->elapsed==0 && c->elapsed==0);
+    a->animate=true; host_run_until(48); zmk_rgb_matrix_flush(); host_run_ready();
+    assert(a->elapsed==0);
     host_run_until(64); assert(a->elapsed==16 && c->elapsed==0);
     // Selection is sampled at delivery, not admission; unobserved transitions coalesce.
     key(77); ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
@@ -132,8 +132,7 @@ int main(void) {
     assert(a->events==before_events+16 && a->paints==before_paints+1);
     assert(kp_rgb_pending_available() && kp_output_work.work.queued);
     host_run_ready();
-    // Requests raised during the second drain survive even though it empties the ring.
-    assert(a->events==before_events+21 && a->paints==before_paints+3 && !kp_rgb_pending_available());
+    assert(a->events==before_events+21 && a->paints==before_paints+2 && !kp_rgb_pending_available());
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
     assert(!a->runtime.active && !c->runtime.active);

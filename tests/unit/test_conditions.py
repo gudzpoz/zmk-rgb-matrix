@@ -13,12 +13,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 UNIT = ROOT / "tests/unit"
 CASES = ("startup", "dag", "deadline", "deadline-reset", "same-value", "isr", "cycle", "missing",
          "undeclared", "invalid-deadline", "scope", "unused-scope", "self-feedback",
-         "multi-feedback", "unready", "metadata", "short-circuit")
+         "multi-feedback", "unready", "metadata", "short-circuit", "refresh", "refresh-interrupted", "early-refresh")
 
 
 def run_tests():
     source = (ROOT / "src/rgb_conditions.c").read_text()
-    # No output state exists in this fixture: a new coupling must fail compilation.
+    # Output refresh completion is a mocked notification, not strip state.
     source += "\n" + (ROOT / "src/rgb_control_start.c").read_text()
     source = re.sub(r'^#include[^\n]*\n', '', source, flags=re.M)
     public = (ROOT / "include/zmk/rgb_matrix.h").read_text()

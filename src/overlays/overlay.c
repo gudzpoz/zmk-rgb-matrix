@@ -31,15 +31,16 @@ static const struct device *kp_ovl_event_target(const struct device *dev) {
   return cfg->effect;
 }
 
-static void kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *frame) {
+static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *frame) {
   const struct kp_ovl_config *cfg = dev->config;
   struct kp_rgb_frame child_frame = *frame;
   child_frame.pixels = frame->scratch;
   child_frame.scratch = NULL;
   memset(child_frame.pixels, 0, child_frame.count * sizeof(*child_frame.pixels));
-  kp_rgb_effect_render(cfg->effect, &child_frame);
+  bool animating = kp_rgb_effect_render(cfg->effect, &child_frame);
   kp_rgb_overlay_paint_pixels(frame, frame->targets, frame->target_count,
                               frame->scratch, cfg->common.opacity);
+  return animating;
 }
 
 #define KP_OVL_DEFINE(inst)                                                    \

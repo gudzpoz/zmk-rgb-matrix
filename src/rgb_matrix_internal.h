@@ -31,7 +31,7 @@ struct kp_rgb_state {
 
 struct kp_rgb_effect_defaults {
   struct kp_rgb_hsb color; /* b is overwritten by initial_brightness */
-  uint16_t duration_ms;    /* 0 -> initial_duration_ms */
+  uint32_t duration_ms;    /* 0 -> initial_duration_ms */
 };
 
 struct kp_rgb_controller {
@@ -44,7 +44,7 @@ struct kp_rgb_controller {
   size_t effect_index;
   bool initial_on;
   int32_t initial_brightness;
-  int32_t initial_duration_ms;
+  int64_t initial_duration_ms;
   uint16_t initial_effect;
 };
 
@@ -53,6 +53,9 @@ extern struct kp_rgb_controller kp_rgb_controller;
 /* Never hold the matrix lock across flash I/O. */
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
+
+void kp_rgb_conditions_request_refresh(uint64_t token);
+void kp_rgb_conditions_refreshed(uint64_t token);
 
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);

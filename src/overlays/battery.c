@@ -90,7 +90,7 @@ static void kp_ovl_battery_order(const struct kp_rgb_frame *frame, size_t *idx,
 static size_t kp_ovl_battery_order_buf[KP_LED_COUNT];
 #endif /* KP_LED_COUNT > 0 */
 
-static void kp_ovl_battery_render(const struct device *dev,
+static bool kp_ovl_battery_render(const struct device *dev,
                                   const struct kp_rgb_frame *frame) {
 #if KP_LED_COUNT == 0
   ARG_UNUSED(dev);
@@ -99,7 +99,7 @@ static void kp_ovl_battery_render(const struct device *dev,
   const struct kp_ovl_battery_config *cfg = dev->config;
   const size_t count = frame->target_count;
   if (count == 0) {
-    return;
+    return false;
   }
   size_t *order = kp_ovl_battery_order_buf;
   for (size_t i = 0; i < count; i++) {
@@ -122,6 +122,7 @@ static void kp_ovl_battery_render(const struct device *dev,
         frame->pixels[order[i]], i < lit ? on : off, cfg->common.opacity);
   }
 #endif /* KP_LED_COUNT > 0 */
+  return false;
 }
 
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)

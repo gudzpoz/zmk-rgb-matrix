@@ -22,9 +22,7 @@
 #include <zmk/rgb_matrix.h>
 #include <zmk/workqueue.h>
 
-#if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
 #include <zmk/events/activity_state_changed.h>
-#endif
 
 #include "rgb_matrix_internal.h"
 
@@ -125,6 +123,12 @@ static int64_t kp_rgb_next_frame_ms = INT64_MAX;
 static struct k_spinlock kp_rgb_schedule_lock;
 static bool kp_rgb_scene_requested;
 static bool kp_rgb_pass_active;
+static bool kp_rgb_pass_requested;
+static bool kp_rgb_scene_dirty = true;
+static bool kp_rgb_scene_animating;
+static uint64_t kp_rgb_refresh_token;
+static bool kp_rgb_refresh_pending;
+static int kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
 
 /* A half with no strip renders nothing, but the central-only overlay and split
  * machinery still runs. */
@@ -168,19 +172,36 @@ static int kp_rgb_schedule_locked(int64_t deadline_ms) {
   int err = k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
                                       delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
   if (err < 0) {
-    kp_rgb_scene_requested = true;
+    kp_rgb_pass_requested = true;
     k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
                                 K_MSEC(1));
   }
   return err;
 }
 
-void zmk_rgb_matrix_flush(void) {
+static void kp_rgb_request_output_pass(bool scene_changed) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
-  kp_rgb_scene_requested = true;
+  kp_rgb_pass_requested = true;
+  kp_rgb_scene_requested |= scene_changed;
   int err = kp_rgb_pass_active ? 0 : kp_rgb_schedule_locked(k_uptime_get());
   k_spin_unlock(&kp_rgb_schedule_lock, key);
   if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
+}
+
+void zmk_rgb_matrix_flush(void) { kp_rgb_request_output_pass(true); }
+
+void kp_rgb_effect_invalidate(const struct device *effect) {
+  ARG_UNUSED(effect);
+  zmk_rgb_matrix_flush();
+}
+
+void kp_rgb_conditions_refreshed(uint64_t token) {
+  kp_rgb_matrix_lock();
+  if (kp_rgb_refresh_pending && token == kp_rgb_refresh_token) {
+    kp_rgb_refresh_pending = false;
+    zmk_rgb_matrix_flush();
+  }
+  kp_rgb_matrix_unlock();
 }
 
 static void kp_rgb_begin_output_pass(void) {
@@ -193,6 +214,7 @@ static bool kp_rgb_take_scene_request(void) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
   bool requested = kp_rgb_scene_requested;
   kp_rgb_scene_requested = false;
+  kp_rgb_pass_requested = false;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
   return requested;
 }
@@ -200,8 +222,8 @@ static bool kp_rgb_take_scene_request(void) {
 static void kp_rgb_finish_output_pass(int64_t deadline_ms, bool lock_retry) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
   if (lock_retry) {
-    kp_rgb_scene_requested = true;
-  } else if (kp_rgb_scene_requested) {
+    kp_rgb_pass_requested = true;
+  } else if (kp_rgb_pass_requested) {
     deadline_ms = k_uptime_get();
   }
   int err = kp_rgb_schedule_locked(deadline_ms);
@@ -224,7 +246,7 @@ static struct k_spinlock kp_rgb_pending_lock;
 static bool kp_rgb_pending_pop(struct kp_rgb_key_event *out);
 static bool kp_rgb_pending_available(void);
 static uint32_t kp_rgb_pending_take_dropped(void);
-static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev);
+static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev);
 
 typedef void (*effect_visitor)(const struct device *dev, int64_t now_ms);
 static void kp_rgb_each_effect(effect_visitor visit, int64_t now_ms) {
@@ -317,9 +339,10 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
   return last;
 }
 
-static void kp_render_overlays(const struct kp_rgb_frame *frame,
+static bool kp_render_overlays(const struct kp_rgb_frame *frame,
                                const struct device *const *overlays,
                                size_t count, size_t first) {
+  bool animating = false;
   for (size_t i = first; i < count; i++) {
     const struct device *dev = overlays[i];
     if (dev == NULL) {
@@ -333,11 +356,12 @@ static void kp_render_overlays(const struct kp_rgb_frame *frame,
     local.targets = kp_rgb_overlay_targets(dev);
     local.target_count = kp_rgb_overlay_target_count(dev);
     local.scratch = scratch;
-    ovl->render(dev, &local);
+    animating |= ovl->render(dev, &local);
   }
+  return animating;
 }
 
-static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
+static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
   const struct device *const *overlays = NULL;
   size_t overlay_count = 0, first = SIZE_MAX;
@@ -364,11 +388,12 @@ static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   kp_rgb_each_effect(kp_rgb_reconcile_effect, now_ms);
 
   struct kp_rgb_key_event event;
+  bool input_changed = false;
   for (size_t i = 0; i < KP_RGB_EVENT_QUEUE_LEN && kp_rgb_pending_pop(&event); i++) {
-    kp_rgb_deliver_position(&event);
+    input_changed |= kp_rgb_deliver_position(&event);
   }
 
-  if (paint && allowed) {
+  if (allowed && (paint || kp_rgb_scene_dirty || input_changed)) {
     memset(scene, 0, sizeof(scene));
     struct kp_rgb_frame frame = {
         .targets = kp_rgb_all_targets,
@@ -381,9 +406,11 @@ static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
         .board_height = kp_rgb_board_height,
         .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
     };
+    kp_rgb_scene_animating = false;
     if (fx != NULL) {
-      kp_rgb_effect_render(fx, &frame);
-      kp_render_overlays(&frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
+      kp_rgb_scene_animating |= kp_rgb_effect_render(fx, &frame);
+      kp_rgb_scene_animating |= kp_render_overlays(
+          &frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
     }
     uint8_t brightness = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
                                       : kp_rgb_controller.tuning.max_brightness;
@@ -391,7 +418,10 @@ static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
       scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
     }
     kp_rgb_output_pending = KP_RGB_OUTPUT_SCENE;
+    kp_rgb_scene_dirty = false;
+    return true;
   }
+  return false;
 }
 
 static void kp_rgb_request_black_locked(void) {
@@ -439,23 +469,33 @@ static void kp_rgb_output_handler(struct k_work *work) {
     return;
   }
 
-  bool requested = kp_rgb_take_scene_request();
+  kp_rgb_scene_dirty |= kp_rgb_take_scene_request();
   bool allowed = atomic_get(&kp_rgb_output_allowed);
   int64_t now_ms = k_uptime_get();
-  bool paint = requested || kp_rgb_pending_available() || now_ms >= kp_rgb_next_frame_ms;
-  kp_rgb_scene_pass_locked(now_ms, allowed, paint);
+  bool ready = allowed && !kp_rgb_refresh_pending;
+  bool painted = false;
+  if (!allowed || ready) {
+    painted = kp_rgb_scene_pass_locked(now_ms, ready, now_ms >= kp_rgb_next_frame_ms);
+  }
   kp_rgb_attempt_output_locked();
 
-  if (allowed) {
-    int64_t finished_ms = k_uptime_get();
-    if (kp_rgb_next_frame_ms <= finished_ms) {
-      int64_t period_ms = CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;
-      kp_rgb_next_frame_ms += ((finished_ms - kp_rgb_next_frame_ms) / period_ms + 1) * period_ms;
+  if (painted) {
+    if (kp_rgb_scene_animating) {
+      if (kp_rgb_next_frame_ms == INT64_MAX) kp_rgb_next_frame_ms = now_ms;
+      int64_t finished_ms = k_uptime_get();
+      if (kp_rgb_next_frame_ms <= finished_ms) {
+        int64_t period_ms = CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;
+        kp_rgb_next_frame_ms +=
+            ((finished_ms - kp_rgb_next_frame_ms) / period_ms + 1) * period_ms;
+      }
+    } else {
+      kp_rgb_next_frame_ms = INT64_MAX;
     }
   }
 
-  int64_t next_ms = MIN(allowed ? kp_rgb_next_frame_ms : INT64_MAX,
+  int64_t next_ms = MIN(ready ? kp_rgb_next_frame_ms : INT64_MAX,
                         kp_rgb_output_deadline_locked());
+  if (ready && kp_rgb_pending_available()) next_ms = k_uptime_get();
   kp_rgb_finish_output_pass(next_ms, false);
   kp_rgb_matrix_unlock();
 
@@ -480,22 +520,23 @@ bool zmk_rgb_matrix_is_inhibited(void) {
   return atomic_get(&kp_rgb_inhibited) != 0;
 }
 
-static void kp_rgb_deliver_event(const struct device *dev,
+static bool kp_rgb_deliver_event(const struct device *dev,
                                  const struct kp_rgb_key_event *ev) {
   const struct kp_rgb_effect_api *api = dev->api;
   if (api->runtime->active && api->callbacks->on_event != NULL) {
-    api->callbacks->on_event(dev, ev);
+    return api->callbacks->on_event(dev, ev);
   }
+  return false;
 }
 
 /* Caller holds kp_rgb_lock. */
-static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
+static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
   const struct device *fx = kp_rgb_controller.state.active_fx;
   if (fx == NULL || kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
-    return;
+    return false;
   }
   const struct kp_rgb_effect_api *api = fx->api;
-  kp_rgb_deliver_event(fx, ev);
+  bool changed = kp_rgb_deliver_event(fx, ev);
 
   const struct device *const *overlays =
       api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
@@ -510,9 +551,10 @@ static void kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
     }
     const struct device *target = ovl->event_target(overlays[i]);
     if (target != NULL) {
-      kp_rgb_deliver_event(target, ev);
+      changed |= kp_rgb_deliver_event(target, ev);
     }
   }
+  return changed;
 }
 
 void kp_rgb_reconcile_power_locked(void) {
@@ -533,9 +575,15 @@ void kp_rgb_reconcile_power_locked(void) {
     kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
     kp_rgb_output_urgent_black = false;
     kp_rgb_each_effect(kp_rgb_restart_clock, 0);
-    kp_rgb_next_frame_ms = k_uptime_get();
+    kp_rgb_next_frame_ms = INT64_MAX;
+    kp_rgb_scene_dirty = true;
+    kp_rgb_refresh_pending = true;
+    kp_rgb_refresh_token++;
+    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
   } else {
     kp_rgb_next_frame_ms = INT64_MAX;
+    kp_rgb_scene_animating = false;
+    kp_rgb_refresh_pending = false;
     kp_rgb_request_black_locked();
   }
   zmk_rgb_matrix_flush();
@@ -595,27 +643,29 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
         .pressed = pos_ev->state,
         .timestamp_ms = pos_ev->timestamp,
     };
-    if (kp_rgb_pending_push(&event)) zmk_rgb_matrix_flush();
+    if (kp_rgb_pending_push(&event)) kp_rgb_request_output_pass(false);
     return ZMK_EV_EVENT_BUBBLE;
   }
 
-#if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
   if (as_zmk_activity_state_changed(eh) != NULL) {
     kp_rgb_matrix_lock();
-    kp_rgb_reconcile_power_locked();
+    int state = zmk_activity_get_state();
+    if (state != kp_rgb_activity_state) {
+      kp_rgb_activity_state = state;
+      kp_rgb_reconcile_power_locked();
+      zmk_rgb_matrix_flush();
+    }
     kp_rgb_matrix_unlock();
     return ZMK_EV_EVENT_BUBBLE;
   }
-#endif
   return -ENOTSUP;
 }
 ZMK_LISTENER(kp_rgb_matrix, kp_rgb_matrix_event_listener);
 ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_position_state_changed);
-#if IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE)
 ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_activity_state_changed);
-#endif
 
 static int kp_rgb_set_user_on(bool on) {
+  if (k_is_in_isr()) return -EWOULDBLOCK;
   int ret = KP_TRY_LOCK();
   if (ret < 0) {
     return ret;
@@ -631,6 +681,7 @@ int zmk_rgb_matrix_on(void) { return kp_rgb_set_user_on(true); }
 int zmk_rgb_matrix_off(void) { return kp_rgb_set_user_on(false); }
 
 int zmk_rgb_matrix_toggle(void) {
+  if (k_is_in_isr()) return -EWOULDBLOCK;
   int ret = KP_TRY_LOCK();
   if (ret < 0) {
     return ret;
@@ -642,10 +693,20 @@ int zmk_rgb_matrix_toggle(void) {
 }
 
 int zmk_rgb_matrix_get_state(bool *on_off) {
+  if (k_is_in_isr()) return -EWOULDBLOCK;
   if (on_off == NULL)
     return -EINVAL;
   kp_rgb_matrix_lock();
   *on_off = kp_rgb_logical_on_locked();
+  kp_rgb_matrix_unlock();
+  return 0;
+}
+
+int zmk_rgb_matrix_get_user_state(bool *user_on) {
+  if (k_is_in_isr()) return -EWOULDBLOCK;
+  if (user_on == NULL) return -EINVAL;
+  kp_rgb_matrix_lock();
+  *user_on = kp_rgb_controller.state.user_on;
   kp_rgb_matrix_unlock();
   return 0;
 }

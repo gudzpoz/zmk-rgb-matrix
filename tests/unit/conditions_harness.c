@@ -67,6 +67,7 @@ static void kp_rgb_overlay_dispatch(void);
 static void zmk_rgb_matrix_flush(void);
 static void kp_rgb_triggers_evaluate(int64_t now);
 static void kp_rgb_triggers_quarantine(void);
+static void kp_rgb_conditions_refreshed(uint64_t token);
 /* PRODUCTION_COORDINATOR */
 
 #define N 6
@@ -86,6 +87,13 @@ static bool roots[N], gate, quarantined;
 static unsigned refreshes, dispatches, repaints, evaluations, begins, quarantines;
 static unsigned feedback_mode, feedback_actions[N];
 static const struct device *gate_root;
+static unsigned refresh_completions;
+static uint64_t completed_token, inject_refresh_token;
+static void kp_rgb_conditions_refreshed(uint64_t token) {
+    assert(worker && !held && !in_control && dispatches);
+    refresh_completions++;
+    completed_token = token;
+}
 
 static const struct device *const *dependencies(const struct device *dev, size_t *count) {
     struct source *s = dev->data;
@@ -142,6 +150,11 @@ static void zmk_rgb_matrix_flush(void) { assert(worker && !held); repaints++; }
 static void kp_rgb_triggers_evaluate(int64_t now) {
     assert(worker && !held && now == clock_ms);
     evaluations++;
+    if (inject_refresh_token) {
+        uint64_t token = inject_refresh_token;
+        inject_refresh_token = 0;
+        kp_rgb_conditions_request_refresh(token);
+    }
     for (size_t i = 0; i < N; i++) {
         if (roots[i] && !entries[i].fault) assert(kp_rgb_condition_valid(&devices[i]));
         if (roots[i] && kp_rgb_condition_valid(&devices[i])) {
@@ -209,7 +222,39 @@ int main(int argc, char **argv) {
     assert(argc == 2);
     const char *name = argv[1];
     fixture();
-    if (!strcmp(name, "startup")) {
+    if (!strcmp(name, "refresh")) {
+        link_to(0, 1);
+        start();
+        sources[1].value = true;
+        kp_rgb_conditions_request_refresh(11);
+        ready();
+        assert(gate && sources[0].calls == 2 && sources[1].calls == 2);
+        assert(!sources[5].calls && refresh_completions == 1 && completed_token == 11);
+        inject_refresh_token = 13;
+        kp_rgb_conditions_request_refresh(12);
+        run_one();
+        assert(completed_token == 12 && control_work.queued);
+        ready();
+        assert(completed_token == 13 && refresh_completions == 3);
+        assert(sources[0].calls == 4 && sources[1].calls == 4);
+    } else if (!strcmp(name, "refresh-interrupted")) {
+        start();
+        sources[0].inject_isr = true;
+        kp_rgb_conditions_request_refresh(21);
+        run_one();
+        assert(!refresh_completions && control_work.queued && refresh_requested == 21);
+        ready();
+        assert(refresh_completions == 1 && completed_token == 21);
+        assert(entries[0].value && sources[0].calls == 3 && !control_work.scheduled);
+    } else if (!strcmp(name, "early-refresh")) {
+        kp_rgb_conditions_request_refresh(1);
+        kp_rgb_conditions_request_refresh(2);
+        assert(!schedules && !refresh_completions);
+        sources[0].invalid_deadline = 1;
+        start();
+        assert(entries[0].fault && refresh_completions == 1 && completed_token == 2);
+        assert(!control_work.queued && !control_work.scheduled);
+    } else if (!strcmp(name, "startup")) {
         sources[0].value = true;
         kp_rgb_condition_invalidate(&devices[0]);
         assert(!evaluations && !schedules);

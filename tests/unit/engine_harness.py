@@ -49,6 +49,7 @@ PRELUDE = r'''
 #include <stdatomic.h>
 #include <sched.h>
 #define ARG_UNUSED(x) (void)(x)
+#define __ASSERT(cond, ...) assert(cond)
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define KP_RGB_LOCK_RETRY_MS 1
@@ -70,7 +71,11 @@ struct k_work {
 struct k_work_delayable { struct k_work work; };
 static struct k_work_delayable kp_output_work;
 static int output_submits;
-static bool kp_rgb_pass_active,kp_rgb_scene_requested;
+static bool kp_rgb_pass_active,kp_rgb_pass_requested,kp_rgb_scene_requested;
+static bool kp_rgb_scene_dirty=true,kp_rgb_scene_animating;
+static uint64_t kp_rgb_refresh_token;
+static bool kp_rgb_refresh_pending;
+static int kp_rgb_activity_state=0,host_activity_state=0;
 static int64_t kp_rgb_next_frame_ms=INT64_MAX;
 enum kp_rgb_output_kind { KP_RGB_OUTPUT_NONE, KP_RGB_OUTPUT_SCENE, KP_RGB_OUTPUT_BLACK };
 static enum kp_rgb_output_kind kp_rgb_output_pending;
@@ -104,7 +109,7 @@ struct kp_rgb_effect_api {
  struct kp_rgb_effect_runtime *runtime;
  const struct device *const *overlays; size_t overlays_len;
 };
-struct kp_rgb_overlay_api { void (*render)(const struct device *,const struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); bool replaces_target; };
+struct kp_rgb_overlay_api { bool (*render)(const struct device *,const struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); bool replaces_target; };
 struct kp_rgb_controller {
  const struct device *dev;
  uint16_t effect_index;
@@ -131,6 +136,8 @@ static struct k_spinlock kp_rgb_pending_lock,kp_rgb_schedule_lock;
 static pthread_mutex_t schedule_lock = PTHREAD_MUTEX_INITIALIZER;
 static void (*host_schedule_unlock_hook)(void);
 static bool inject_pending_press,pending_press_accepted;
+static void kp_rgb_conditions_refreshed(uint64_t token);
+static void kp_rgb_conditions_request_refresh(uint64_t token);
 static bool kp_rgb_pending_push(const struct kp_rgb_key_event *ev);
 static int k_spin_lock(struct k_spinlock *l) {
  if(l==&kp_rgb_schedule_lock) { pthread_mutex_lock(&schedule_lock); return 0; }
@@ -186,18 +193,17 @@ static uint32_t rendered_elapsed;
 static int64_t k_uptime_get(void) { return now; }
 static bool k_is_in_isr(void) { return isr; }
 #define ZMK_ACTIVITY_ACTIVE 0
-static int zmk_activity_get_state(void) { return idle; }
+static int zmk_activity_get_state(void) { return host_activity_state; }
 typedef struct { bool activity; const struct zmk_position_state_changed *position; } zmk_event_t;
 #define ZMK_EV_EVENT_BUBBLE 0
 static const struct zmk_position_state_changed *as_zmk_position_state_changed(const zmk_event_t *e) { return e->position; }
-#if CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
 static const zmk_event_t *as_zmk_activity_state_changed(const zmk_event_t *e) { return e->activity ? e : NULL; }
-#endif
 static void *zmk_workqueue_lowprio_work_q(void) { return NULL; }
 #if HOST_SCHEDULER
 #include "engine_scheduler.h"
 #else
 static int k_work_reschedule_for_queue(void *q,struct k_work_delayable *w,int64_t delay) { (void)q;(void)w; output_submits++;retry_delay=delay;return 0; }
+static void kp_rgb_conditions_request_refresh(uint64_t token) { kp_rgb_conditions_refreshed(token); }
 #endif
 static bool host_strip_ready = true;
 static bool device_is_ready(const struct device *d) { return d!=NULL && host_strip_ready; }
@@ -220,7 +226,7 @@ static const struct device *const *kp_rgb_overlay_list(void) { return host_overl
 static size_t kp_rgb_overlay_count(void) { return host_overlay_count; }
 static bool kp_rgb_overlay_covers_all(const struct device *d) { return ((struct host_overlay *)d->data)->cover; }
 static bool kp_rgb_overlay_gate(const struct device *d) { return ((struct host_overlay *)d->data)->gate; }
-static void kp_rgb_deliver_position(const struct kp_rgb_key_event *e);
+static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *e);
 static bool kp_rgb_pending_pop(struct kp_rgb_key_event *e);
 static bool kp_rgb_pending_available(void);
 static uint32_t kp_rgb_pending_take_dropped(void);
@@ -243,7 +249,10 @@ static bool render(const struct device *d,const struct kp_rgb_frame *f) {
  if(host_render_hook) host_render_hook();
  return host_render_animating;
 }
-static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) { (void)d;(void)e;assert(held);feedback++;return true; }
+static bool host_event_repaint=true;
+static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) {
+ (void)d;assert(held);feedback++;return e->pressed && host_event_repaint;
+}
 static struct kp_rgb_effect_runtime runtime;
 static const struct kp_rgb_effect_callbacks callbacks={.render=render,.on_event=on_event};
 static const struct kp_rgb_effect_api api={.callbacks=&callbacks,.runtime=&runtime};
@@ -252,6 +261,14 @@ static const struct device *host_effects[8]={&fx};
 static size_t host_effect_count=1;
 static size_t kp_rgb_effect_count(void) { return host_effect_count; }
 static const struct device *kp_rgb_effect_at(size_t n) { return host_effects[n]; }
+void kp_rgb_request_runtime_reset_locked(void);
+void kp_rgb_reconcile_power_locked(void);
+static __attribute__((unused)) int kp_rgb_select_effect_locked(uint16_t index) {
+ if (index >= host_effect_count) return -EINVAL;
+ ctx.effect_index=index; ctx.state.active_fx=host_effects[index];
+ kp_rgb_request_runtime_reset_locked(); kp_rgb_reconcile_power_locked();
+ return 0;
+}
 static int led_strip_update_rgb(const struct device *d,struct led_rgb *p,size_t n) {
  (void)d; assert(held);assert(n>0);writes++;
  bool color=false;
@@ -279,9 +296,9 @@ void zmk_rgb_matrix_flush(void);
 ACTIVITY_FUNCTION = r'''
 static void host_activity(bool active) {
     idle = !active;
+    host_activity_state = active ? ZMK_ACTIVITY_ACTIVE : 1;
     const zmk_event_t event = {.activity = true};
-    assert(kp_rgb_matrix_event_listener(&event) ==
-           (CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE ? ZMK_EV_EVENT_BUBBLE : -ENOTSUP));
+    assert(kp_rgb_matrix_event_listener(&event) == ZMK_EV_EVENT_BUBBLE);
 }
 '''
 
@@ -289,8 +306,8 @@ FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
     "kp_rgb_each_effect", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_reconcile_effect", "kp_rgb_effect_render",
-    "kp_rgb_schedule_locked", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
-    "kp_rgb_finish_output_pass",
+    "kp_rgb_schedule_locked", "kp_rgb_request_output_pass", "kp_rgb_effect_invalidate", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
+    "kp_rgb_finish_output_pass", "kp_rgb_conditions_refreshed",
     "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_scene_pass_locked",
     "kp_rgb_request_black_locked", "kp_rgb_output_deadline_locked",
     "kp_rgb_attempt_output_locked", "kp_rgb_output_handler",
@@ -300,11 +317,11 @@ FUNCTIONS = [
     "kp_rgb_pending_pop", "kp_rgb_pending_take_dropped", "kp_rgb_pending_available",
     "kp_rgb_deliver_event", "kp_rgb_deliver_position",
     "kp_rgb_matrix_event_listener", "kp_rgb_set_user_on", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
-    "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "kp_rgb_matrix_init",
+    "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "zmk_rgb_matrix_get_user_state", "kp_rgb_matrix_init",
 ]
 
 
-def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True):
+def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True, allow_unused=False):
     """Build fresh fixtures for LED and zero-LED configurations; propagate failures."""
     with tempfile.TemporaryDirectory() as directory:
         for leds in (2, 0):
@@ -318,8 +335,9 @@ def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True):
             binary = pathlib.Path(directory) / "engine"
             subprocess.run(
                 shlex.split(os.environ.get("CC", "cc"))
-                + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-type-limits",
-                   "-pthread", "-I", str(ROOT / "tests/unit"), str(source), "-o", str(binary)],
+                + ["-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-type-limits"]
+                + (["-Wno-unused-function"] if allow_unused else [])
+                + ["-pthread", "-I", str(ROOT / "tests/unit"), str(source), "-o", str(binary)],
                 check=True,
             )
             for case in cases:

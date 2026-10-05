@@ -98,8 +98,9 @@ struct kp_rgb_frame {
   struct led_rgb *scratch;
   /* One monotonic uptime shared by this worker pass. */
   int64_t now_ms;
-  /* Active animation time since this instance's previous render, saturated at
-   * UINT32_MAX. Zero on first paint, resume, or after render returned false. */
+  /* Active animation time since this effect's previous render, saturated at
+   * UINT32_MAX. Zero on first paint, resume, after render returned false, and in
+   * overlay frames; delegated effects receive their own elapsed time. */
   uint32_t elapsed_ms;
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
@@ -128,7 +129,9 @@ struct kp_rgb_key_event {
  * intrinsic colors before controller brightness. Simulation and geometry remain
  * full-strip. Return true from render while another timed update is needed;
  * return false only after painting a valid static/terminal image.
- * False does not deactivate the effect. Rendering remains periodic for now.
+ * False does not deactivate the effect; it stops autonomous animation updates.
+ * Settled effects must still paint when another contributor or notification
+ * requests composition.
  * Return true from on_event when the event requires a repaint. Input is copied,
  * best effort, and routed to effects active at delivery, not capture time.
  * Queue overflow or output suppression may discard either half of a key pair.
@@ -187,9 +190,17 @@ BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
  * Supply that overlay's targets and scratch as the child's pixels, with the
  * child's scratch set to NULL. Initialize target pixels to black before calling;
  * this helper does not clear pixels. Supplies the child's elapsed_ms and returns
- * its render result (false when inactive).
+ * its render result (false when inactive). Return this result from the overlay
+ * callback unless the overlay itself also needs animation.
  * Effect callbacks and application code must not call this function. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
+
+/* Notify after a synchronized source update changes pixels or animation demand.
+ * Any-context, non-blocking and coalescing; does not enable output, reset clocks
+ * or sample conditions. Suppressed output is recomposed when eligible again.
+ * Supply a valid RGB effect device; composition membership is not required.
+ * Early notifications are retained or subsumed by the first fresh composition. */
+void kp_rgb_effect_invalidate(const struct device *effect);
 
 int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
@@ -214,15 +225,16 @@ kp_rgb_effect_cfg(const struct device *dev) {
   return (const struct kp_rgb_effect_common_config *)dev->config;
 }
 
-/* The period `duration = 0` falls back to, for an effect the owner never seeded
- * (a private effect nested under an overlay). See docs/development.md. */
+/* Default period when duration_ms is zero; clamped to configured duration bounds. */
 #define KP_RGB_EFFECT_PERIOD_FALLBACK_MS 1000u
 
 /* The effect's animation period in milliseconds; never 0, so an effect can use
  * it as a modulus without a guard. */
 static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   uint32_t duration = kp_rgb_effect_data(dev)->duration_ms;
-  return duration != 0 ? duration : KP_RGB_EFFECT_PERIOD_FALLBACK_MS;
+  return CLAMP(duration != 0 ? duration : KP_RGB_EFFECT_PERIOD_FALLBACK_MS,
+               CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+               CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 
 /* Expand one entry of an `overlays = <&a &b>;` list. */
@@ -300,7 +312,14 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                "an empty `overlays` list is not expressible; use "             \
                "`no-overlays;` for an effect that wants none");                \
   KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                                \
-  static int cfg_inst##_init(const struct device *dev) { return 0; }           \
+  static int cfg_inst##_init(const struct device *dev) {                       \
+    uint32_t duration = DT_PROP_OR(node_id, duration, 0);                      \
+    kp_rgb_effect_data(dev)->duration_ms =                                     \
+        duration ? CLAMP(duration, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,   \
+                         CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)             \
+                 : kp_rgb_effect_period(dev);                                  \
+    return 0;                                                                  \
+  }                                                                            \
   IF_ENABLED(                                                                  \
       CONFIG_ZMK_BEHAVIOR_METADATA,                                            \
       (static const struct behavior_parameter_metadata cfg_inst##_metadata = { \
@@ -403,9 +422,10 @@ bool kp_rgb_condition_value(const struct device *condition);
 struct kp_rgb_overlay_api {
   const struct device *condition; /* NULL = unconditional */
   /* Paint only frame targets over existing pixels, before controller brightness.
-   * Use common.opacity (0..100) as blend strength. The effect callback's thread,
-   * lifetime and scene-control restrictions also apply here. */
-  void (*render)(const struct device *dev, const struct kp_rgb_frame *frame);
+   * Use common.opacity (0..100) as blend strength. Return true when another
+   * frame is needed at the configured cadence; return false when settled.
+   * The effect callback's thread, lifetime and scene-control restrictions apply. */
+  bool (*render)(const struct device *dev, const struct kp_rgb_frame *frame);
   /* Return the overlay's private effect for lifecycle, clocks and input routing,
    * or NULL when the overlay does not delegate to an effect. */
   const struct device *(*event_target)(const struct device *dev);
@@ -591,6 +611,21 @@ int zmk_rgb_matrix_on(void);
 int zmk_rgb_matrix_off(void);
 /* Returns logical ON after idle suppression; external inhibition does not alter it. */
 int zmk_rgb_matrix_get_state(bool *on_off);
+
+/* Return retained user intent before idle suppression. Thread context only;
+ * NULL returns -EINVAL, ISR calls return -EWOULDBLOCK. */
+int zmk_rgb_matrix_get_user_state(bool *user_on);
+
+/* Set parameters of a ready RGB effect device. Thread context only.
+ * Supply an RGB effect device; composition membership is not required.
+ * Hue accepts 0..360 (360 becomes 0); saturation/brightness accept 0..100.
+ * Period accepts configured DURATION_MIN_MS..DURATION_MAX_MS without clamping.
+ * NULL color/invalid values return -EINVAL; NULL/not-ready effect devices
+ * return -ENODEV; ISR calls return -EWOULDBLOCK. Changed values request repaint
+ * without resetting clocks. Success means state acceptance, not strip delivery.
+ * Neither call saves settings, sends split commands or changes user intent. */
+int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hsb *color);
+int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
 int zmk_rgb_matrix_select_effect(uint16_t effect);
 int zmk_rgb_matrix_cycle_effect(int16_t direction);

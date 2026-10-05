@@ -23,6 +23,17 @@ EXAMPLE = Path(os.environ.get("RGB_EXAMPLE_MODULE", MODULE.parent / "zmk-rgb-eff
 CASES = {
     "baseline": (True, ""),
     "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
+    "period-zero": (True, '&kprgb { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
+    "period-wide": (True, '''
+&kprgb { initial-duration-ms = <70000>; };
+&fx_solid { duration = <70000>; };
+&fixture_overlay { fx_fixture { duration = <70000>; }; };
+'''),
+    "period-u32-max": (True, '''
+&kprgb { initial-duration-ms = <0xffffffff>; };
+&fx_solid { duration = <0xffffffff>; };
+&fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
+'''),
     "external-effect": (True, '''
 &kprgb { external_example { compatible = "keypaw,rgb-matrix-example";
     #binding-cells = <0>; }; };
@@ -103,6 +114,8 @@ def main():
             if (result.returncode == 0) != valid:
                 raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                      + result.stdout[-12000:])
+            if name.startswith("period-"):
+                assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
             if not valid:
                 output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
                 assert re.search(DIAGNOSTICS[name], output), output[-12000:]

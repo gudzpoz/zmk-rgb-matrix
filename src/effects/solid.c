@@ -67,7 +67,8 @@ static const struct kp_rgb_effect_callbacks kp_eff_solid_callbacks = {
           {                                                                    \
               .color = KP_RGB_HSB_FROM_HEX(                                    \
                   DT_PROP_OR(DT_DRV_INST(inst), color, 0)),                    \
-              .duration_ms = DT_PROP_OR(DT_DRV_INST(inst), duration, 0),       \
+              .duration_ms = MIN(                                              \
+                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
           },                                                                   \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_solid_callbacks,             \

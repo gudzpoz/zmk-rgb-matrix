@@ -75,6 +75,7 @@ static int kp_rgb_load_cb(const char *name, size_t len,
     LOG_INF("Discarding RGB state of unexpected size %u", (uint32_t)len);
     return -EINVAL;
   }
+
   struct kp_rgb_persist_blob blob;
   int rc = read_cb(cb_arg, &blob, sizeof(blob));
   if (rc < 0) {
@@ -83,6 +84,7 @@ static int kp_rgb_load_cb(const char *name, size_t len,
   if (rc != sizeof(blob) || !kp_rgb_persist_version_ok(blob.version)) {
     return -EINVAL;
   }
+
   size_t count =
       MIN((size_t)blob.effect_count, (size_t)KP_RGB_PERSIST_MAX_EFFECTS);
   count = MIN(count, kp_rgb_effect_count());
@@ -98,21 +100,32 @@ static int kp_rgb_load_cb(const char *name, size_t len,
       continue;
     }
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(dev);
-    data->color =
-        (struct kp_rgb_hsb){.h = stored->h, .s = stored->s, .b = stored->b};
+    data->color = (struct kp_rgb_hsb){
+        .h = stored->h == KP_RGB_HUE_MAX ? 0 : stored->h,
+        .s = stored->s,
+        .b = stored->b,
+    };
     data->duration_ms = kp_rgb_persist_clamp_duration(
         stored->duration_ms, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
         CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   }
-  if (kp_rgb_select_effect(blob.selected_index) < 0) {
+
+  size_t previous_index = kp_rgb_controller.effect_index;
+  const struct device *previous_fx = kp_rgb_controller.state.active_fx;
+  bool unavailable = kp_rgb_select_effect(blob.selected_index) < 0;
+  if (unavailable) {
     LOG_WRN("Persisted effect %u is unavailable",
             (uint32_t)blob.selected_index);
     kp_rgb_resolve_active();
-    zmk_rgb_matrix_flush();
   }
   kp_rgb_controller.state.user_on = blob.user_on;
   kp_rgb_reconcile_power_locked();
+  if (unavailable || (previous_index == kp_rgb_controller.effect_index &&
+                      previous_fx == kp_rgb_controller.state.active_fx)) {
+    zmk_rgb_matrix_flush();
+  }
   kp_rgb_matrix_unlock();
+
   return 0;
 }
 

@@ -10,7 +10,7 @@ CASES = (
     "scheduler-seams", "idle-policy", "idempotent", "intent", "purge", "stale", "resume",
     "slow-render", "slow-driver", "black-slow", "boundary", "lock-retry",
     "boot-on-failure", "black-resume", "stale-early", "submit-failure", "finish-failure",
-    "settled", "slow-early", "fairness",
+    "settled", "slow-early", "fairness", "ignored-release", "source-invalidate", "callback-invalidate",
 )
 
 TESTS = r'''
@@ -56,6 +56,7 @@ static void input_during_render(void) {
     assert(feedback == 0);
 }
 static void slow_render(void) { host_render_hook = NULL; now += 37; }
+static void invalidate_during_render(void) { host_render_hook=NULL; kp_rgb_effect_invalidate(&fx); }
 static void fail_finish(void) { host_render_hook = NULL; host_reschedule_failures = 1; }
 static unsigned flush_budget = 4;
 static int probe_renders;
@@ -223,13 +224,15 @@ int main(int argc, char **argv) {
         assert(!host_probe_work.work.scheduled); host_run_ready();
         assert(host_probe_work.work.runs==5);
     } else if (!strcmp(name, "idle-policy")) {
-        fixture(true,false); host_run_until(7); host_activity(false);
+        fixture(true,false); host_run_until(7); host_activity(false); host_run_ready();
         bool logical; assert(zmk_rgb_matrix_get_state(&logical)==0);
         assert(logical==!CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE && ctx.state.user_on);
         assert((kp_rgb_next_frame_ms!=INT64_MAX)==(logical && KP_LED_COUNT>0));
-        host_run_until(16); assert(renders==(KP_LED_COUNT?(logical?2:1):0));
-        host_activity(true); host_run_ready(); assert(renders==(KP_LED_COUNT?2:0));
-        if (KP_LED_COUNT) assert(rendered_elapsed==(logical?16:0));
+        int after_change=renders;
+        host_activity(false); host_run_ready(); assert(renders==after_change);
+        host_run_until(16); assert(renders==(KP_LED_COUNT?(logical?3:after_change):0));
+        host_activity(true); host_run_ready(); assert(renders==(KP_LED_COUNT?(logical?4:2):0));
+        if (KP_LED_COUNT) assert(rendered_elapsed==0);
     } else if (!strcmp(name, "idempotent")) {
         fixture(true,false); host_run_until(7);
         int64_t due=kp_rgb_next_frame_ms,tick=runtime.last_render_ms;
@@ -274,9 +277,11 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name,"settled")) {
         host_render_animating = false;
         fixture(true,false);
+        host_run_ready();
+        int settled_renders=renders,settled_writes=writes;
         host_run_until(160);
-        assert(renders == (KP_LED_COUNT ? 11 : 0));
-        assert(writes == (KP_LED_COUNT ? 12 : 0));
+        assert(renders == settled_renders);
+        assert(writes == settled_writes);
         assert(!runtime.animating && rendered_elapsed == 0);
     } else if (!strcmp(name,"slow-early")) {
         fixture(true,false);
@@ -289,6 +294,33 @@ int main(int argc, char **argv) {
         assert(renders == (KP_LED_COUNT ? 2 : 0));
         host_run_until(48);
         if (KP_LED_COUNT) assert(renders == 3 && rendered_elapsed == 41);
+    } else if (!strcmp(name,"ignored-release")) {
+        if(!KP_LED_COUNT) return 0;
+        host_render_animating=false;
+        fixture(true,false); host_run_ready();
+        int before_renders=renders,before_writes=writes;
+        struct kp_rgb_key_event ev={.position=0,.pressed=false};
+        assert(kp_rgb_pending_push(&ev)); kp_rgb_request_output_pass(false); host_run_ready();
+        assert(renders==before_renders && writes==before_writes && feedback==1);
+    } else if (!strcmp(name,"source-invalidate")) {
+        host_render_animating=false;
+        fixture(true,false); host_run_ready();
+        int before_renders=renders;
+        host_render_red=91; kp_rgb_effect_invalidate(&fx); host_run_ready();
+        assert(renders==before_renders+(KP_LED_COUNT?1:0));
+        if(KP_LED_COUNT) assert(scene[0].r==91);
+        static struct kp_rgb_effect_runtime embedded_runtime;
+        static const struct kp_rgb_effect_api embedded_api={
+            .callbacks=&callbacks,.runtime=&embedded_runtime};
+        static const struct device embedded_fx={.api=&embedded_api};
+        before_renders=renders;
+        host_render_red=117; kp_rgb_effect_invalidate(&embedded_fx); host_run_ready();
+        assert(renders==before_renders+(KP_LED_COUNT?1:0));
+        if(KP_LED_COUNT) assert(scene[0].r==117);
+    } else if (!strcmp(name,"callback-invalidate")) {
+        host_render_animating=false; fixture(true,false);
+        host_render_hook=invalidate_during_render; host_run_ready();
+        assert(renders==(KP_LED_COUNT?2:0));
     } else if (!strcmp(name,"fairness")) {
         fixture(true,false);
         host_render_hook = request_again;
@@ -324,7 +356,7 @@ int main(int argc, char **argv) {
         if(KP_LED_COUNT) {
             assert(!renders && kp_output_work.work.deadline==1);
             host_run_until(1); assert(!renders && kp_output_work.work.deadline==2);
-            host_run_until(2); assert(renders==1 && rendered_elapsed==0 && kp_rgb_next_frame_ms==16);
+            host_run_until(2); assert(renders==1 && rendered_elapsed==0 && kp_rgb_next_frame_ms==(int64_t)now+16);
         }
     } else if (!strcmp(name,"boot-on-failure")) {
         failures=KP_LED_COUNT?1:0; fixture(true,false); host_run_ready();
@@ -356,8 +388,8 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name,"finish-failure")) {
         fixture(true,false); host_render_hook=fail_finish; host_run_ready();
         if(KP_LED_COUNT) {
-            assert(renders==1 && kp_rgb_scene_requested && kp_output_work.work.deadline==1);
-            host_run_until(1); assert(renders==2 && !kp_rgb_scene_requested);
+            assert(renders==1 && kp_rgb_pass_requested && kp_output_work.work.deadline==1);
+            host_run_until(1); assert(renders==1 && !kp_rgb_pass_requested);
             assert(kp_rgb_next_frame_ms==16);
         }
     } else { assert(!"unknown case"); }

@@ -99,14 +99,22 @@ def main():
     i_layer = capture.find(i_decay + 1, capture.uniform(GREEN))
     check(i_layer > i_decay, "no green frame while layer 1 is held")
 
-    # Caps Lock is a condition with no layer event, so only the trigger table can
-    # react to it (the engine samples the table every tick). Its rising edge
-    # recolours solid blue and its on-exit restores red when Caps Lock clears.
+    # Caps Lock's condition invalidation wakes control even while solid is settled.
+    # Its rising edge selects blue; its falling edge restores red.
     i_blue = capture.find(i_layer + 1, capture.uniform(BLUE))
     check(i_blue > i_layer, "no blue frame after Caps Lock turned on")
 
     i_red2 = capture.find(i_blue + 1, capture.uniform(RED))
     check(i_red2 > i_blue, "no red frame after Caps Lock turned off")
+
+    check(i_off == 1, "settled boot solid kept submitting before OFF")
+    check(i_on == i_off + 1, "blocked output kept submitting after black settled")
+    check(not is_uniform(frames[i_on + 1][1], capture.n, RED),
+          "settled ON solid kept submitting before selection")
+    check(is_uniform(frames[i_layer - 1][1], capture.n, REACTIVE_IDLE),
+          "reactive did not submit its settled terminal image")
+    check(i_red2 == i_blue + 1, "settled Caps Lock solid kept submitting")
+    check(i_red2 == len(frames) - 1, "settled final solid kept submitting")
 
     print(
         f"smoke ok: {len(frames)} frames, {capture.n} LEDs; "

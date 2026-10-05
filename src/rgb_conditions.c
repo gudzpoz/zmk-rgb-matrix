@@ -16,6 +16,7 @@ static atomic_t external_pending;
 static bool started, initialized, in_control;
 static size_t condition_count;
 
+static uint64_t refresh_requested;
 static void control_handler(struct k_work *work);
 
 static K_WORK_DELAYABLE_DEFINE(control_work, control_handler);
@@ -76,6 +77,17 @@ void kp_rgb_condition_invalidate(const struct device *dev) {
   if (!on_worker())
     atomic_set(&external_pending, 1);
   if (started && !on_worker()) {
+    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+                                K_NO_WAIT);
+  }
+  k_spin_unlock(&schedule_lock, key);
+}
+
+void kp_rgb_conditions_request_refresh(uint64_t token) {
+  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
+  refresh_requested = token;
+  atomic_set(&external_pending, 1);
+  if (started) {
     k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
                                 K_NO_WAIT);
   }
@@ -241,6 +253,15 @@ static void control_handler(struct k_work *work) {
   }
 
   atomic_set(&external_pending, 0);
+  k_spinlock_key_t refresh_key = k_spin_lock(&schedule_lock);
+  uint64_t refresh_token = refresh_requested;
+  refresh_requested = 0;
+  k_spin_unlock(&schedule_lock, refresh_key);
+  if (refresh_token) {
+    for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+      if (e->live && !e->fault) atomic_set(&e->pending, 1);
+    }
+  }
   kp_rgb_triggers_begin();
 
   for (unsigned pass = 0; pass < 8; pass++) {
@@ -259,13 +280,17 @@ static void control_handler(struct k_work *work) {
 
   in_control = false;
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
+  bool refresh_complete = refresh_token && !pending();
+  if (refresh_token && !refresh_complete && !refresh_requested) {
+    refresh_requested = refresh_token;
+  }
   int64_t next = KP_RGB_CONDITION_NEVER;
   for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
     if (e->live && !e->fault)
       next = MIN(next, e->deadline);
   }
 
-  if (pending() || atomic_get(&external_pending)) {
+  if (refresh_requested || pending() || atomic_get(&external_pending)) {
     k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
                                 K_NO_WAIT);
   } else if (next != KP_RGB_CONDITION_NEVER) {
@@ -273,6 +298,7 @@ static void control_handler(struct k_work *work) {
                                 K_MSEC(MAX(INT64_C(0), next - k_uptime_get())));
   }
   k_spin_unlock(&schedule_lock, key);
+  if (refresh_complete) kp_rgb_conditions_refreshed(refresh_token);
 }
 
 void kp_rgb_conditions_start(void) {

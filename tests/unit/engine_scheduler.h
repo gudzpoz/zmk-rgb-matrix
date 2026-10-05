@@ -8,11 +8,28 @@
  * delayable work, not Zephyr priorities, tick rounding or real ISR preemption.
  */
 static struct k_work_delayable host_probe_work;
+static struct k_work_delayable host_refresh_work;
+static uint64_t host_refresh_token;
+static bool host_manual_refresh,host_refresh_queued;
 static struct k_work *const host_works[] = {
-    &kp_output_work.work, &host_probe_work.work,
+    &kp_output_work.work, &host_probe_work.work, &host_refresh_work.work,
 };
 static uint64_t host_order;
 static unsigned host_reschedule_failures;
+static void kp_rgb_conditions_refreshed(uint64_t token);
+static int k_work_submit_to_queue(void *queue, struct k_work *work);
+static void host_refresh_handler(struct k_work *work) {
+    (void)work;
+    host_refresh_queued=false;
+    kp_rgb_conditions_refreshed(host_refresh_token);
+}
+static void kp_rgb_conditions_request_refresh(uint64_t token) {
+    host_refresh_token=token;
+    if(host_manual_refresh) return;
+    host_refresh_work.work.handler=host_refresh_handler;
+    host_refresh_queued=true;
+    k_work_submit_to_queue(NULL,&host_refresh_work.work);
+}
 
 static int k_work_submit_to_queue(void *queue, struct k_work *work) {
     (void)queue;
