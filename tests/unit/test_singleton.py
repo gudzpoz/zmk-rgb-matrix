@@ -55,8 +55,8 @@ struct kp_rgb_effect_common_data { struct kp_rgb_hsb color; uint16_t duration_ms
 static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) {
     return dev->data;
 }
-static unsigned held, lock_entries, flushes;
-static void zmk_rgb_matrix_flush(void) { flushes++; }
+static unsigned held, lock_entries, flushes, locked_flushes;
+static void zmk_rgb_matrix_flush(void) { flushes++; if(held) locked_flushes++; }
 static void kp_rgb_matrix_lock(void) { if (!held) lock_entries++; held++; }
 static void kp_rgb_matrix_unlock(void) { assert(held); held--; }
 '''
@@ -99,9 +99,37 @@ int main(void) {
     assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 1); /* Skip disabled. */
     assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 0);
     assert(zmk_rgb_matrix_select_effect(1) == 0 && kp_rgb_selected_effect() == 1);
+    unsigned before=flushes, locked_before=locked_flushes;
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
+    assert(flushes==before+1 && locked_flushes==locked_before+1);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
+    assert(flushes==before+1);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,50,80}) == 0);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,51,80}) == 0);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,51,81}) == 0);
+    assert(flushes==before+4 && locked_flushes==locked_before+4);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
+    before=flushes;locked_before=locked_flushes;
     assert(kp_rgb_set_duration(1234) == 0);
+    assert(flushes==before+1 && locked_flushes==locked_before+1);
+    assert(kp_rgb_set_duration(1234) == 0 && flushes==before+1);
+    assert(kp_rgb_set_duration(0) == 0);
+    assert(data[1].duration_ms==100 && flushes==before+2);
+    assert(kp_rgb_set_duration(1) == 0 && flushes==before+2);
+    assert(kp_rgb_set_duration(20000) == 0);
+    assert(data[1].duration_ms==10000 && flushes==before+3);
+    assert(kp_rgb_set_duration(10001) == 0 && flushes==before+3);
+    assert(kp_rgb_set_duration(1234) == 0);
+    assert(flushes==before+4 && locked_flushes==locked_before+4);
+    before=flushes;
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){361,50,80}) == -EINVAL);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,101,80}) == -EINVAL);
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,101}) == -EINVAL);
+    assert(flushes==before);
+    kp_rgb_controller.state.active_fx=NULL;
+    assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == -ENODEV);
+    assert(kp_rgb_set_duration(500) == -ENODEV && flushes==before);
+    kp_rgb_controller.state.active_fx=&devices[1];
     assert(zmk_rgb_matrix_select_effect(0) == 0);
     assert(data[1].color.h == 222 && data[0].color.h == 10 && data[3].color.h == 321);
     assert(data[1].duration_ms == 1234 && data[0].duration_ms == 100 && data[3].duration_ms == 456);

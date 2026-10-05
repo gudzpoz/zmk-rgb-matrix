@@ -8,8 +8,8 @@ TESTS = r'''
 static void pass(void) { kp_rgb_output_handler(NULL); }
 static void repaint(void) { zmk_rgb_matrix_flush(); pass(); }
 static void black_due(void) {
- assert(kp_rgb_black_pending && kp_rgb_black_deadline_ms != INT64_MAX);
- now=kp_rgb_black_deadline_ms; pass();
+ assert(kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK && kp_rgb_output_retry_deadline_ms > 0);
+ now=kp_rgb_output_retry_deadline_ms; pass();
 }
 static void *output_thread(void *unused) { (void)unused;pass();return NULL; }
 static void *setter_thread(void *unused) {
@@ -58,13 +58,13 @@ int main(void) {
  bool state=false;assert(zmk_rgb_matrix_get_state(&state)==0 && state);
  assert(!kp_rgb_pending_push(&ev) && kp_rgb_next_frame_ms==INT64_MAX);
  if(KP_LED_COUNT) {
-  assert(kp_rgb_black_pending && kp_rgb_black_deadline_ms==100);
+  assert(kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK && kp_rgb_output_retry_deadline_ms==100);
   pass();assert(writes==1);failures=7;
   int delays[]={200,400,800,1000,1000,1000,1000};
   for(int i=0;i<7;i++) {
-   black_due();assert(kp_rgb_black_deadline_ms==(int64_t)now+delays[i] && colored==0);
+   black_due();assert(kp_rgb_output_retry_deadline_ms==(int64_t)now+delays[i] && colored==0);
   }
-  black_due();assert(!kp_rgb_black_pending);
+  black_due();assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE);
  }
  now+=10000;repaint();assert(!renders && !feedback && !colored);
  struct binding binding={.param1=RGB_TOG_CMD};
@@ -82,8 +82,8 @@ int main(void) {
  int before=writes;pass();assert(writes==before);
  assert(zmk_rgb_matrix_off()==0);
  if(KP_LED_COUNT) {
-  failures=1;pass();assert(kp_rgb_black_pending);
-  black_due();assert(!kp_rgb_black_pending);
+  failures=1;pass();assert(kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK);
+  black_due();assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE);
  }
  assert(zmk_rgb_matrix_on()==0);pass();
  // A stale blackout wake follows current permission, never the old OFF state.
@@ -103,7 +103,7 @@ int main(void) {
   before=colored;pass();assert(colored==before);pass();assert(colored==before);
  }
  if(KP_LED_COUNT) {
-  // ON waits for an in-flight black transfer and supersedes its failed retry.
+  // ON waits for black transfer completion but retains its failure deadline.
   pthread_t output,on;zmk_rgb_matrix_set_inhibited(false);zmk_rgb_matrix_off();
   atomic_set(&transfer_entered,0);atomic_set(&transfer_release,0);
   atomic_set(&setter_entered,0);atomic_set(&setter_done,0);
@@ -114,7 +114,9 @@ int main(void) {
   while(!atomic_get(&setter_entered)) sched_yield();
   assert(!atomic_get(&setter_done));atomic_set(&transfer_release,1);
   pthread_join(output,NULL);pthread_join(on,NULL);atomic_set(&block_transfer,0);
-  assert(!kp_rgb_black_pending);pass();
+  assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE);before=writes;pass();
+  assert(writes==before && kp_rgb_output_pending == KP_RGB_OUTPUT_SCENE);
+  now=kp_rgb_output_retry_deadline_ms;pass();
   assert(host_transfers[host_transfer_count-1].pixels[0].r==17);
  }
  if(KP_LED_COUNT) {
@@ -154,9 +156,9 @@ int main(void) {
  assert(post_release_accepted==(KP_LED_COUNT>0));
  assert(kp_rgb_pending_pop(&received)==post_release_accepted);
  zmk_rgb_matrix_set_inhibited(false);zmk_rgb_matrix_off();
- kp_rgb_black_pending=false;failures=KP_LED_COUNT?1:0;
+ kp_rgb_output_pending=KP_RGB_OUTPUT_NONE;failures=KP_LED_COUNT?1:0;
  assert(kp_rgb_matrix_init()==0);
- if(KP_LED_COUNT) { assert(kp_rgb_black_pending);black_due();assert(!kp_rgb_black_pending); }
+ if(KP_LED_COUNT) { assert(kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK);black_due();assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE); }
  assert(!polls && !refreshes && !dispatches);
  assert(zmk_rgb_matrix_get_state(NULL)==-EINVAL);assert(zmk_rgb_matrix_off()==0);
  assert(zmk_rgb_matrix_toggle()==0 && ctx.state.user_on);

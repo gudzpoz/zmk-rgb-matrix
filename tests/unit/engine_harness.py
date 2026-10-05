@@ -71,7 +71,12 @@ struct k_work_delayable { struct k_work work; };
 static struct k_work_delayable kp_output_work;
 static int output_submits;
 static bool kp_rgb_pass_active,kp_rgb_scene_requested;
-static int64_t kp_rgb_next_frame_ms=INT64_MAX,kp_rgb_black_deadline_ms=INT64_MAX;
+static int64_t kp_rgb_next_frame_ms=INT64_MAX;
+enum kp_rgb_output_kind { KP_RGB_OUTPUT_NONE, KP_RGB_OUTPUT_SCENE, KP_RGB_OUTPUT_BLACK };
+static enum kp_rgb_output_kind kp_rgb_output_pending;
+static int64_t kp_rgb_output_retry_deadline_ms;
+static uint32_t kp_rgb_output_retry_ms=100;
+static bool kp_rgb_output_urgent_black;
 typedef _Atomic int atomic_t;
 #define atomic_get(p) atomic_load(p)
 #define atomic_set(p,v) atomic_store(p,v)
@@ -102,6 +107,7 @@ struct kp_rgb_effect_api {
 struct kp_rgb_overlay_api { void (*render)(const struct device *,const struct kp_rgb_frame *); const struct device *(*event_target)(const struct device *); bool replaces_target; };
 struct kp_rgb_controller {
  const struct device *dev;
+ uint16_t effect_index;
  struct { bool user_on; const struct device *active_fx; } state;
  struct kp_rgb_tuning tuning;
 };
@@ -154,8 +160,7 @@ static struct kp_rgb_key_event kp_rgb_pending[KP_RGB_EVENT_QUEUE_LEN];
 static uint8_t kp_rgb_pending_head,kp_rgb_pending_tail;
 static uint32_t kp_rgb_pending_dropped;
 static atomic_t kp_rgb_output_allowed,kp_rgb_inhibited;
-static bool kp_rgb_output_ready,kp_rgb_black_pending;
-static uint32_t kp_rgb_black_retry_ms=100;
+static bool kp_rgb_output_ready;
 static uint64_t now;
 static struct led_rgb scene[KP_LED_COUNT],scratch[KP_LED_COUNT];
 static const size_t kp_rgb_all_targets[KP_LED_COUNT ? KP_LED_COUNT : 1]={0
@@ -230,10 +235,11 @@ static bool host_mutate_output = true;
 static bool host_allow_color_failure;
 static uint32_t host_transfer_ms;
 static bool host_render_animating = true;
+static uint8_t host_render_red = 17;
 static bool render(const struct device *d,const struct kp_rgb_frame *f) {
  (void)d; assert(held); renders++;rendered_elapsed=f->elapsed_ms;
  assert(f->targets && !f->scratch && f->count==KP_LED_COUNT);
- for(size_t n=0;n<f->target_count;n++) f->pixels[f->targets[n]].r=17;
+ for(size_t n=0;n<f->target_count;n++) f->pixels[f->targets[n]].r=host_render_red;
  if(host_render_hook) host_render_hook();
  return host_render_animating;
 }
@@ -283,9 +289,11 @@ FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
     "kp_rgb_each_effect", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_reconcile_effect", "kp_rgb_effect_render",
-    "kp_rgb_schedule_locked", "kp_rgb_begin_output_pass", "kp_rgb_finish_output_pass",
+    "kp_rgb_schedule_locked", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
+    "kp_rgb_finish_output_pass",
     "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_scene_pass_locked",
-    "kp_rgb_request_black_locked", "kp_rgb_attempt_black_locked", "kp_rgb_output_handler",
+    "kp_rgb_request_black_locked", "kp_rgb_output_deadline_locked",
+    "kp_rgb_attempt_output_locked", "kp_rgb_output_handler",
     "kp_rgb_reconcile_power_locked",
     "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
     "zmk_rgb_matrix_flush", "kp_rgb_pending_push",

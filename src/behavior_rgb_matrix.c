@@ -244,7 +244,11 @@ int kp_rgb_set_hsb(struct kp_rgb_hsb color) {
     return -EINVAL;
   }
   kp_rgb_matrix_lock();
-  kp_rgb_effect_data(kp_rgb_controller.state.active_fx)->color = color;
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_rgb_controller.state.active_fx);
+  if (data->color.h != color.h || data->color.s != color.s || data->color.b != color.b) {
+    data->color = color;
+    zmk_rgb_matrix_flush();
+  }
   kp_rgb_matrix_unlock();
   return 0;
 }
@@ -299,8 +303,11 @@ int kp_rgb_set_duration(uint32_t duration_ms) {
                            (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
                            (int32_t)CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   kp_rgb_matrix_lock();
-  kp_rgb_effect_data(kp_rgb_controller.state.active_fx)->duration_ms =
-      (uint16_t)duration;
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(kp_rgb_controller.state.active_fx);
+  if (data->duration_ms != (uint16_t)duration) {
+    data->duration_ms = (uint16_t)duration;
+    zmk_rgb_matrix_flush();
+  }
   kp_rgb_matrix_unlock();
   return 0;
 }

@@ -110,9 +110,17 @@ static K_MUTEX_DEFINE(kp_rgb_lock);
 static atomic_t kp_rgb_output_allowed;
 static atomic_t kp_rgb_inhibited;
 static bool kp_rgb_output_ready;
-static bool kp_rgb_black_pending;
-static uint32_t kp_rgb_black_retry_ms = 100;
-static int64_t kp_rgb_black_deadline_ms = INT64_MAX;
+
+enum kp_rgb_output_kind {
+  KP_RGB_OUTPUT_NONE,
+  KP_RGB_OUTPUT_SCENE,
+  KP_RGB_OUTPUT_BLACK,
+};
+
+static enum kp_rgb_output_kind kp_rgb_output_pending;
+static uint32_t kp_rgb_output_retry_ms = 100;
+static int64_t kp_rgb_output_retry_deadline_ms;
+static bool kp_rgb_output_urgent_black;
 static int64_t kp_rgb_next_frame_ms = INT64_MAX;
 static struct k_spinlock kp_rgb_schedule_lock;
 static bool kp_rgb_scene_requested;
@@ -175,9 +183,14 @@ void zmk_rgb_matrix_flush(void) {
   if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
 }
 
-static bool kp_rgb_begin_output_pass(void) {
+static void kp_rgb_begin_output_pass(void) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
   kp_rgb_pass_active = true;
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+}
+
+static bool kp_rgb_take_scene_request(void) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
   bool requested = kp_rgb_scene_requested;
   kp_rgb_scene_requested = false;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
@@ -377,47 +390,61 @@ static void kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
     for (size_t i = 0; i < KP_LED_COUNT; i++) {
       scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
     }
-    /* Defensive copy: Zephyr LED strip drivers could modify the pixels */
-    memcpy(scratch, scene, sizeof(scene));
-    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
-    if (err < 0) LOG_WRN("Failed to update the RGB strip (%d)", err);
+    kp_rgb_output_pending = KP_RGB_OUTPUT_SCENE;
   }
 }
 
 static void kp_rgb_request_black_locked(void) {
-  if (!kp_rgb_output_ready || !kp_rgb_has_leds() || kp_rgb_black_pending) return;
-  kp_rgb_black_pending = true;
-  kp_rgb_black_deadline_ms = k_uptime_get();
-  kp_rgb_black_retry_ms = 100;
+  if (!kp_rgb_output_ready || !kp_rgb_has_leds() ||
+      kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK) return;
+  kp_rgb_output_pending = KP_RGB_OUTPUT_BLACK;
+  kp_rgb_output_urgent_black = true;
 }
 
-static void kp_rgb_attempt_black_locked(void) {
+static int64_t kp_rgb_output_deadline_locked(void) {
+  if (kp_rgb_output_pending == KP_RGB_OUTPUT_NONE) return INT64_MAX;
+  return kp_rgb_output_urgent_black ? 0 : kp_rgb_output_retry_deadline_ms;
+}
+
+static void kp_rgb_attempt_output_locked(void) {
+  if (kp_rgb_output_pending == KP_RGB_OUTPUT_NONE ||
+      k_uptime_get() < kp_rgb_output_deadline_locked()) return;
+
+  bool black = kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK;
+  kp_rgb_output_urgent_black = false;
   /* led_strip_update_rgb() may overwrite even a failed submission. */
-  memset(scratch, 0, sizeof(scratch));
+  if (black) {
+    memset(scratch, 0, sizeof(scratch));
+  } else {
+    memcpy(scratch, scene, sizeof(scene));
+  }
   int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
   if (err < 0) {
-    LOG_WRN("Failed to clear the RGB strip (%d)", err);
-    kp_rgb_black_deadline_ms = k_uptime_get() + kp_rgb_black_retry_ms;
-    kp_rgb_black_retry_ms = MIN(kp_rgb_black_retry_ms * 2, 1000);
+    LOG_WRN("Failed to %s the RGB strip (%d)", black ? "clear" : "update", err);
+    kp_rgb_output_retry_deadline_ms = k_uptime_get() + kp_rgb_output_retry_ms;
+    kp_rgb_output_retry_ms = MIN(kp_rgb_output_retry_ms * 2, 1000);
   } else {
-    kp_rgb_black_pending = false;
-    kp_rgb_black_deadline_ms = INT64_MAX;
+    kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
+    kp_rgb_output_retry_deadline_ms = 0;
+    kp_rgb_output_retry_ms = 100;
   }
 }
 
 static void kp_rgb_output_handler(struct k_work *work) {
   ARG_UNUSED(work);
-  bool requested = kp_rgb_begin_output_pass();
+  kp_rgb_begin_output_pass();
   if (!kp_rgb_matrix_lock_patiently()) {
     LOG_WRN("Failed to obtain RGB matrix lock");
     kp_rgb_finish_output_pass(k_uptime_get() + KP_RGB_LOCK_RETRY_MS, true);
     return;
   }
 
+  bool requested = kp_rgb_take_scene_request();
   bool allowed = atomic_get(&kp_rgb_output_allowed);
   int64_t now_ms = k_uptime_get();
   bool paint = requested || kp_rgb_pending_available() || now_ms >= kp_rgb_next_frame_ms;
   kp_rgb_scene_pass_locked(now_ms, allowed, paint);
+  kp_rgb_attempt_output_locked();
 
   if (allowed) {
     int64_t finished_ms = k_uptime_get();
@@ -425,12 +452,10 @@ static void kp_rgb_output_handler(struct k_work *work) {
       int64_t period_ms = CONFIG_KEYPAW_RGB_MATRIX_TICK_MS;
       kp_rgb_next_frame_ms += ((finished_ms - kp_rgb_next_frame_ms) / period_ms + 1) * period_ms;
     }
-  } else if (kp_rgb_black_pending && k_uptime_get() >= kp_rgb_black_deadline_ms) {
-    kp_rgb_attempt_black_locked();
   }
 
-  int64_t next_ms = allowed ? kp_rgb_next_frame_ms
-      : kp_rgb_black_pending ? kp_rgb_black_deadline_ms : INT64_MAX;
+  int64_t next_ms = MIN(allowed ? kp_rgb_next_frame_ms : INT64_MAX,
+                        kp_rgb_output_deadline_locked());
   kp_rgb_finish_output_pass(next_ms, false);
   kp_rgb_matrix_unlock();
 
@@ -505,8 +530,8 @@ void kp_rgb_reconcile_power_locked(void) {
   k_spin_unlock(&kp_rgb_pending_lock, key);
 
   if (allowed) {
-    kp_rgb_black_pending = false;
-    kp_rgb_black_deadline_ms = INT64_MAX;
+    kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
+    kp_rgb_output_urgent_black = false;
     kp_rgb_each_effect(kp_rgb_restart_clock, 0);
     kp_rgb_next_frame_ms = k_uptime_get();
   } else {
@@ -646,15 +671,9 @@ static int kp_rgb_matrix_init(void) {
   kp_rgb_matrix_lock();
   kp_rgb_output_ready = true;
   if (kp_rgb_has_leds()) {
-    memset(scratch, 0, sizeof(scratch));
-    int err = led_strip_update_rgb(strip, scratch, KP_LED_COUNT);
-    if (err < 0) {
-      LOG_WRN("Failed to clear the RGB strip (%d)", err);
-      kp_rgb_black_pending = true;
-      kp_rgb_black_retry_ms = 200;
-      kp_rgb_black_deadline_ms = k_uptime_get() + 100;
-      zmk_rgb_matrix_flush();
-    }
+    kp_rgb_request_black_locked();
+    kp_rgb_attempt_output_locked();
+    if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE) zmk_rgb_matrix_flush();
   }
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();

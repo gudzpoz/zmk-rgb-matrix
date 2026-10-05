@@ -155,7 +155,7 @@ int main(void) {
     zmk_rgb_matrix_flush(); host_run_ready();
     assert(host_transfers[host_transfer_count-1].result==-EIO);
     assert(!memcmp(&scene[0],&idle_output,sizeof(idle_output)));
-    host_run_until(now+16);
+    host_run_until(kp_rgb_output_retry_deadline_ms);
     assert(host_transfers[host_transfer_count-1].result==0);
     assert(!memcmp(&scene[0],&idle_output,sizeof(idle_output)));
 

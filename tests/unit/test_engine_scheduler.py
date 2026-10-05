@@ -151,11 +151,11 @@ int main(int argc, char **argv) {
             for (int n=0; n<20; n++) zmk_rgb_matrix_flush();
             host_run_ready();
             assert(writes == (KP_LED_COUNT ? (int)i + 1 : 0));
-            if (KP_LED_COUNT) assert(kp_rgb_black_deadline_ms == (int64_t)due[i]);
+            if (KP_LED_COUNT) assert(kp_rgb_output_retry_deadline_ms == (int64_t)due[i]);
             host_run_until(due[i]);
             assert(writes == (KP_LED_COUNT ? (int)i + 2 : 0));
         }
-        assert(!kp_rgb_black_pending && !host_next_work() && !host_next_scheduled());
+        assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE && !host_next_work() && !host_next_scheduled());
         assert(!renders && !colored);
         for (size_t i = 0; i < host_transfer_count; i++) {
             assert_pixels(i, 0);
@@ -181,14 +181,16 @@ int main(int argc, char **argv) {
         fixture(true, false); host_run_ready();
         failures = KP_LED_COUNT ? 1 : 0; host_allow_color_failure = true;
         host_run_until(7); zmk_rgb_matrix_flush(); host_run_ready();
-        assert(!kp_rgb_black_pending);
+        assert(kp_rgb_output_pending == (KP_LED_COUNT ? KP_RGB_OUTPUT_SCENE : KP_RGB_OUTPUT_NONE));
         if (KP_LED_COUNT) {
             assert(host_transfers[host_transfer_count-1].result == -EIO);
             assert_pixels(host_transfer_count-1,17);
             assert(kp_rgb_next_frame_ms == 16);
         }
         int before=writes; host_run_until(15); assert(writes==before);
-        host_run_until(16); assert(writes==before+(KP_LED_COUNT?1:0));
+        host_run_until(106); assert(writes==before);
+        int painted=renders;
+        host_run_until(107); assert(writes==before+(KP_LED_COUNT?1:0) && renders==painted);
         if (KP_LED_COUNT) assert(host_transfers[host_transfer_count-1].result == 0);
     } else if (!strcmp(name, "rollover")) {
         now = UINT32_MAX-7ULL; fixture(true,false); host_run_ready();
@@ -305,10 +307,10 @@ int main(int argc, char **argv) {
         host_run_until(48); if(KP_LED_COUNT) assert(renders==2 && rendered_elapsed==48);
     } else if (!strcmp(name,"black-slow")) {
         failures=KP_LED_COUNT?2:0; host_transfer_ms=37; fixture(false,false);
-        if(KP_LED_COUNT) assert(now==37 && kp_rgb_black_deadline_ms==137);
+        if(KP_LED_COUNT) assert(now==37 && kp_rgb_output_retry_deadline_ms==137);
         host_run_until(137);
-        if(KP_LED_COUNT) assert(now==174 && writes==2 && kp_rgb_black_deadline_ms==374);
-        host_run_until(374); assert(!kp_rgb_black_pending);
+        if(KP_LED_COUNT) assert(now==174 && writes==2 && kp_rgb_output_retry_deadline_ms==374);
+        host_run_until(374); assert(kp_rgb_output_pending == KP_RGB_OUTPUT_NONE);
     } else if (!strcmp(name,"boundary")) {
         fixture(true,false); host_run_ready();
         zmk_rgb_matrix_flush();
@@ -326,12 +328,16 @@ int main(int argc, char **argv) {
         }
     } else if (!strcmp(name,"boot-on-failure")) {
         failures=KP_LED_COUNT?1:0; fixture(true,false); host_run_ready();
-        assert(!kp_rgb_black_pending); if(KP_LED_COUNT) assert(colored==1);
-        host_run_until(100);
+        assert(kp_rgb_output_pending == (KP_LED_COUNT ? KP_RGB_OUTPUT_SCENE : KP_RGB_OUTPUT_NONE));
+        assert(!colored); host_run_until(99); assert(!colored);
+        int painted=renders; host_run_until(100); assert(renders==painted);
+        if(KP_LED_COUNT) assert(colored==1);
         for(size_t i=1;i<host_transfer_count;i++) assert_pixels(i,17);
     } else if (!strcmp(name,"black-resume")) {
         failures=KP_LED_COUNT?1:0; fixture(false,false); host_run_until(50);
-        assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(!kp_rgb_black_pending);
+        assert(zmk_rgb_matrix_on()==0); host_run_ready();
+        assert(!colored); host_run_until(99); assert(!colored);
+        host_run_until(100); if(KP_LED_COUNT) assert(colored==1);
         host_run_until(150); for(size_t i=1;i<host_transfer_count;i++) assert_pixels(i,17);
     } else if (!strcmp(name,"stale-early")) {
         fixture(true,false); host_run_ready(); host_run_until(7);

@@ -108,6 +108,7 @@ static int kp_rgb_load_cb(const char *name, size_t len,
     LOG_WRN("Persisted effect %u is unavailable",
             (uint32_t)blob.selected_index);
     kp_rgb_resolve_active();
+    zmk_rgb_matrix_flush();
   }
   kp_rgb_controller.state.user_on = blob.user_on;
   kp_rgb_reconcile_power_locked();

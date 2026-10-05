@@ -571,8 +571,9 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
  * aggregator must own the setter. Thread context only, including before matrix
  * initialization. Returns 0 once accepted, not once hardware is black; failed
  * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
- * colored submissions until released. Release resumes current logical intent
- * without advancing animation time spent inhibited. Event/deadline control and
+ * colored submissions until released. Release preserves outstanding transfer
+ * backoff and resumes current logical intent without advancing animation time
+ * spent inhibited. Event/deadline control and
  * overlay synchronization remain live even while logically OFF. Pending key
  * feedback is discarded while inhibited. An in-flight render or feedback pass
  * may finish computing. */
