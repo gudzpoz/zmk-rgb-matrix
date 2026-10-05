@@ -227,8 +227,24 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event);
 
+#define KP_RGB_EFFECT_COMMON_CONFIG(node_id, index_)                           \
+  .common = {                                                                  \
+      .index = (index_),                                                       \
+      .persist_id =                                                            \
+          DT_PROP_OR(node_id, persist_id, DT_NODE_FULL_NAME(node_id)),         \
+      .persist_parameters = DT_NODE_HAS_PROP(node_id, persist_id),             \
+  }
+#define KP_RGB_EFFECT_COMMON_DATA(node_id, default_color_)                     \
+  .common = {                                                                  \
+      .color =                                                                 \
+          KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, default_color_)),     \
+      .duration_ms = MIN(DT_PROP_OR(node_id, duration, 0), UINT16_MAX),        \
+  }
+
 struct kp_rgb_effect_common_config {
   uint16_t index; /* registry slot; the effect's child position */
+  const char *persist_id;
+  bool persist_parameters;
 };
 struct kp_rgb_effect_common_data {
   uint16_t duration_ms;    /* single cycle animation duration */

@@ -208,18 +208,13 @@ static const struct kp_rgb_effect_callbacks kp_eff_rain_callbacks = {
                    DT_PROP(DT_DRV_INST(inst), step_interval_ms) <= UINT16_MAX, \
                "rain step-interval-ms must be in 1..65535");                   \
   static const struct kp_eff_rain_config kp_eff_rain_##inst##_cfg = {          \
-      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
+                                  KP_RGB_EFFECT_INDEX(inst)),                  \
       .mode = CONV_DT_ENUM(inst, mode),                                        \
       .step_interval_ms = DT_PROP(DT_DRV_INST(inst), step_interval_ms),        \
   };                                                                           \
   static struct kp_eff_rain_data kp_eff_rain_##inst##_data = {                 \
-      .common =                                                                \
-          {                                                                    \
-              .color = KP_RGB_HSB_FROM_HEX(                                    \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = MIN(                                              \
-                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
-          },                                                                   \
+      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rain_callbacks,              \
                        kp_eff_rain_##inst)

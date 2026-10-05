@@ -42,18 +42,13 @@ struct kp_eff_static_data {
                    ARRAY_SIZE(kp_eff_static_##inst##_colors) <= KP_LED_COUNT,  \
                "led-colors has more entries than LEDs");                       \
   static const struct kp_eff_static_config kp_eff_static_##inst##_cfg = {      \
-      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
+                                  KP_RGB_EFFECT_INDEX(inst)),                  \
       .colors = kp_eff_static_##inst##_colors,                                 \
       .colors_len = ARRAY_SIZE(kp_eff_static_##inst##_colors),                 \
   };                                                                           \
   static struct kp_eff_static_data kp_eff_static_##inst##_data = {             \
-      .common =                                                                \
-          {                                                                    \
-              .color = KP_RGB_HSB_FROM_HEX(                                    \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = MIN(                                              \
-                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
-          },                                                                   \
+      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_static_callbacks,            \
                        kp_eff_static_##inst)

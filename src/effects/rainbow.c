@@ -169,19 +169,14 @@ static const struct kp_rgb_effect_callbacks kp_eff_rainbow_callbacks = {
 
 #define KP_EFF_RAINBOW_DEFINE(inst)                                            \
   static const struct kp_eff_rainbow_config kp_eff_rainbow_##inst##_cfg = {    \
-      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
+                                  KP_RGB_EFFECT_INDEX(inst)),                  \
       .basis = CONV_DT_ENUM(inst, basis),                                      \
       .direction = CONV_DT_ENUM(inst, direction),                              \
       .palette = CONV_DT_ENUM(inst, palette),                                  \
   };                                                                           \
   static struct kp_eff_rainbow_data kp_eff_rainbow_##inst##_data = {           \
-      .common =                                                                \
-          {                                                                    \
-              .color = KP_RGB_HSB_FROM_HEX(                                    \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = MIN(                                              \
-                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
-          },                                                                   \
+      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rainbow_callbacks,           \
                        kp_eff_rainbow_##inst)

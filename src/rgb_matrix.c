@@ -431,8 +431,10 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
       kp_rgb_scene_animating |= kp_render_overlays(
           &frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
     }
-    uint8_t brightness = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
-                                      : kp_rgb_controller.tuning.max_brightness;
+    uint8_t cap = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
+                                : kp_rgb_controller.tuning.max_brightness;
+    uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_controller.brightness) /
+                                   KP_RGB_BRT_MAX);
     for (size_t i = 0; i < KP_LED_COUNT; i++) {
       scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
     }

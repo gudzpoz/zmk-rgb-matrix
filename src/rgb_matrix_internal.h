@@ -30,7 +30,7 @@ struct kp_rgb_state {
 };
 
 struct kp_rgb_effect_defaults {
-  struct kp_rgb_hsb color; /* b is overwritten by initial_brightness */
+  struct kp_rgb_hsb color;
   uint32_t duration_ms;    /* 0 -> initial_duration_ms */
 };
 
@@ -38,6 +38,7 @@ struct kp_rgb_controller {
   const struct device *dev;
   struct kp_rgb_state state;
   struct kp_rgb_tuning tuning;
+  uint8_t brightness;
   const struct device *const *effects;
   const struct kp_rgb_effect_defaults *effect_defaults;
   size_t effect_count;
@@ -138,6 +139,7 @@ size_t kp_rgb_effect_count(void);
 const struct device *kp_rgb_effect_at(size_t index);
 size_t kp_rgb_selected_effect(void);
 int kp_rgb_save_state(void);
+int kp_rgb_select_effect_locked(uint16_t index);
 
 /* Restore presets and user intent, then reconcile local output permission. */
 int kp_rgb_apply_defaults(void);

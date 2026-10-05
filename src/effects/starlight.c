@@ -154,20 +154,15 @@ static const struct kp_rgb_effect_callbacks kp_eff_starlight_callbacks = {
                "starlight step-interval-ms must be in 1..65535");              \
   static const struct kp_eff_starlight_config kp_eff_starlight_##inst##_cfg =  \
       {                                                                        \
-          .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                      \
+          KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                       \
+                                      KP_RGB_EFFECT_INDEX(inst)),              \
           .step_interval_ms = DT_PROP(DT_DRV_INST(inst), step_interval_ms),    \
           .smooth = DT_PROP_OR(DT_DRV_INST(inst), smooth, 0),                  \
           .dual_hue = DT_PROP_OR(DT_DRV_INST(inst), dual_hue, 0),              \
           .dual_sat = DT_PROP_OR(DT_DRV_INST(inst), dual_sat, 0),              \
   };                                                                           \
   static struct kp_eff_starlight_data kp_eff_starlight_##inst##_data = {       \
-      .common =                                                                \
-          {                                                                    \
-              .color = KP_RGB_HSB_FROM_HEX(                                    \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = MIN(                                              \
-                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
-          },                                                                   \
+      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_starlight_callbacks,         \
                        kp_eff_starlight_##inst)

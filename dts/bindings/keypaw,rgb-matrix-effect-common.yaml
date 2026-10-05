@@ -17,6 +17,13 @@ properties:
       uses the controller's `initial-duration-ms` for selectable effects, or
       1000 ms for effects owned by other providers.
 
+  persist-id:
+    type: string
+    required: false
+    description: |
+      Opts this selectable effect into persistence. The value is the stable
+      settings identity and must be a unique identifier-compatible token.
+
   overlays:
     type: phandles
     required: false

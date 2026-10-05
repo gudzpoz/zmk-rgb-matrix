@@ -31,10 +31,25 @@ BUILD_ASSERT(!DT_NODE_HAS_PROP(KP_CONTROLLER, leds),
              "RGB controller always owns the whole strip; remove leds");
 BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_CONTROLLER)) <= 9,
              "RGB controller name must fit the split behavior_dev field");
-BUILD_ASSERT(DT_CHILD_NUM(KP_CONTROLLER) <= KP_RGB_MAX_REGISTRY_EFFECTS,
-             "RGB effect registry exceeds persistence capacity");
-BUILD_ASSERT(DT_CHILD_NUM(KP_CONTROLLER) <= UINT8_MAX,
-             "RGB effect count must fit the blob count byte");
+
+#define KP_RGB_EFFECT_ID_TOKEN(node_id)                                        \
+  COND_CODE_1(DT_NODE_HAS_PROP(node_id, persist_id),                           \
+              (DT_STRING_TOKEN(node_id, persist_id)),                          \
+              (DT_NODE_FULL_NAME_TOKEN(node_id)))
+
+#define KP_RGB_EFFECT_ID_LENGTH_ASSERT(node_id)                                \
+  CONCAT(kp_rgb_id_len_, DT_DEP_ORD(node_id)) =                                \
+      (sizeof(DT_PROP_OR(node_id, persist_id, DT_NODE_FULL_NAME(node_id))) <=  \
+       KP_RGB_PERSIST_MAX_ID_LENGTH),
+
+#define KP_RGB_PERSIST_UNIQUE(node_id)                                         \
+  CONCAT(kp_rgb_persist_id_, KP_RGB_EFFECT_ID_TOKEN(node_id)),
+
+enum {
+  DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_ID_LENGTH_ASSERT)
+  DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_PERSIST_UNIQUE)
+  __kp_rgb_persist_id_end,
+};
 
 #define KP_RGB_EFFECT_DEVICE(node_id)                                          \
   COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay), (DEVICE_DT_GET(node_id), ),   \
@@ -179,6 +194,7 @@ int kp_rgb_apply_defaults(void) {
                                       CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   kp_rgb_matrix_lock();
   kp_rgb_controller.state.user_on = kp_rgb_controller.initial_on;
+  kp_rgb_controller.brightness = brightness;
   for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
     const struct device *fx = kp_rgb_effect_at(i);
     if (fx == NULL) {
@@ -188,7 +204,7 @@ int kp_rgb_apply_defaults(void) {
         &kp_rgb_controller.effect_defaults[i];
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
     data->color = def->color;
-    data->color.b = brightness;
+    data->color.b = KP_RGB_BRT_MAX;
     data->duration_ms =
         def->duration_ms != 0
             ? (uint16_t)CLAMP(def->duration_ms,
@@ -204,7 +220,7 @@ int kp_rgb_apply_defaults(void) {
   return ret;
 }
 
-static int kp_rgb_select_effect_locked(uint16_t index) {
+int kp_rgb_select_effect_locked(uint16_t index) {
   if (index >= kp_rgb_effect_count()) {
     return -EINVAL;
   }
@@ -269,9 +285,11 @@ static int kp_rgb_set_color_locked(const struct device *fx,
   struct kp_rgb_hsb next = *color;
   next.h %= KP_RGB_HUE_MAX;
   struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-  if (data->color.h != next.h || data->color.s != next.s ||
-      data->color.b != next.b) {
-    data->color = next;
+  if (data->color.h != next.h || data->color.s != next.s
+  ) {
+    data->color.h = next.h;
+    data->color.s = next.s;
+    data->color.b = KP_RGB_BRT_MAX;
     zmk_rgb_matrix_flush();
   }
   return 0;
@@ -329,7 +347,10 @@ static struct kp_rgb_hsb kp_active_hsb(void) {
     return (struct kp_rgb_hsb){
         .h = 0, .s = 0, .b = kp_rgb_controller.tuning.max_brightness};
   }
-  return kp_rgb_effect_data(kp_rgb_controller.state.active_fx)->color;
+  struct kp_rgb_hsb color =
+      kp_rgb_effect_data(kp_rgb_controller.state.active_fx)->color;
+  color.b = kp_rgb_controller.brightness;
+  return color;
 }
 
 static struct kp_rgb_hsb kp_rgb_calc_hue_locked(int8_t direction) {
@@ -387,9 +408,10 @@ int kp_rgb_change_sat(int8_t direction) {
 
 static struct kp_rgb_hsb kp_rgb_calc_brt_locked(int8_t direction) {
   struct kp_rgb_hsb color = kp_active_hsb();
-  color.b = (uint8_t)CLAMP((int64_t)color.b + (int64_t)direction *
-                                                  CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP,
-                           0, KP_RGB_BRT_MAX);
+  color.b =
+      (uint8_t)CLAMP((int64_t)kp_rgb_controller.brightness +
+                         (int64_t)direction * CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP,
+                     0, KP_RGB_BRT_MAX);
   return color;
 }
 
@@ -406,9 +428,10 @@ int kp_rgb_change_brt(int8_t direction) {
   }
   kp_rgb_matrix_lock();
   struct kp_rgb_hsb color = kp_rgb_calc_brt_locked(direction);
-  int ret = kp_rgb_set_color_locked(kp_rgb_controller.state.active_fx, &color);
+  kp_rgb_controller.brightness = color.b;
+  zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();
-  return ret;
+  return 0;
 }
 
 static uint32_t kp_active_duration(void) {

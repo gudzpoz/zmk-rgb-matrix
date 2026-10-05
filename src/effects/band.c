@@ -115,18 +115,13 @@ static const struct kp_rgb_effect_callbacks kp_eff_band_callbacks = {
 
 #define KP_EFF_BAND_DEFINE(inst)                                               \
   static const struct kp_eff_band_config kp_eff_band_##inst##_cfg = {          \
-      .common = {.index = KP_RGB_EFFECT_INDEX(inst)},                          \
+      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
+                                  KP_RGB_EFFECT_INDEX(inst)),                  \
       .channel = CONV_DT_ENUM(inst, channel),                                  \
       .shape = CONV_DT_ENUM(inst, shape),                                      \
   };                                                                           \
   static struct kp_eff_band_data kp_eff_band_##inst##_data = {                 \
-      .common =                                                                \
-          {                                                                    \
-              .color = KP_RGB_HSB_FROM_HEX(                                    \
-                  DT_PROP_OR(DT_DRV_INST(inst), color, 0xFFFFFF)),             \
-              .duration_ms = MIN(                                              \
-                  DT_PROP_OR(DT_DRV_INST(inst), duration, 0), UINT16_MAX),     \
-          },                                                                   \
+      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_band_callbacks,              \
                        kp_eff_band_##inst)

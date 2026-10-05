@@ -3,23 +3,27 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * On-flash record codec for the RGB matrix settings. Split out of
- * rgb_settings.c so a host build can unit-test it (tests/unit) without linking
- * the ZMK app.
+ * On-flash record codec for RGB matrix settings.
  */
 
 #include <string.h>
 
+#include <zephyr/settings/settings.h>
 #include <zephyr/sys/util.h>
 
+#include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
 
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_effect) == 6,
-             "the persisted effect gained padding");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_blob) ==
-                 6 + KP_RGB_PERSIST_MAX_EFFECTS *
-                         sizeof(struct kp_rgb_persist_effect),
-             "the persisted blob gained padding");
+#define KP_RGB_PERSIST_EFFECT_PATH_LEN                                         \
+  (sizeof("keypaw/rgb_matrix/state/effects/") - 1)
+
+BUILD_ASSERT(sizeof(struct kp_rgb_persist_blob) <= SETTINGS_MAX_VAL_LEN,
+             "the persisted global record exceeds SETTINGS_MAX_VAL_LEN");
+BUILD_ASSERT(sizeof(struct kp_rgb_persist_effect) <= SETTINGS_MAX_VAL_LEN,
+             "the persisted effect record exceeds SETTINGS_MAX_VAL_LEN");
+BUILD_ASSERT(KP_RGB_PERSIST_EFFECT_PATH_LEN + KP_RGB_PERSIST_MAX_ID_LENGTH <=
+                 SETTINGS_MAX_NAME_LEN,
+             "the persisted effect settings key exceeds SETTINGS_MAX_NAME_LEN");
 
 bool kp_rgb_persist_size_ok(size_t len) {
   return len == sizeof(struct kp_rgb_persist_blob);
@@ -30,8 +34,8 @@ bool kp_rgb_persist_version_ok(uint8_t version) {
 }
 
 bool kp_rgb_persist_effect_valid(const struct kp_rgb_persist_effect *effect) {
-  return effect->h <= KP_RGB_HUE_MAX && effect->s <= KP_RGB_SAT_MAX &&
-         effect->b <= KP_RGB_BRT_MAX;
+  return effect != NULL && effect->h <= KP_RGB_HUE_MAX &&
+         effect->s <= KP_RGB_SAT_MAX;
 }
 
 uint16_t kp_rgb_persist_clamp_duration(uint16_t duration_ms, uint16_t min_ms,
@@ -40,16 +44,14 @@ uint16_t kp_rgb_persist_clamp_duration(uint16_t duration_ms, uint16_t min_ms,
                          (int32_t)max_ms);
 }
 
-void kp_rgb_persist_pack(uint16_t selected_index, bool user_on,
-                         const struct kp_rgb_persist_effect *effects,
-                         size_t count, struct kp_rgb_persist_blob *out) {
+void kp_rgb_persist_pack(bool user_on, uint8_t brightness, const char *selected_id,
+                         struct kp_rgb_persist_blob *out) {
   memset(out, 0, sizeof(*out));
   out->version = KP_RGB_PERSIST_VERSION;
-  out->selected_index = selected_index;
   out->user_on = user_on;
-  count = MIN(count, (size_t)KP_RGB_PERSIST_MAX_EFFECTS);
-  out->effect_count = (uint8_t)count;
-  for (size_t i = 0; i < count; i++) {
-    out->effects[i] = effects[i];
+  out->brightness = MIN(brightness, (uint8_t)KP_RGB_BRT_MAX);
+  if (selected_id != NULL && selected_id[0] != '\0') {
+    out->has_selected = 1;
+    strncpy(out->selected_id, selected_id, sizeof(out->selected_id) - 1);
   }
 }
