@@ -25,20 +25,20 @@ class PreviewTimingTests(unittest.TestCase):
     def test_irregular_timestamps_hold_until_next_sample(self):
         frames = [(100, RED), (125, GREEN), (180, BLUE)]
         self.assertEqual(self.pixels(frames, end_ms=200),
-                         [RED] * 3 + [GREEN] * 5 + [BLUE] * 2)
-        self.assertEqual(self.pixels(frames, fps=50, end_ms=200),
                          [RED] * 2 + [GREEN] * 2 + [BLUE])
+        self.assertEqual(self.pixels(frames, fps=100, end_ms=200),
+                         [RED] * 3 + [GREEN] * 5 + [BLUE] * 2)
 
     def test_one_frame_final_duration(self):
         self.assertEqual(self.pixels([(500, RED)]), [RED])
-        self.assertEqual(self.pixels([(500, RED)], end_ms=600), [RED] * 10)
+        self.assertEqual(self.pixels([(500, RED)], end_ms=600), [RED] * 5)
         self.assertEqual(self.pixels([(500, RED)], end_ms=500), [RED])
-        self.assertEqual(self.pixels([(500, RED)], end_ms=511), [RED] * 2)
+        self.assertEqual(self.pixels([(500, RED)], end_ms=511), [RED])
         self.assertEqual(self.pixels([(500, RED)], fps=25), [RED])
 
     def test_default_end_holds_last_interval(self):
         self.assertEqual(self.pixels([(0, RED), (25, BLUE)]),
-                         [RED] * 3 + [BLUE])
+                         [RED] * 2 + [BLUE])
 
     def test_equal_timestamps_last_wins(self):
         self.assertEqual(self.pixels([(0, RED), (0, GREEN), (10, RED), (10, BLUE)]),
@@ -66,11 +66,12 @@ class PreviewTimingTests(unittest.TestCase):
             coords, preview.resample_frames(frames, end_ms=50), 100, 1, 0)
         self.assertEqual((width, height), (1, 1))
         self.assertIs(iter(images), images)
-        self.assertEqual([bytes(image) for image in images], [RED] * 3)
+        self.assertEqual([bytes(image) for image in images], [RED] * 2)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
                          "ffmpeg and ffprobe are optional")
     def test_encoded_duration(self):
+        fps = preview.DEFAULT_FPS
         with tempfile.TemporaryDirectory() as directory:
             for name, frames, end_ms in [
                 ("held", [(100, RED), (225, BLUE)], 500),
@@ -86,12 +87,13 @@ class PreviewTimingTests(unittest.TestCase):
                     with raw.open("wb") as handle:
                         for image in images:
                             handle.write(image)
-                    preview.encode_gif(str(raw), width, height, 100, str(gif))
+                    preview.encode_gif(str(raw), width, height, fps, str(gif))
                     duration = float(subprocess.check_output([
                         "ffprobe", "-v", "error", "-min_delay", "0",
                         "-show_entries", "format=duration", "-of",
                         "default=noprint_wrappers=1:nokey=1", str(gif)], text=True))
-                    self.assertAlmostEqual(duration, 0.01 if end_ms is None else 0.4,
+                    self.assertAlmostEqual(duration,
+                                           1 / fps if end_ms is None else 0.4,
                                            delta=0.001)
 
 

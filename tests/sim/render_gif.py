@@ -27,7 +27,9 @@ import tempfile
 
 MAGIC = b"KPRC"
 VERSION = 1
-DEFAULT_FPS = 100  # GIF delays have 10 ms resolution
+# 20 ms/frame. Chrome, Safari and Firefox rewrite GIF delays of 10 ms or
+# less to 100 ms...
+DEFAULT_FPS = 50
 DEFAULT_TILE = 32
 
 
@@ -220,7 +222,7 @@ def main():
         "--fps",
         type=float,
         default=DEFAULT_FPS,
-        help="output sampling rate, not playback speed (default: 100 Hz)",
+        help="output sampling rate, not playback speed (default: 50 Hz)",
     )
     parser.add_argument(
         "--end-ms", type=float,
