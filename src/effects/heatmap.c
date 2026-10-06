@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * "heatmap" effect: each key's colour reflects how recently (and how often) it was
- * pressed, decaying over time. Port of QMK's TYPING_HEATMAP.
+ * "heatmap" effect: each key's colour reflects how recently (and how often) it
+ * was pressed, decaying over time. Port of QMK's TYPING_HEATMAP.
  */
 
 #define DT_DRV_COMPAT keypaw_rgb_matrix_heatmap
@@ -37,7 +37,6 @@ struct kp_eff_heatmap_data {
   uint32_t remainder[KP_LED_COUNT];
 #endif
 };
-
 
 #if KP_LED_COUNT > 0
 static void kp_eff_heatmap_apply(const struct device *dev,
@@ -149,7 +148,8 @@ static void kp_eff_heatmap_apply(const struct device *dev,
 }
 #endif
 
-static bool kp_eff_heatmap_event(const struct device *dev, const struct kp_rgb_key_event *ev) {
+static bool kp_eff_heatmap_event(const struct device *dev,
+                                 const struct kp_rgb_key_event *ev) {
 #if KP_LED_COUNT > 0
   struct kp_eff_heatmap_data *data = dev->data;
   const struct kp_eff_heatmap_config *cfg = dev->config;
@@ -174,7 +174,8 @@ static void kp_eff_heatmap_reset(const struct device *dev, int64_t now_ms) {
   *data = (struct kp_eff_heatmap_data){.common = common};
 }
 
-static void kp_eff_heatmap_set_active(const struct device *dev, bool active, int64_t now_ms) {
+static void kp_eff_heatmap_set_active(const struct device *dev, bool active,
+                                      int64_t now_ms) {
   if (!active) {
     kp_eff_heatmap_reset(dev, now_ms);
   }
@@ -203,8 +204,7 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
                        UINT8_MAX,                                              \
                "heatmap increase-step must fit a nonnegative uint8_t");        \
   static const struct kp_eff_heatmap_config kp_eff_heatmap_##inst##_cfg = {    \
-      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
-                                  KP_RGB_EFFECT_INDEX(inst)),                  \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
       .decrease_delay_ms =                                                     \
           DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25),                \
       .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
@@ -213,8 +213,7 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
       .slim = DT_PROP_OR(DT_DRV_INST(inst), slim, 0),                          \
   };                                                                           \
   static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {           \
-      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
-  };                                                                           \
+      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_heatmap_callbacks,           \
                        kp_eff_heatmap_##inst)
 

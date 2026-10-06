@@ -205,12 +205,10 @@ static const struct kp_rgb_effect_callbacks kp_eff_digital_rain_callbacks = {
 #define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                       \
   static const struct kp_eff_digital_rain_config                               \
       kp_eff_digital_rain_##inst##_cfg = {                                     \
-          KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                       \
-                                      KP_RGB_EFFECT_INDEX(inst)),              \
+          KP_RGB_EFFECT_COMMON_CONFIG(inst),                                   \
   };                                                                           \
   static struct kp_eff_digital_rain_data kp_eff_digital_rain_##inst##_data = { \
-      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0x00FF00),                  \
-  };                                                                           \
+      KP_RGB_EFFECT_COMMON_DATA(inst, 0x00FF00, 0)};                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_digital_rain_callbacks,      \
                        kp_eff_digital_rain_##inst)
 

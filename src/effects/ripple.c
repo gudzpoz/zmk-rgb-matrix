@@ -173,14 +173,12 @@ static const struct kp_rgb_effect_callbacks kp_eff_ripple_callbacks = {
 
 #define KP_EFF_RIPPLE_DEFINE(inst)                                             \
   static const struct kp_eff_ripple_config kp_eff_ripple_##inst##_cfg = {      \
-      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
-                                  KP_RGB_EFFECT_INDEX(inst)),                  \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
       .background_brightness = (uint8_t)CLAMP(                                 \
           DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
   };                                                                           \
   static struct kp_eff_ripple_data kp_eff_ripple_##inst##_data = {             \
-      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
-  };                                                                           \
+      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_ripple_callbacks,            \
                        kp_eff_ripple_##inst)
 

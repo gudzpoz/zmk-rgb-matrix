@@ -59,12 +59,10 @@ static const struct kp_rgb_effect_callbacks kp_eff_spectrum_callbacks = {
 
 #define KP_EFF_SPECTRUM_DEFINE(inst)                                           \
   static const struct kp_eff_spectrum_config kp_eff_spectrum_##inst##_cfg = {  \
-      KP_RGB_EFFECT_COMMON_CONFIG(DT_DRV_INST(inst),                           \
-                                  KP_RGB_EFFECT_INDEX(inst)),                  \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
   };                                                                           \
   static struct kp_eff_spectrum_data kp_eff_spectrum_##inst##_data = {         \
-      KP_RGB_EFFECT_COMMON_DATA(DT_DRV_INST(inst), 0xFFFFFF),                  \
-  };                                                                           \
+      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_spectrum_callbacks,          \
                        kp_eff_spectrum_##inst)
 

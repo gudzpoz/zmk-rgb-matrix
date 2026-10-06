@@ -276,23 +276,24 @@ targets.
 };
 ```
 
-The effect that an overlay composites can be given in two ways:
+A generic overlay must contain exactly one enabled effect child (as above).
+Unlike "public" effects listed under the `&kprgb` node, these "private" child
+effects are owned by the overlay and can only be activated by an active overlay
+condition.
 
-- a nested child (as above) is "private": it consumes no registry slot, cannot
-  be cycled into, and does not follow the user's brightness/hue changes;
-- `effect = <&fx_solid>;` names a "shared" registry effect (a child of
-  `&kprgb`), which is live and adjustable.
-
-There are some more attributes: `opacity = <...>;` adjusts how much of the
-output is mixed into the layers below; `all-leds;` is a convenient way to
-express that the effect renders over all LEDs (and, alternatively, you can limit
-the overlay effect to a few LEDs, specified with `keys` or `leds`).
+There are some more attributes for the overlay: `opacity = <...>;` adjusts how
+much of the output is mixed into the layers below; `all-leds;` is a convenient
+way to express that the effect renders over all LEDs (and, alternatively, you
+can limit the overlay effect to a few LEDs, specified with `keys` or `leds`).
 
 `keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes,
 serving as registries. An overlay's declaration order under `rgb_overlays` is
 its paint order: a later child composites on top. Every registered overlay is
-composited by default; a public effect may narrow that list with its own
-`overlays`/`no-overlays`.
+composited by default; a controller-selectable effect may narrow that list with its
+own `overlays`/`no-overlays`.
+
+> An explicit `overlays = <&a &b>;` list also sets its own paint order;
+> duplicate placements in that list are rejected.
 
 > The `cond_batt` latch condition is a bit different from other conditions
 > above: it allows the user to toggle the condition via key bindings. Just bind
@@ -495,9 +496,9 @@ to a copy-and-pastable devicetree snippet that produced it.
 </tbody>
 </table>
 
-Every effect accepts `color`, `duration`, `overlays`, `no-overlays`, and
-`no-cycle` attributes (though some attributes might be meaningless to some
-effects).
+Every effect accepts `color` and `duration`. Selectable effects also accept
+`overlays` and `no-overlays`. `RGB_EFF`/`RGB_EFR` cycle through all enabled
+selectable effects; private overlay effects are not part of that list.
 
 ### Built-in conditions and overlays
 

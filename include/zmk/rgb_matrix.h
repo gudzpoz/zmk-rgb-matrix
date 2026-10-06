@@ -89,13 +89,16 @@ struct kp_rgb_frame {
   size_t count;
   const struct kp_rgb_coord *coords;
   struct led_rgb *pixels;
+
   /* Always non-NULL; target_count unique indices below count. Zero is empty.
    * target_count == count permits painting in physical-index order. */
   const size_t *targets;
   size_t target_count;
+
   /* Overlay-only temporary storage for at least count pixels, independent of
    * pixels, with unspecified contents. NULL in effect callbacks. */
   struct led_rgb *scratch;
+
   /* One monotonic uptime shared by this worker pass. */
   int64_t now_ms;
   /* Active animation time since this participant's previous render, saturated at
@@ -227,18 +230,21 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event);
 
-#define KP_RGB_EFFECT_COMMON_CONFIG(node_id, index_)                           \
+#define KP_RGB_EFFECT_COMMON_CONFIG(inst)                                      \
   .common = {                                                                  \
-      .index = (index_),                                                       \
-      .persist_id =                                                            \
-          DT_PROP_OR(node_id, persist_id, DT_NODE_FULL_NAME(node_id)),         \
-      .persist_parameters = DT_NODE_HAS_PROP(node_id, persist_id),             \
+      .index = KP_RGB_EFFECT_INDEX(inst),                                      \
+      .persist_id = DT_PROP_OR(DT_DRV_INST(inst), persist_id,                  \
+                               DT_NODE_FULL_NAME(DT_DRV_INST(inst))),          \
+      .persist_parameters = DT_NODE_HAS_PROP(DT_DRV_INST(inst), persist_id),   \
   }
-#define KP_RGB_EFFECT_COMMON_DATA(node_id, default_color_)                     \
+#define KP_RGB_EFFECT_COMMON_DATA(inst, default_color_, default_duration_)     \
   .common = {                                                                  \
       .color =                                                                 \
-          KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, default_color_)),     \
-      .duration_ms = MIN(DT_PROP_OR(node_id, duration, 0), UINT16_MAX),        \
+          KP_RGB_HSB_FROM_HEX(                                                 \
+              DT_PROP_OR(DT_DRV_INST(inst), color, default_color_)),           \
+      .duration_ms = MIN(                                                      \
+          DT_PROP_OR(DT_DRV_INST(inst), duration, default_duration_),          \
+          UINT16_MAX),                                                         \
   }
 
 struct kp_rgb_effect_common_config {
