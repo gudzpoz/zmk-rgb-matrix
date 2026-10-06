@@ -151,4 +151,14 @@ config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
       Waiting this long after the connection is seen gives discovery and the
       security upgrade time to finish. Best effort, not a guarantee.
 
+config KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS
+    int "Shared animation clock re-sync period (ms)"
+    default 30000
+    range 1000 60000
+    help
+      How often the central re-sends its monotonic uptime so a peripheral
+      corrects crystal drift in its shared animation-clock offset. Runs
+      independently of the connection poll; an early drop self-heals on the
+      next period.
+
 endif # KEYPAW_RGB_SPLIT_SYNC

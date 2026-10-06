@@ -27,6 +27,12 @@
 #define RGB_RESET_CMD 0x102
 #define RGB_RESET RGB_RESET_CMD 0
 
+/* Module-local, internal command: param2 is the low 32 bits of the central's
+ * monotonic uptime. A peripheral derives its shared animation-clock offset from
+ * it (see kp_rgb_clock_ms). Deliberately not persisted: the handler returns
+ * before the kp_rgb_save_state() the other commands end with. */
+#define RGB_CLOCK_CMD 0x103
+
 /* A "mapping" entry is one of two things:
  *
  *   - a plain integer N  -> the LED sits under key position N in the

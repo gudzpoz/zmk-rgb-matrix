@@ -11,6 +11,7 @@
 
 #include <drivers/behavior.h>
 #include <zephyr/device.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
@@ -619,6 +620,12 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
   case RGB_OVL_STATE_CMD:
     kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(binding->param2),
                             RGB_OVL_STATE_BITS(binding->param2));
+    return 0;
+  case RGB_CLOCK_CMD:
+    /* uint32 subtraction then an int32 cast is exact modulo 2^32; valid while
+     * the true offset is under 2^31 ms. */
+    kp_rgb_set_clock_offset(
+        (int32_t)(binding->param2 - (uint32_t)k_uptime_get()));
     return 0;
   default:
     return -ENOTSUP;

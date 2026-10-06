@@ -137,6 +137,10 @@ static uint64_t kp_rgb_refresh_token;
 static bool kp_rgb_refresh_pending;
 static int kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
 
+/* shared - local, in ms; 0 on the central/standalone. Written by the split
+ * command handler, read once per render pass. */
+static atomic_t kp_rgb_clock_offset_ms;
+
 /* A half with no strip renders nothing, but the central-only overlay and split
  * machinery still runs. */
 static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
@@ -168,6 +172,15 @@ static bool kp_rgb_logical_on_locked(void) {
 
 void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
 void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
+
+uint32_t kp_rgb_clock_ms(void) {
+  return (uint32_t)k_uptime_get() +
+         (uint32_t)(int32_t)atomic_get(&kp_rgb_clock_offset_ms);
+}
+
+void kp_rgb_set_clock_offset(int32_t offset_ms) {
+  atomic_set(&kp_rgb_clock_offset_ms, (atomic_val_t)offset_ms);
+}
 
 /* The lock is never held across flash I/O. Bound the wait so a stuck holder
  * warns instead of hanging the queue. */
@@ -419,7 +432,8 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
         .count = KP_LED_COUNT,
         .coords = kp_led_coords,
         .pixels = scene,
-        .now_ms = now_ms,
+        .local_ms = now_ms,
+        .clock_ms = kp_rgb_clock_ms(),
         .board_length = kp_rgb_board_length,
         .board_height = kp_rgb_board_height,
         .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
@@ -621,6 +635,7 @@ void kp_rgb_reconcile_power_locked(void) {
     kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
     kp_rgb_output_urgent_black = false;
     kp_rgb_each_scene(kp_rgb_restart_clock, 0);
+    kp_rgb_each_scene(kp_rgb_mark_reset, 0);
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_dirty = true;
     kp_rgb_refresh_pending = true;

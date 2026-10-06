@@ -70,7 +70,7 @@ static bool kp_eff_heatmap_render(const struct device *dev,
   struct kp_eff_heatmap_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
 
-  int64_t end_ms = MAX(f->now_ms, 0);
+  int64_t end_ms = MAX(f->local_ms, 0);
   int64_t cursor = end_ms - (int64_t)MIN((uint64_t)end_ms, f->elapsed_ms);
   for (size_t i = 0; i < data->pending_count; i++) {
     const struct kp_rgb_key_event *ev = &data->pending[i];

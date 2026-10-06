@@ -170,7 +170,7 @@ int main(void) {
     /* A terminal callback paints caller-cleared targets without touching other pixels. */
     kp_rgb_matrix_lock();
     size_t target=1;
-    struct kp_rgb_frame f={.count=KP_LED_COUNT,.targets=&target,.target_count=1,.pixels=scratch,.now_ms=now,.elapsed_ms=37};
+    struct kp_rgb_frame f={.count=KP_LED_COUNT,.targets=&target,.target_count=1,.pixels=scratch,.local_ms=now,.elapsed_ms=37};
     check_raw_elapsed=true;
     memset(scratch,0xa5,sizeof(scratch));
     scratch[target]=(struct led_rgb){0};

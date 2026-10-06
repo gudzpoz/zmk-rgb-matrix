@@ -95,7 +95,7 @@ struct kp_rgb_tuning { uint8_t max_brightness,idle_brightness; };
 struct kp_rgb_frame {
  size_t count; const size_t *targets; size_t target_count; struct led_rgb *scratch;
  const struct kp_rgb_coord *coords; struct led_rgb *pixels;
- int64_t now_ms; uint32_t elapsed_ms; uint16_t board_length,board_height; bool is_idle;
+ int64_t local_ms; uint32_t clock_ms; uint32_t elapsed_ms; uint16_t board_length,board_height; bool is_idle;
 };
 struct zmk_position_state_changed { uint32_t position; bool state; int64_t timestamp; };
 struct kp_rgb_key_event { uint32_t position; bool pressed; int64_t timestamp_ms; };
@@ -204,6 +204,7 @@ static atomic_t setter_entered,setter_done;
 #endif
 static uint32_t rendered_elapsed;
 static int64_t k_uptime_get(void) { return now; }
+static uint32_t kp_rgb_clock_ms(void) { return (uint32_t)now; }
 static bool k_is_in_isr(void) { return isr; }
 #define ZMK_ACTIVITY_ACTIVE 0
 static int zmk_activity_get_state(void) { return host_activity_state; }

@@ -20,7 +20,7 @@ MOCKS = r'''
 #include <string.h>
 
 struct kp_rgb_key_event { uint32_t position; bool pressed; int64_t timestamp_ms; };
-struct kp_rgb_frame { int64_t now_ms; uint32_t elapsed_ms; int marker; };
+struct kp_rgb_frame { int64_t local_ms; uint32_t elapsed_ms; int marker; };
 struct device { void *data; const void *config; const void *api; };
 struct kp_rgb_effect_callbacks {
     bool (*render)(const struct device *, const struct kp_rgb_frame *);
@@ -92,7 +92,7 @@ int main(void) {
     struct kp_rgb_effect_instance b = KP_RGB_EFFECT_INSTANCE_INIT(&device_b);
     struct kp_rgb_effect_instance optional = KP_RGB_EFFECT_INSTANCE_INIT(&device_optional);
     struct kp_rgb_key_event event = {.position = 17, .pressed = true};
-    struct kp_rgb_frame frame = {.now_ms = 100, .marker = 42};
+    struct kp_rgb_frame frame = {.local_ms = 100, .marker = 42};
     expected_dev = &device_a;
 
     /* An inactive false sample is inert; first activation resets before activate. */
@@ -118,60 +118,60 @@ int main(void) {
     /* Explicit reset preserves activity and timestamp/state-independent params. */
     kp_rgb_effect_instance_set_active(&a, true, 20);
     animation_result = true;
-    frame.now_ms = 100;
+    frame.local_ms = 100;
     assert(kp_rgb_effect_instance_render(&a, &frame));
     assert(elapsed_seen == 0 && a.state.last_render_ms == 100);
-    frame.now_ms = 140;
+    frame.local_ms = 140;
     assert(kp_rgb_effect_instance_render(&a, &frame));
     assert(elapsed_seen == 40);
     kp_rgb_effect_instance_reset(&a, 141);
     assert(a.state.active && a.state.initialized && !a.state.animating);
     assert(reset_count == 2 && reset_time == 141);
-    frame.now_ms = 200;
+    frame.local_ms = 200;
     assert(kp_rgb_effect_instance_render(&a, &frame) && elapsed_seen == 0);
     animation_result = false;
-    frame.now_ms = 220;
+    frame.local_ms = 220;
     assert(!kp_rgb_effect_instance_render(&a, &frame));
     animation_result = true;
-    frame.now_ms = 1000;
+    frame.local_ms = 1000;
     assert(kp_rgb_effect_instance_render(&a, &frame) && elapsed_seen == 0);
-    frame.now_ms = 990;
+    frame.local_ms = 990;
     assert(kp_rgb_effect_instance_render(&a, &frame) && elapsed_seen == 0);
 
     /* Duration subtraction saturates across the full signed timestamp range. */
-    frame.now_ms = INT64_MIN;
+    frame.local_ms = INT64_MIN;
     kp_rgb_effect_instance_reset(&a, INT64_MIN);
     assert(kp_rgb_effect_instance_render(&a, &frame) && elapsed_seen == 0);
-    frame.now_ms = INT64_MAX;
+    frame.local_ms = INT64_MAX;
     assert(kp_rgb_effect_instance_render(&a, &frame) && elapsed_seen == UINT32_MAX);
 
     /* Restart after a coalesced owner pause affects an unrendered child too. */
-    frame.now_ms = 5;
+    frame.local_ms = 5;
     kp_rgb_effect_instance_render(&a, &frame);
     assert(elapsed_seen == 0);
-    frame.now_ms = 15;
+    frame.local_ms = 15;
     kp_rgb_effect_instance_render(&a, &frame);
     assert(elapsed_seen == 10);
     kp_rgb_effect_instance_restart_clock(&a);
-    frame.now_ms = 500;
+    frame.local_ms = 500;
     kp_rgb_effect_instance_render(&a, &frame);
     assert(elapsed_seen == 0);
 
     /* Child clocks are independent even when both use the same callback table. */
     expected_dev = &device_b;
     kp_rgb_effect_instance_set_active(&b, true, 0);
-    frame.now_ms = 20;
+    frame.local_ms = 20;
     kp_rgb_effect_instance_render(&b, &frame);
     assert(elapsed_seen == 0);
-    frame.now_ms = 30;
+    frame.local_ms = 30;
     kp_rgb_effect_instance_render(&b, &frame);
     assert(elapsed_seen == 10);
     kp_rgb_effect_instance_restart_clock(&b); /* Child b was skipped during the pause. */
-    frame.now_ms = 500;
+    frame.local_ms = 500;
     kp_rgb_effect_instance_render(&b, &frame);
     assert(elapsed_seen == 0);
     expected_dev = &device_a;
-    frame.now_ms = 510;
+    frame.local_ms = 510;
     kp_rgb_effect_instance_render(&a, &frame);
     assert(elapsed_seen == 10);
 

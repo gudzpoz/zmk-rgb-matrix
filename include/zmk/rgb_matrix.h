@@ -99,11 +99,19 @@ struct kp_rgb_frame {
    * pixels, with unspecified contents. NULL in effect callbacks. */
   struct led_rgb *scratch;
 
-  /* One monotonic uptime shared by this worker pass. */
-  int64_t now_ms;
-  /* Active animation time since this participant's previous render, saturated at
-   * UINT32_MAX. Zero on first paint, resume and after render returned false. */
+  /* This half's own monotonic uptime for this worker pass. Different on each
+   * split half; use it for local effects, never for split-synchronized phase. */
+  int64_t local_ms;
+  /* Split-shared animation clock, wrapping after ~49.7 days. Equal on both
+   * halves within link latency, so `clock_ms % period` is the same phase on each
+   * half regardless of render cadence or pauses. Use it for continuous effects
+   * that must stay in step across the split. */
+  uint32_t clock_ms;
+  /* Local time since this participant's previous render, saturated at
+   * UINT32_MAX. Zero on first paint, resume and after render returned false.
+   * For stochastic or event-anchored effects; do not use it for split phase. */
   uint32_t elapsed_ms;
+
   /* Longest edge of this half's LEDs, in layout units (never 0). */
   uint16_t board_length;
   /* Vertical extent of this half's LEDs (max y - min y), in layout units
@@ -142,11 +150,12 @@ struct kp_rgb_key_event {
  * capture time. Queue overflow or output suppression may discard either half of
  * a key pair.
  *
- * For engine-managed participants, reset runs before first activation and on explicit
- * RGB reset; preserve user parameters. set_active runs only on sampled activity
- * changes, before input. Owners choose child callback delivery and must satisfy the
- * child's initialization and timing contracts. Clearing temporary feedback on
- * active=false is recommended, not required; brief hide/show transitions may coalesce. */
+ * For engine-managed participants, reset runs before first activation, on
+ * explicit RGB reset, and when a paused half resumes; preserve user parameters.
+ * set_active runs only on sampled activity changes, before input. Owners choose
+ * child callback delivery and must satisfy the child's initialization and timing
+ * contracts. Clearing temporary feedback on active=false is recommended, not
+ * required; brief hide/show transitions may coalesce. */
 typedef bool (*rgb_matrix_effect_render_callback_t)(
     const struct device *dev, const struct kp_rgb_frame *frame);
 typedef bool (*rgb_matrix_effect_event_callback_t)(

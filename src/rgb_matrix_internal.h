@@ -77,6 +77,12 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
+/* Split-shared animation clock: local uptime plus the peripheral offset, in a
+ * wrapping uint32_t. The offset is 0 on the central/standalone half. */
+uint32_t kp_rgb_clock_ms(void);
+/* Set the offset a peripheral derived from RGB_CLOCK_CMD; any context. */
+void kp_rgb_set_clock_offset(int32_t offset_ms);
+
 void kp_rgb_conditions_request_refresh(uint64_t token);
 void kp_rgb_conditions_refreshed(uint64_t token);
 

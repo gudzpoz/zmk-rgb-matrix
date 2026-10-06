@@ -37,7 +37,6 @@ struct kp_eff_rainbow_config {
 
 struct kp_eff_rainbow_data {
   struct kp_rgb_effect_common_data common;
-  uint32_t phase_ms;
 };
 
 
@@ -46,8 +45,7 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   struct kp_eff_rainbow_data *data = dev->data;
   const struct kp_eff_rainbow_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
-  data->phase_ms = phase;
+  uint32_t phase = f->clock_ms % period;
   uint32_t phase01 = phase * 65536u / period;
   uint16_t bl = MAX(f->board_length, 1u);
   uint16_t bh = MAX(f->board_height, 1u);
@@ -156,15 +154,8 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   return true;
 }
 
-static void kp_eff_rainbow_reset(const struct device *dev, int64_t now_ms) {
-  ARG_UNUSED(now_ms);
-  struct kp_eff_rainbow_data *data = dev->data;
-  data->phase_ms = 0;
-}
-
 static const struct kp_rgb_effect_callbacks kp_eff_rainbow_callbacks = {
     .render = kp_eff_rainbow_render,
-    .reset = kp_eff_rainbow_reset,
 };
 
 #define KP_EFF_RAINBOW_DEFINE(inst)                                            \

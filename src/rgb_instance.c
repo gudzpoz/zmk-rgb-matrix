@@ -63,12 +63,12 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 
   struct kp_rgb_frame local = *frame;
   local.elapsed_ms = 0;
-  if (state->animating && frame->now_ms > state->last_render_ms) {
-    uint64_t elapsed = (uint64_t)frame->now_ms - (uint64_t)state->last_render_ms;
+  if (state->animating && frame->local_ms > state->last_render_ms) {
+    uint64_t elapsed = (uint64_t)frame->local_ms - (uint64_t)state->last_render_ms;
     local.elapsed_ms = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
   }
 
-  state->last_render_ms = frame->now_ms;
+  state->last_render_ms = frame->local_ms;
   state->animating = callbacks->render(dev, &local);
   return state->animating;
 }

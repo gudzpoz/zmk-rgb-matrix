@@ -76,7 +76,7 @@ static bool kp_rgb_pair_render(const struct device *dev,
   child.scratch = NULL;
   memset(child.pixels, 0, child.count * sizeof(*child.pixels));
   bool animating;
-  if ((frame->now_ms / 500) & 1) {
+  if ((frame->local_ms / 500) & 1) {
     child.targets = kp_rgb_pair_second_targets;
     child.target_count = second_count;
     animating = kp_rgb_effect_instance_render(&data->second, &child);

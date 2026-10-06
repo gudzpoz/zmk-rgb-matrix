@@ -74,8 +74,8 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
       continue;
     }
 
-    uint64_t age = f->now_ms > trigger->start_ms
-                       ? (uint64_t)f->now_ms - (uint64_t)trigger->start_ms
+    uint64_t age = f->local_ms > trigger->start_ms
+                       ? (uint64_t)f->local_ms - (uint64_t)trigger->start_ms
                        : 0;
     if (age >= period) {
       trigger->used = false;

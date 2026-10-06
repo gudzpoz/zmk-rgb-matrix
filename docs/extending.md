@@ -154,7 +154,7 @@ struct kp_eff_mything_data {
   /* must be first, named exactly as "common" */
   struct kp_rgb_effect_common_data common;
   /* your own state */
-  uint32_t phase_ms;
+  uint16_t radius;
 };
 ```
 
@@ -181,9 +181,22 @@ Among those, `render` is required and all others are optional.
 
 `render(dev, frame)` is called by the engine to paint the effect while it is
 active. All the information that a typical effect should need (LED positions
-`coords`, timing `elapsed_ms`, etc.), as well as the output RGB array
-(`pixels`), are all in the `const struct kp_rgb_frame *` pointer.
+`coords`, timing, etc.), as well as the output RGB array (`pixels`), are all in
+the `const struct kp_rgb_frame *` pointer.
 
+> There are a few time-related fields in `field`: `local_ms`, `clock_ms` and
+> `elapsed_ms`. `local_ms` is a monotonically increasing local uptime. But if
+> you want your effect to synchronize between split halves, you should make sure
+> that a periodic effect takes its phase from `frame->clock_ms`, which is
+> synchronized across the split halves:
+>
+> ```c
+> uint32_t phase = f->clock_ms % kp_rgb_effect_period(dev);
+> ```
+>
+> Note that `clock_ms` wraps after about 49.7 days, where a one-frame glitch
+> might happen.
+>
 > In some rare cases, `elapsed_ms` can be zero, so be mindful of zero divisions.
 
 However, there are an extra level of indirection here to help with overlay
@@ -196,15 +209,15 @@ static bool kp_eff_mything_render(const struct device *dev,
   const struct kp_eff_mything_config *cfg = dev->config;
   struct kp_eff_mything_data *data = dev->data;
   uint32_t period = kp_rgb_effect_period(dev);
+  uint32_t phase = f->clock_ms % period;
 
   for (size_t target = 0; target < f->target_count; target++) {
     size_t i = f->targets[target];
     struct kp_rgb_hsb hsb = data->common.color;
-    /* ... derive hsb from f->coords[i] and data->phase_ms ... */
+    /* ... derive hsb from f->coords[i] and phase ... */
     f->pixels[i] = kp_rgb_hsb_to_rgb(hsb);
   }
 
-  data->phase_ms = ((uint64_t)data->phase_ms + f->elapsed_ms) % period;
   return true;
 }
 ```
@@ -290,15 +303,14 @@ The engine calls `set_active(true)` before input delivery or then the effect
 becomes visible, and, after that, `set_active(false)` whenever the effect
 becomes completely invisible (either the user switches to another effect, or a
 fully opaque overlay is now overlaid upon the effect). `reset` can be called
-pretty much any time (maybe during synchronization or upon user requests), but a
-call is guaranteed before first `set_active(true)` call.
+pretty much any time (on an explicit RGB reset, or when a half resumes from a
+pause), but a call is guaranteed before the first `set_active(true)` call.
 
 We don't enforce what you do in these callbacks, but here are some
 recommendations if you want your animations smoother:
 
-- For `reset`: reset your animtation phase or state, so that after two halves
-  (in a split keyboard) call `reset` at the same time, the animation will be in
-  sync.
+- For `reset`: clear transient or event-anchored state (key feedback, random
+  targets).
 - For `set_active(false)`: clear keypress feedbacks, unless you want your user
   to see their keypresses from an hour ago still linger when they switch back
   from another effect.

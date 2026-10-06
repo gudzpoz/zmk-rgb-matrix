@@ -75,6 +75,7 @@ struct kp_rgb_sync_source {
 
 static struct k_work_delayable kp_rgb_sync_poll;
 static struct k_work_delayable kp_rgb_sync_step;
+static struct k_work_delayable kp_rgb_sync_clock;
 static struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
 
@@ -147,6 +148,9 @@ static void kp_rgb_sync_refresh(void) {
        * window. */
       st->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
       LOG_INF("Queued for source %u", (uint32_t)s);
+      /* Align the shared clock once discovery has settled as well. */
+      k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+                                  K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS));
     } else if (!present[s] && st->seen) {
       st->seen = false;
       st->pending = false; /* abort in flight; a reconnect re-syncs */
@@ -188,6 +192,34 @@ static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
     return false;
   }
   return true;
+}
+
+/* Pushes the central's shared animation clock to every connected source. Kept
+ * out of the snapshot state machine so it keeps running while a snapshot is
+ * stalled or retrying; a dropped send self-heals on the next period. */
+static void kp_rgb_sync_send_clock(void) {
+  const struct zmk_split_transport_central *t = kp_rgb_sync_pick_transport();
+  if (t == NULL) {
+    return;
+  }
+  uint8_t ids[KP_RGB_SYNC_SOURCES];
+  int count = t->api->get_available_source_ids(ids);
+  if (count < 0) {
+    return;
+  }
+  uint32_t now = (uint32_t)k_uptime_get();
+  for (int i = 0; i < count; i++) {
+    if (ids[i] < KP_RGB_SYNC_SOURCES) {
+      (void)kp_rgb_sync_send(ids[i], RGB_CLOCK_CMD, now);
+    }
+  }
+}
+
+static void kp_rgb_sync_clock_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  kp_rgb_sync_send_clock();
+  k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+                              K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
 }
 
 /* Emits at most one wire command. */
@@ -318,11 +350,14 @@ static void kp_rgb_sync_poll_handler(struct k_work *work) {
 static int kp_rgb_split_sync_init(void) {
   k_work_init_delayable(&kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
   k_work_init_delayable(&kp_rgb_sync_step, kp_rgb_sync_step_handler);
+  k_work_init_delayable(&kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
   /* The low-priority queue is already running (started at POST_KERNEL). The
    * first poll is delayed rather than immediate to stay clear of the
    * settings_load() that runs at the top of main(). */
   k_work_schedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_poll,
                             K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
+  k_work_schedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+                            K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
   return 0;
 }
 SYS_INIT(kp_rgb_split_sync_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

@@ -122,7 +122,7 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
 #else
   struct kp_eff_reactive_data *data = dev->data;
   const struct kp_eff_reactive_config *cfg = dev->config;
-  int64_t end_ms = MAX(f->now_ms, 0);
+  int64_t end_ms = MAX(f->local_ms, 0);
   int64_t cursor = end_ms - (int64_t)MIN((uint64_t)end_ms, f->elapsed_ms);
   for (size_t i = 0; i < data->pending_count; i++) {
     const struct kp_rgb_key_event *ev = &data->pending[i];

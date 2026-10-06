@@ -32,10 +32,7 @@ struct kp_eff_band_config {
 
 struct kp_eff_band_data {
   struct kp_rgb_effect_common_data common;
-  uint32_t phase_ms;
 };
-
-
 
 /* Spatial coordinate of an LED in [0, 65536) along the chosen shape. */
 static uint32_t kp_band_spatial(kp_band_shape_t shape, uint16_t x, uint16_t y, uint16_t bl,
@@ -60,8 +57,7 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
   struct kp_eff_band_data *data = dev->data;
   const struct kp_eff_band_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
-  uint32_t phase = (uint32_t)(((uint64_t)data->phase_ms + f->elapsed_ms) % period);
-  data->phase_ms = phase;
+  uint32_t phase = f->clock_ms % period;
   uint32_t phase01 = phase * 65536u / period;
   /* The spiral wraps twice (angle + radius), so halve its phase to keep each
    * front at a single-wrap rate. */
@@ -102,15 +98,8 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
   return true;
 }
 
-static void kp_eff_band_reset(const struct device *dev, int64_t now_ms) {
-  ARG_UNUSED(now_ms);
-  struct kp_eff_band_data *data = dev->data;
-  data->phase_ms = 0;
-}
-
 static const struct kp_rgb_effect_callbacks kp_eff_band_callbacks = {
     .render = kp_eff_band_render,
-    .reset = kp_eff_band_reset,
 };
 
 #define KP_EFF_BAND_DEFINE(inst)                                               \
