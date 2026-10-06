@@ -168,7 +168,67 @@ int main(void) {
     assert(deletes == 3 && !strcmp(deleted_path, "keypaw/rgb_matrix/state/effects/b"));
     assert(kp_rgb_selected_effect() == 0 && kp_rgb_controller.brightness == 70);
     assert(kp_rgb_controller.state.user_on && data[0].color.h == 10 && !held);
-    puts("singleton settings namespace/load/save/reset passed");
+
+    /* Identity is the persist-id or node name, never the registry ordinal: stored
+     * state must follow its effect across reordering, removal and addition. */
+    struct kp_rgb_effect_common_data idata[3] = {0};
+    static const struct kp_rgb_effect_common_config icfg[3] = {
+        {.persist_id = "fx_solid", .persist_parameters = true},
+        {.persist_id = "fx_reactive_gradient", .persist_parameters = true},
+        {.persist_id = "fx_starlight_smooth", .persist_parameters = true},
+    };
+    const struct device idev[3] = {{&idata[0], "a", &icfg[0]},
+                                   {&idata[1], "b", &icfg[1]},
+                                   {&idata[2], "c", &icfg[2]}};
+    const struct device *ieffects[3] = {&idev[0], &idev[1], &idev[2]};
+    static const struct kp_rgb_effect_defaults idefaults[3] = {
+        {{1, 10, 100}, 101}, {{2, 20, 100}, 202}, {{3, 30, 100}, 303}};
+    kp_rgb_controller.effects = ieffects;
+    kp_rgb_controller.effect_count = 3;
+    kp_rgb_controller.effect_defaults = idefaults;
+    kp_rgb_controller.initial_effect = 0;
+    assert(kp_rgb_apply_defaults() == 0);
+
+    /* A node name longer than the old 16-byte id survives intact. */
+    struct kp_rgb_persist_blob stored;
+    kp_rgb_persist_pack(true, 40, "fx_starlight_smooth", &stored);
+    assert(!strcmp(stored.selected_id, "fx_starlight_smooth"));
+    assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
+    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+
+    struct kp_rgb_persist_effect ident = {.duration_ms = 777, .h = 111, .s = 22};
+    assert(registered_set("state/effects/fx_solid", sizeof(ident), read_blob, &ident) == 0);
+    assert(idata[0].color.h == 111 && idata[0].duration_ms == 777);
+    ident.h = 222;
+    assert(registered_set("state/effects/fx_reactive_gradient", sizeof(ident), read_blob,
+                          &ident) == 0);
+    assert(idata[1].color.h == 222 && idata[1].duration_ms == 777);
+    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+    assert(idata[2].color.h == 3 && idata[2].duration_ms == 303);
+
+    /* Reordering the registry re-attaches each id to its effect, not its slot. */
+    const struct device *reordered[3] = {&idev[2], &idev[0], &idev[1]};
+    static const struct kp_rgb_effect_defaults reordered_presets[3] = {
+        {{3, 30, 100}, 303}, {{1, 10, 100}, 101}, {{2, 20, 100}, 202}};
+    kp_rgb_controller.effects = reordered;
+    kp_rgb_controller.effect_defaults = reordered_presets;
+    assert(kp_rgb_apply_defaults() == 0);
+    assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
+    assert(kp_rgb_controller.state.active_fx == &idev[2]); /* fx_starlight_smooth now slot 0 */
+    ident.h = 333;
+    assert(registered_set("state/effects/fx_solid", sizeof(ident), read_blob, &ident) == 0);
+    assert(idata[0].color.h == 333); /* fx_solid moved to slot 1 */
+
+    /* A record for a removed effect is dropped; an added effect keeps defaults. */
+    ident.h = 44;
+    assert(registered_set("state/effects/fx_removed", sizeof(ident), read_blob, &ident) == 0);
+    assert(idata[2].color.h == 3 && idata[2].duration_ms == 303);
+
+    /* A stored selection for a removed effect leaves the current one alone. */
+    kp_rgb_persist_pack(true, 40, "fx_removed", &stored);
+    assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
+    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+    puts("singleton settings namespace/load/save/reset/identity passed");
     return 0;
 }
 '''

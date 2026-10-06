@@ -89,6 +89,21 @@ CASES = {
 &fx_solid { overlays = <&fixture_overlay>; };
 &fx_solid_v { overlays = <&fixture_overlay>; };
 '''),
+    "persist-id": (True, '''
+&fx_solid { persist-id = "solid_main"; };
+&fx_solid_v { persist-id = "solid_vertical"; };
+'''),
+    "persist-id-duplicate": (False, '''
+&fx_solid { persist-id = "duplicate"; };
+&fx_solid_v { persist-id = "duplicate"; };
+'''),
+    "persist-id-too-long": (False, '''
+&fx_solid { persist-id = "persist_id_that_is_far_beyond_the_storage_limit"; };
+'''),
+    "node-name-too-long": (False, '''
+&kprgb { fx_this_node_name_is_far_beyond_the_storage_limit {
+    compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
+'''),
 }
 
 
@@ -101,6 +116,9 @@ DIAGNOSTICS = {
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
     "duplicate-overlay": r"redeclaration of enumerator|redefinition of enumerator",
+    "persist-id-duplicate": r"redeclaration of enumerator|redefinition of enumerator",
+    "persist-id-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
+    "node-name-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
 }
 
 for effect in ("rain", "starlight"):

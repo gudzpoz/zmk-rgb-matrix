@@ -9,7 +9,7 @@
 /* One behavior's persisted RGB state. The format is intentionally separate from
  * devicetree declaration order; bump the version when this contract changes. */
 #define KP_RGB_PERSIST_VERSION 2
-#define KP_RGB_PERSIST_MAX_ID_LENGTH 16
+#define KP_RGB_PERSIST_MAX_ID_LENGTH 32
 
 struct kp_rgb_persist_effect {
   uint16_t duration_ms;

@@ -37,16 +37,20 @@ BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_CONTROLLER)) <= 9,
               (DT_STRING_TOKEN(node_id, persist_id)),                          \
               (DT_NODE_FULL_NAME_TOKEN(node_id)))
 
+/* The persisted identity (persist-id, else the node name) must fit the settings
+ * record and per-effect key buffers; reject an over-long one at build time. */
 #define KP_RGB_EFFECT_ID_LENGTH_ASSERT(node_id)                                \
-  CONCAT(kp_rgb_id_len_, DT_DEP_ORD(node_id)) =                                \
-      (sizeof(DT_PROP_OR(node_id, persist_id, DT_NODE_FULL_NAME(node_id))) <=  \
-       KP_RGB_PERSIST_MAX_ID_LENGTH),
+  BUILD_ASSERT(                                                                \
+      sizeof(DT_PROP_OR(node_id, persist_id, DT_NODE_FULL_NAME(node_id))) <=   \
+          KP_RGB_PERSIST_MAX_ID_LENGTH,                                        \
+      "RGB effect persist-id or node name exceeds "                            \
+      "KP_RGB_PERSIST_MAX_ID_LENGTH");
 
 #define KP_RGB_PERSIST_UNIQUE(node_id)                                         \
   CONCAT(kp_rgb_persist_id_, KP_RGB_EFFECT_ID_TOKEN(node_id)),
 
+DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_ID_LENGTH_ASSERT)
 enum {
-  DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_ID_LENGTH_ASSERT)
   DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_PERSIST_UNIQUE)
   __kp_rgb_persist_id_end,
 };
