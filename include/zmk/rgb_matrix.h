@@ -128,15 +128,19 @@ struct kp_rgb_key_event {
  * synchronous event dispatch. Owners may delegate to independently owned children;
  * do not invoke engine scene rendering recursively.
  *
- * Paint only targets and leave other pixels untouched, before controller brightness.
- * Effect targets start black; overlay targets contain earlier composition. Overlays
- * apply their opacity as blend strength. Simulation and geometry remain full-strip.
- * Return true from render while another timed update is needed; return false only
- * after painting a valid static/terminal image. False does not deactivate the
- * participant. Settled participants must still paint on requested composition.
- * Return true from on_event when the event requires a repaint. Input is copied,
- * best effort, and routed to participants active at delivery, not capture time.
- * Queue overflow or output suppression may discard either half of a key pair.
+ * Paint only targets and leave other pixels untouched, before controller
+ * brightness. Effect targets start black; overlay targets contain earlier
+ * composition. Overlays apply their opacity as blend strength. Simulation and
+ * geometry remain full-strip. Return true from render while another timed
+ * update is needed; return false only after painting a valid static/terminal
+ * image. False does not deactivate the participant. Settled participants must
+ * still paint on requested composition, but the engine may skip a settled
+ * participant that sits below a still-animating one on later animation frames;
+ * invalidate or return true from on_event if its output can change while
+ * settled. Return true from on_event when the event requires a repaint. Input
+ * is copied, best effort, and routed to participants active at delivery, not
+ * capture time. Queue overflow or output suppression may discard either half of
+ * a key pair.
  *
  * For engine-managed participants, reset runs before first activation and on explicit
  * RGB reset; preserve user parameters. set_active runs only on sampled activity

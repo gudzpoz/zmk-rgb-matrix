@@ -180,6 +180,9 @@ static atomic_t kp_rgb_output_allowed,kp_rgb_inhibited;
 static bool kp_rgb_output_ready;
 static uint64_t now;
 static struct led_rgb scene[KP_LED_COUNT],scratch[KP_LED_COUNT];
+static struct led_rgb kp_rgb_prefix[KP_LED_COUNT];
+static size_t kp_rgb_prefix_len;
+static bool kp_rgb_prefix_valid;
 static const size_t kp_rgb_all_targets[KP_LED_COUNT ? KP_LED_COUNT : 1]={0
 #if KP_LED_COUNT > 1
 ,1
@@ -319,7 +322,7 @@ FUNCTIONS = [
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_deactivate_scene", "kp_rgb_reset_scene", "kp_rgb_activate_scene",
     "kp_rgb_schedule_locked", "kp_rgb_request_output_pass", "kp_rgb_effect_invalidate", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
     "kp_rgb_finish_output_pass", "kp_rgb_conditions_refreshed",
-    "kp_last_covering_overlay", "kp_render_overlays", "kp_rgb_scene_pass_locked",
+    "kp_last_covering_overlay", "kp_rgb_try_cache_prefix", "kp_rgb_scene_pass_locked",
     "kp_rgb_request_black_locked", "kp_rgb_output_deadline_locked",
     "kp_rgb_attempt_output_locked", "kp_rgb_output_handler",
     "kp_rgb_reconcile_power_locked",

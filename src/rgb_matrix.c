@@ -104,6 +104,13 @@ static const struct device *const strip =
     COND_CODE_1(KP_RGB_HAS_STRIP, (DEVICE_DT_GET(KP_RGB_STRIP)), (NULL));
 static struct led_rgb scene[KP_LED_COUNT];
 static struct led_rgb scratch[KP_LED_COUNT];
+
+/* Composition cache through the last leading settled participant
+   (pre-brightness). */
+static struct led_rgb kp_rgb_prefix[KP_LED_COUNT];
+static size_t kp_rgb_prefix_len;
+static bool kp_rgb_prefix_valid;
+
 static K_MUTEX_DEFINE(kp_rgb_lock);
 static atomic_t kp_rgb_output_allowed;
 static atomic_t kp_rgb_inhibited;
@@ -358,27 +365,13 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
   return last;
 }
 
-static bool kp_render_overlays(const struct kp_rgb_frame *frame,
-                               const struct device *const *overlays,
-                               size_t count, size_t first) {
-  bool animating = false;
-  for (size_t i = first; i < count; i++) {
-    const struct device *dev = overlays[i];
-    if (dev == NULL) {
-      continue;
-    }
-    const struct kp_rgb_overlay_api *ovl = dev->api;
-    if (!kp_rgb_overlay_gate(dev)) {
-      continue;
-    }
-    struct kp_rgb_frame local = *frame;
-    local.targets = kp_rgb_overlay_targets(dev);
-    local.target_count = kp_rgb_overlay_target_count(dev);
-    local.scratch = scratch;
-    animating |= kp_rgb_callbacks_render(
-        dev, ovl->callbacks, &kp_rgb_overlay_scene(dev)->state, &local);
+static inline void kp_rgb_try_cache_prefix(const struct kp_rgb_frame *local,
+                                           bool animating,
+                                           size_t *prefix_count) {
+  if (!animating) {
+    memcpy(kp_rgb_prefix, local->pixels, sizeof(kp_rgb_prefix));
+    (*prefix_count)++;
   }
-  return animating;
 }
 
 static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
@@ -411,7 +404,15 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   }
 
   if (allowed && (paint || kp_rgb_scene_dirty || input_changed)) {
-    memset(scene, 0, sizeof(scene));
+    bool reuse = kp_rgb_prefix_valid && !kp_rgb_scene_dirty && !input_changed;
+    size_t skip = reuse ? kp_rgb_prefix_len : 0;
+    size_t prefix_count = 0;
+    if (reuse) {
+      memcpy(scene, kp_rgb_prefix, sizeof(scene));
+    } else {
+      memset(scene, 0, sizeof(scene));
+    }
+
     struct kp_rgb_frame frame = {
         .targets = kp_rgb_all_targets,
         .target_count = KP_LED_COUNT,
@@ -425,12 +426,50 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
     };
     kp_rgb_scene_animating = false;
     if (fx != NULL) {
-      const struct kp_rgb_effect_api *api = fx->api;
-      kp_rgb_scene_animating |= kp_rgb_callbacks_render(
-          fx, api->callbacks, &kp_rgb_effect_scene(fx)->state, &frame);
-      kp_rgb_scene_animating |= kp_render_overlays(
-          &frame, overlays, overlay_count, first == SIZE_MAX ? 0 : first);
+      /* The base is a participant only when no covering overlay hides it. */
+      if (first == SIZE_MAX) {
+        if (skip > 0) {
+          skip--;
+        } else {
+          const struct kp_rgb_effect_api *api = fx->api;
+          kp_rgb_scene_animating |= kp_rgb_callbacks_render(
+              fx, api->callbacks, &kp_rgb_effect_scene(fx)->state, &frame);
+          if (!reuse) {
+            kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating,
+                                    &prefix_count);
+          }
+        }
+      }
+
+      frame.scratch = scratch;
+      for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
+        const struct device *dev = overlays[i];
+        if (dev == NULL) {
+          continue;
+        }
+        if (!kp_rgb_overlay_gate(dev)) {
+          continue;
+        }
+        if (skip > 0) {
+          skip--;
+          continue;
+        }
+        frame.targets = kp_rgb_overlay_targets(dev);
+        frame.target_count = kp_rgb_overlay_target_count(dev);
+
+        const struct kp_rgb_overlay_api *ovl = dev->api;
+        kp_rgb_scene_animating |= kp_rgb_callbacks_render(
+            dev, ovl->callbacks, &kp_rgb_overlay_scene(dev)->state, &frame);
+        if (!reuse) {
+          kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating, &prefix_count);
+        }
+      }
     }
+    if (!reuse) {
+      kp_rgb_prefix_len = prefix_count;
+      kp_rgb_prefix_valid = prefix_count > 0;
+    }
+
     uint8_t cap = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
                                 : kp_rgb_controller.tuning.max_brightness;
     uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_controller.brightness) /

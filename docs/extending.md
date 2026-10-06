@@ -236,6 +236,12 @@ responsibility to notify the engine when re-rendering is need, through
 `kp_rgb_effect_invalidate(dev)` or the return value of the `on_event` callback
 below.
 
+While an animation is running, the engine caches the composed result of the
+settled layers at the bottom of the scene and re-renders only the layers above
+the first animating one. A settled participant can therefore be skipped on later
+animation frames; it is still rendered on every requested composition (a flush,
+input, or scene change), and it must invalidate whenever its output changes.
+
 > Here's three examples of typical usages of the different return values:
 >
 > 1. The `keypaw,rgb-matrix-solid` effect: fully static. Its `render` always
