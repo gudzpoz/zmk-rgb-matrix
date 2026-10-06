@@ -119,6 +119,12 @@ config KEYPAW_RGB_SPLIT_SYNC
       period, and the user on/off intent to a peripheral whenever it newly
       connects; the peripheral's own command handler applies and persists them.
 
+      The forward of a switch carries only the effect index, so the peripheral
+      would apply the new effect with its own colour and period. This also
+      re-pushes the full snapshot when the active effect changes to one the
+      peripheral has not received, keeping only the marker of the last effect
+      pushed, so effects never selected on the central are still not synced.
+
       Built for the split central only. The trigger polls the transport's in-RAM
       connected-source list, which transmits nothing until a peripheral appears.
 

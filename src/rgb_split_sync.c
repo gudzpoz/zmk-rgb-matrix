@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: MIT
  *
  * Split RGB state sync: pushes the selected effect (index, colour, period) and
- * the user on/off intent to a peripheral when it newly appears, so a peripheral
- * that was off during a settings change does not keep its stale flash defaults.
- * A send that fails is retried with bounded backoff while the peripheral stays
- * present.
+ * the user on/off intent to a peripheral when it newly appears, and again when
+ * the active effect changes to one it has not received. The second push covers
+ * the effect colour and period: the GLOBAL invocation only carries the index, so
+ * without it a peripheral renders a switched-to effect with its own stale
+ * parameters. A send that fails is retried with bounded backoff while the
+ * peripheral stays present.
  *
  * Central only; the trigger is a poll, as there is no central-side "peripheral
  * connected" event. See docs/development.md.
@@ -35,6 +37,7 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_SYNC_SOURCES MAX(ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT, 1)
+#define KP_RGB_SYNC_NO_EFFECT UINT16_MAX
 #define KP_RGB_SYNC_STEP_DELAY_MS 50
 #define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
@@ -60,6 +63,9 @@ struct kp_rgb_sync_source {
   uint16_t mask_word;  /* next overlay word to push this time round */
   int64_t ready_at;
   enum kp_rgb_sync_phase phase;
+  /* Last effect fully pushed to this source; KP_RGB_SYNC_NO_EFFECT until one
+   * completes. A change of active effect away from it re-queues a push. */
+  uint16_t synced_effect;
   /* Snapshot taken under kp_rgb_matrix_lock() at KP_RGB_SYNC_SELECT. */
   uint16_t effect_index;
   uint16_t duration_ms;
@@ -89,8 +95,9 @@ static const struct zmk_split_transport_central *kp_rgb_sync_pick_transport(void
   return NULL;
 }
 
-/* Samples the connected set, queues a sync for every source that newly appeared,
- * and abandons one that disappeared. Called from both handlers. */
+/* Samples the connected set, queues a sync for every source that newly appeared
+ * or whose active effect changed to one it has not received, and abandons one
+ * that disappeared. Called from both handlers. */
 static void kp_rgb_sync_refresh(void) {
   const struct zmk_split_transport_central *t = kp_rgb_sync_pick_transport();
 
@@ -102,6 +109,7 @@ static void kp_rgb_sync_refresh(void) {
       kp_rgb_sync_sources[i].seen = false;
       kp_rgb_sync_sources[i].pending = false;
       kp_rgb_sync_sources[i].retry_count = 0;
+      kp_rgb_sync_sources[i].synced_effect = KP_RGB_SYNC_NO_EFFECT;
     }
   }
 
@@ -120,6 +128,10 @@ static void kp_rgb_sync_refresh(void) {
     }
   }
 
+  kp_rgb_matrix_lock();
+  uint16_t active = (uint16_t)kp_rgb_controller.effect_index;
+  kp_rgb_matrix_unlock();
+
   int64_t now = k_uptime_get();
   for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
     struct kp_rgb_sync_source *st = &kp_rgb_sync_sources[s];
@@ -129,6 +141,7 @@ static void kp_rgb_sync_refresh(void) {
       st->retry_count = 0;
       st->phase = KP_RGB_SYNC_SELECT;
       st->mask_word = 0;
+      st->synced_effect = KP_RGB_SYNC_NO_EFFECT;
       /* A peripheral is marked connected before its GATT characteristics are
        * discovered, and the split worker silently drops commands in that
        * window. */
@@ -137,6 +150,16 @@ static void kp_rgb_sync_refresh(void) {
     } else if (!present[s] && st->seen) {
       st->seen = false;
       st->pending = false; /* abort in flight; a reconnect re-syncs */
+      st->synced_effect = KP_RGB_SYNC_NO_EFFECT;
+    } else if (present[s] && st->seen && !st->pending &&
+               st->synced_effect != active) {
+      /* Active effect changed to one this source has not received. */
+      st->pending = true;
+      st->retry_count = 0;
+      st->phase = KP_RGB_SYNC_SELECT;
+      st->mask_word = 0;
+      st->ready_at = now;
+      LOG_INF("Effect change queued for source %u", (uint32_t)s);
     }
   }
 }
@@ -267,6 +290,7 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
       continue; /* other sources still make progress */
     }
     st->pending = false;
+    st->synced_effect = st->effect_index;
   }
 
   if (next_ms >= 0) {
