@@ -399,6 +399,9 @@ int main(int argc, char **argv) {
 }
 '''
 
+# The `fixture()` helper shared by the other scenario suites.
+FIXTURE = TESTS[:TESTS.index("static void assert_pixels")]
+
 if __name__ == '__main__':
     run_tests(TESTS, scheduler=True, cases=CASES)
     run_tests(TESTS, scheduler=True, cases=("idle-policy",), auto_off_idle=False)

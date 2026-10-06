@@ -54,6 +54,7 @@ PRELUDE = r'''
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define KP_RGB_LOCK_RETRY_MS 1
+#define KP_RGB_BRT_MAX 100
 #define K_NO_WAIT 0
 #define K_MSEC(x) (x)
 #define CONFIG_KEYPAW_RGB_MATRIX_TICK_MS 16
@@ -123,8 +124,9 @@ struct kp_rgb_controller {
  uint16_t effect_index;
  struct { bool user_on; const struct device *active_fx; } state;
  struct kp_rgb_tuning tuning;
+ uint8_t brightness;
 };
-static struct kp_rgb_controller kp_rgb_controller={.tuning={100,100}};
+static struct kp_rgb_controller kp_rgb_controller={.tuning={100,100},.brightness=100};
 #define ctx kp_rgb_controller
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;

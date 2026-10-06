@@ -11,7 +11,7 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/util.h>
 
-#include <zmk/rgb_matrix.h>
+#include <zmk/rgb_color.h>
 #include <zmk/rgb_persist.h>
 
 #define KP_RGB_PERSIST_EFFECT_PATH_LEN                                         \

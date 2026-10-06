@@ -10,6 +10,8 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
+#include <string.h>
+
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_matrix_math.h>
 #include <zmk/rgb_persist.h>
@@ -174,14 +176,12 @@ ZTEST(kp_rgb_persist, rejects_wrong_version) {
 ZTEST(kp_rgb_persist, effect_range_check) {
   zassert_true(kp_rgb_persist_effect_valid(
       &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX,
-                                      .s = KP_RGB_SAT_MAX,
-                                      .b = KP_RGB_BRT_MAX}));
+                                      .s = KP_RGB_SAT_MAX}));
   zassert_false(kp_rgb_persist_effect_valid(
       &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX + 1}));
   zassert_false(kp_rgb_persist_effect_valid(
       &(struct kp_rgb_persist_effect){.s = KP_RGB_SAT_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.b = KP_RGB_BRT_MAX + 1}));
+  zassert_false(kp_rgb_persist_effect_valid(NULL));
 }
 
 ZTEST(kp_rgb_persist, duration_clamp) {
@@ -190,31 +190,45 @@ ZTEST(kp_rgb_persist, duration_clamp) {
   zassert_equal(kp_rgb_persist_clamp_duration(500, 100, 10000), 500);
 }
 
-ZTEST(kp_rgb_persist, pack_round_trip) {
-  const struct kp_rgb_persist_effect in[2] = {
-      {.duration_ms = 500, .h = 10, .s = 20, .b = 30},
-      {.duration_ms = 1000, .h = 40, .s = 50, .b = 60},
-  };
+ZTEST(kp_rgb_persist, pack_records_selection) {
   struct kp_rgb_persist_blob blob;
 
-  kp_rgb_persist_pack(7, true, in, 2, &blob);
+  kp_rgb_persist_pack(true, 88, "breathe", &blob);
   zassert_equal(blob.version, KP_RGB_PERSIST_VERSION);
-  zassert_equal(blob.selected_index, 7);
   zassert_equal(blob.user_on, 1);
-  zassert_equal(blob.effect_count, 2);
+  zassert_equal(blob.brightness, 88);
+  zassert_equal(blob.has_selected, 1);
+  zassert_str_equal(blob.selected_id, "breathe");
   zassert_true(kp_rgb_persist_size_ok(sizeof(blob)));
   zassert_true(kp_rgb_persist_version_ok(blob.version));
-  zassert_mem_equal(&blob.effects[0], &in[0], sizeof(in[0]));
-  zassert_mem_equal(&blob.effects[1], &in[1], sizeof(in[1]));
-  /* Unused slots stay zeroed. */
-  zassert_equal(blob.effects[2].duration_ms, 0);
-  zassert_equal(blob.effects[2].h, 0);
 
-  /* Over-long input is truncated to the registry cap, never overflowing. */
-  struct kp_rgb_persist_effect many[KP_RGB_PERSIST_MAX_EFFECTS + 4] = {0};
-  kp_rgb_persist_pack(0, false, many, ARRAY_SIZE(many), &blob);
-  zassert_equal(blob.effect_count, KP_RGB_PERSIST_MAX_EFFECTS);
+  /* A missing or empty id clears the selection rather than naming one. */
+  kp_rgb_persist_pack(false, 0, NULL, &blob);
   zassert_equal(blob.user_on, 0);
+  zassert_equal(blob.brightness, 0);
+  zassert_equal(blob.has_selected, 0);
+  zassert_equal(blob.selected_id[0], '\0');
+  kp_rgb_persist_pack(false, 0, "", &blob);
+  zassert_equal(blob.has_selected, 0);
+}
+
+ZTEST(kp_rgb_persist, pack_clamps_and_truncates) {
+  struct kp_rgb_persist_blob blob;
+
+  kp_rgb_persist_pack(true, 200, NULL, &blob);
+  zassert_equal(blob.brightness, KP_RGB_BRT_MAX);
+
+  /* An over-long id is truncated to fit and stays null-terminated. */
+  char long_id[KP_RGB_PERSIST_MAX_ID_LENGTH + 8];
+  memset(long_id, 'x', sizeof(long_id) - 1);
+  long_id[sizeof(long_id) - 1] = '\0';
+  kp_rgb_persist_pack(true, 50, long_id, &blob);
+  zassert_equal(blob.has_selected, 1);
+  zassert_equal(blob.selected_id[sizeof(blob.selected_id) - 1], '\0');
+  zassert_equal(strlen(blob.selected_id), sizeof(blob.selected_id) - 1);
+  for (size_t i = 0; i < sizeof(blob.selected_id) - 1; i++) {
+    zassert_equal(blob.selected_id[i], 'x');
+  }
 }
 
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);

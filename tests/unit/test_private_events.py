@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Production routing samples overlay lifecycle, not private-child discovery."""
 from engine_harness import run_tests
-from test_engine_scheduler import TESTS as SCHEDULER_TESTS
-
-FIXTURE = SCHEDULER_TESTS[:SCHEDULER_TESTS.index('static void assert_pixels')]
+from test_engine_scheduler import FIXTURE
 TESTS = r'''
 static unsigned counts[2], paints[2], activations[2], deactivations[2];
 static uint32_t elapsed[2];

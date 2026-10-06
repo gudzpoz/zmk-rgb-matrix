@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Production scene worker lifecycle, private clocks and bounded input delivery."""
 from engine_harness import run_tests
-from test_engine_scheduler import TESTS as SCHEDULER_TESTS
-
-FIXTURE = SCHEDULER_TESTS[:SCHEDULER_TESTS.index('static void assert_pixels')]
+from test_engine_scheduler import FIXTURE
 TESTS = r'''
 struct observation {
     unsigned resets, activations, deactivations, events, paints;

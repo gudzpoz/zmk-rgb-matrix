@@ -51,6 +51,7 @@ static struct {
     int64_t initial_duration_ms;
     struct { const struct device *active_fx; bool user_on; } state;
     struct { uint8_t max_brightness; } tuning;
+    uint8_t brightness;
 } kp_rgb_controller = {.effects=selectable, .effect_defaults=defaults, .effect_count=3};
 static bool isr, locked;
 static unsigned flushes, lock_calls;
@@ -112,8 +113,8 @@ int main(void) {
     assert(effects[1].data.color.h<360);
     assert(kp_rgb_change_sat(127)==0 && effects[1].data.color.s==100);
     assert(kp_rgb_change_sat(-128)==0 && effects[1].data.color.s==0);
-    assert(kp_rgb_change_brt(127)==0 && effects[1].data.color.b==100);
-    assert(kp_rgb_change_brt(-128)==0 && effects[1].data.color.b==0);
+    assert(kp_rgb_change_brt(127)==0 && kp_rgb_controller.brightness==100);
+    assert(kp_rgb_change_brt(-128)==0 && kp_rgb_controller.brightness==0);
     (void)kp_rgb_calc_hue(1); (void)kp_rgb_calc_sat(1); (void)kp_rgb_calc_brt(1);
     assert(kp_rgb_select_effect(3)==-EINVAL);
     assert(kp_rgb_select_effect(1)==-ENOENT);
@@ -139,7 +140,7 @@ int main(void) {
     kp_rgb_controller.initial_brightness=30;
     n=flushes; assert(kp_rgb_apply_defaults()==0 && flushes>n);
     assert(effects[0].data.duration_ms==10000 && effects[2].data.duration_ms==100);
-    assert(effects[0].data.color.b==30);
+    assert(kp_rgb_controller.brightness==30);
     defaults[0].duration_ms=0;
     assert(kp_rgb_apply_defaults()==0 && effects[0].data.duration_ms==100);
     kp_rgb_controller.initial_duration_ms=UINT32_MAX;
@@ -160,7 +161,7 @@ int main(void) {
     c=(struct kp_rgb_hsb){47,66,88}; n=flushes;
     assert(zmk_rgb_matrix_set_color(&embedded_fx,&c)==0 && flushes==n+1);
     assert(embedded_fx.data.color.h==47 && embedded_fx.data.color.s==66 &&
-           embedded_fx.data.color.b==88);
+           embedded_fx.data.color.b==100);
     assert(zmk_rgb_matrix_set_color(&embedded_fx,&c)==0 && flushes==n+1);
     assert(zmk_rgb_matrix_set_period(&embedded_fx,2345)==0 && flushes==n+2);
     assert(embedded_fx.data.duration_ms==2345);

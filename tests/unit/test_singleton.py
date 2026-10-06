@@ -119,7 +119,7 @@ int main(void) {
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,50,80}) == 0);
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,51,80}) == 0);
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){223,51,81}) == 0);
-    assert(flushes==before+4 && locked_flushes==locked_before+4);
+    assert(flushes==before+3 && locked_flushes==locked_before+3);
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == 0);
     before=flushes;locked_before=locked_flushes;
     assert(kp_rgb_set_duration(1234) == 0);
@@ -241,7 +241,8 @@ static void check_conversion(const struct device *dev, int expected, uint16_t in
 }
 int main(void) {
     const struct device controller = {.name = "rgb"};
-    struct kp_rgb_effect_common_config configs[] = {{0}, {2}, {0}, {3}, {1}};
+    struct kp_rgb_effect_common_config configs[] = {
+        {.index=0}, {.index=2}, {.index=0}, {.index=3}, {.index=1}};
     const struct device devices[] = {
         {.config = &configs[0]}, {.config = &configs[1]},
         {.config = &configs[2]}, {.config = &configs[3]},

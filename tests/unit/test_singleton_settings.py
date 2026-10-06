@@ -19,6 +19,9 @@ MOCKS = r'''
 #define CONFIG_SETTINGS 1
 #define CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE 1
 #define CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE 100
+#define SETTINGS_MAX_VAL_LEN 256
+#define SETTINGS_MAX_NAME_LEN 64
+#define snprintk snprintf
 #define DT_HAS_COMPAT_STATUS_OKAY(x) 1
 #define LOG_MODULE_DECLARE(...)
 #define LOG_WRN(...) ((void)0)
@@ -45,15 +48,20 @@ typedef int (*settings_read_cb)(void *, void *, size_t);
     static const char *registered_subtree = path; \
     static int (*registered_set)(const char *,size_t,settings_read_cb,void *) = set
 static char saved_path[128], deleted_path[128];
-static unsigned char saved_blob[512];
-static size_t saved_size;
-static unsigned saves;
+static unsigned char saved_blob[512], saved_global[512];
+static size_t saved_size, saved_global_size;
+static unsigned saves, deletes;
 static int settings_save_one(const char *path, const void *value, size_t size) {
     assert(!held && size <= sizeof(saved_blob));
     saves++;
+    if (!strcmp(path, "keypaw/rgb_matrix/state")) {
+        memcpy(saved_global, value, size); saved_global_size = size;
+    }
     strcpy(saved_path,path); memcpy(saved_blob,value,size); saved_size=size; return 0;
 }
-static int settings_delete(const char *path) { assert(!held); strcpy(deleted_path,path); return 0; }
+static int settings_delete(const char *path) {
+    assert(!held); deletes++; strcpy(deleted_path,path); return 0;
+}
 static unsigned reads;
 static int read_blob(void *arg, void *out, size_t len) {
     reads++; memcpy(out,arg,len); return (int)len;
@@ -69,7 +77,11 @@ static int failed_read(void *arg, void *out, size_t len) {
 TESTS = r'''
 int main(void) {
     struct kp_rgb_effect_common_data data[2] = {0};
-    const struct device devices[] = {{&data[0], "a"}, {&data[1], "b"}};
+    static const struct kp_rgb_effect_common_config cfg[2] = {
+        {.index = 0, .persist_id = "a", .persist_parameters = true},
+        {.index = 1, .persist_id = "b", .persist_parameters = true},
+    };
+    const struct device devices[] = {{&data[0], "a", &cfg[0]}, {&data[1], "b", &cfg[1]}};
     const struct device *effects[] = {&devices[0], &devices[1]};
     const struct kp_rgb_effect_defaults defaults[] = {{{10,20,30},500},{{40,50,60},600}};
     kp_rgb_controller.effects = effects;
@@ -78,75 +90,84 @@ int main(void) {
     kp_rgb_controller.initial_on = true;
     kp_rgb_controller.initial_brightness = 70;
     kp_rgb_controller.initial_duration_ms = 1000;
+    kp_rgb_controller.initial_effect = 0;
     assert(kp_rgb_apply_defaults() == 0);
     assert(lock_entries == 1 && reconciles == 1 && reconciled_user_on && !held);
-    assert(flushes == 1 && locked_flushes == 1);
-    assert(!pending && !saves);
-    assert(!strcmp(registered_subtree, "keypaw/rgb_matrix"));
+    assert(kp_rgb_controller.brightness == 70 && kp_rgb_controller.state.user_on);
+    assert(kp_rgb_selected_effect() == 0);
+    assert(!pending && !saves && !strcmp(registered_subtree, "keypaw/rgb_matrix"));
+
+    /* Unknown subtree keys are ignored without touching the backend. */
     struct kp_rgb_persist_blob blob;
-    const struct kp_rgb_persist_effect stored[] = {{800,100,90,80},{900,200,70,60}};
-    kp_rgb_persist_pack(1, true, stored, 2, &blob);
-    assert(registered_set("kprgb/state",sizeof(blob),read_blob,&blob) == -ENOENT);
-    assert(registered_set("state/extra",sizeof(blob),read_blob,&blob) == -ENOENT);
+    kp_rgb_persist_pack(true, 88, "b", &blob);
+    assert(registered_set("kprgb/state", sizeof(blob), read_blob, &blob) == -ENOENT);
+    assert(registered_set("extra", sizeof(blob), read_blob, &blob) == -ENOENT);
     assert(reads == 0);
-    unsigned locks_before = lock_entries, reconciles_before = reconciles;
-    unsigned flushes_before=flushes, locked_before=locked_flushes;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(flushes==flushes_before+1 && locked_flushes==locked_before+1);
-    assert(lock_entries == locks_before + 1 && reconciles == reconciles_before + 1);
-    assert(reconciled_user_on && kp_rgb_controller.state.user_on && !held);
-    assert(!pending && !saves);
-    assert(kp_rgb_selected_effect() == 1 && data[0].color.h == 100 && data[1].color.h == 200);
-    /* Unchanged selection and permission must still repaint restored parameters. */
-    flushes_before=flushes;locked_before=locked_flushes;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(flushes==flushes_before+1 && locked_flushes==locked_before+1);
-    assert(!pending && !saves && !held);
-    blob.selected_index=99;blob.effects[1].h=201;
-    flushes_before=flushes;locked_before=locked_flushes;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(flushes==flushes_before+1 && locked_flushes==locked_before+1);
-    assert(kp_rgb_selected_effect()==1 && data[1].color.h==201 && !held);
-    effects[1]=NULL;
-    blob.selected_index=1;blob.effects[0].h=101;
-    flushes_before=flushes;locked_before=locked_flushes;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(flushes==flushes_before+1 && locked_flushes==locked_before+1);
-    assert(kp_rgb_selected_effect()==0 && data[0].color.h==101 && !held);
-    effects[1]=&devices[1];blob.effects[0].h=100;blob.effects[1].h=200;
-    blob.user_on = false;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    assert(!reconciled_user_on && !kp_rgb_controller.state.user_on);
-    blob.user_on = true;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == 0);
-    reconciles_before = reconciles;
-    assert(registered_set("state",sizeof(blob)-1,read_blob,&blob) == -EINVAL);
-    assert(registered_set("state",sizeof(blob),short_read,&blob) == -EINVAL);
-    assert(registered_set("state",sizeof(blob),failed_read,&blob) == -EIO);
+
+    /* A global record restores brightness, user intent and selection by id. */
+    assert(registered_set("state", sizeof(blob), read_blob, &blob) == 0);
+    assert(kp_rgb_controller.brightness == 88 && kp_rgb_controller.state.user_on);
+    assert(kp_rgb_selected_effect() == 1 && !held);
+    assert(reconciled_user_on && reconciles == 2 && lock_entries == 2);
+    assert(flushes == locked_flushes && flushes == 3);
+
+    /* A selection id that matches no effect leaves the current one in place. */
+    struct kp_rgb_persist_blob unknown;
+    kp_rgb_persist_pack(true, 55, "missing", &unknown);
+    unsigned locks_before = lock_entries, flushes_before = flushes;
+    assert(registered_set("state", sizeof(unknown), read_blob, &unknown) == 0);
+    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.brightness == 55);
+    assert(lock_entries == locks_before + 1 && flushes == flushes_before + 1);
+
+    /* Per-effect records land on the effect with the matching persist id. */
+    struct kp_rgb_persist_effect record = {.duration_ms = 800, .h = 100, .s = 90};
+    assert(registered_set("state/effects/a", sizeof(record), read_blob, &record) == 0);
+    assert(data[0].color.h == 100 && data[0].color.s == 90 && data[0].duration_ms == 800);
+    assert(data[1].color.h == 40 && kp_rgb_selected_effect() == 1);
+    /* An unknown id is dropped without a lock or repaint. */
+    locks_before = lock_entries; flushes_before = flushes;
+    assert(registered_set("state/effects/zz", sizeof(record), read_blob, &record) == 0);
+    assert(lock_entries == locks_before && flushes == flushes_before);
+    /* Out-of-range and wrong-size records are rejected. */
+    record.h = 400;
+    assert(registered_set("state/effects/a", sizeof(record), read_blob, &record) == -EINVAL);
+    assert(registered_set("state/effects/a", sizeof(record) - 1, read_blob, &record) == -EINVAL);
+    locks_before = lock_entries;
+    assert(registered_set("state/effects/a", sizeof(record), failed_read, &record) == -EIO);
+    assert(lock_entries == locks_before);
+
+    /* Global record size, read and field validation. */
+    locks_before = lock_entries;
+    assert(registered_set("state", sizeof(blob) - 1, read_blob, &blob) == -ENOENT);
+    assert(registered_set("state", sizeof(blob), short_read, &blob) == -EINVAL);
+    assert(registered_set("state", sizeof(blob), failed_read, &blob) == -EIO);
     blob.version++;
-    assert(registered_set("state",sizeof(blob),read_blob,&blob) == -EINVAL);
+    assert(registered_set("state", sizeof(blob), read_blob, &blob) == -EINVAL);
     blob.version--;
-    assert(reconciles == reconciles_before && !pending && !saves);
+    blob.has_selected = 2;
+    assert(registered_set("state", sizeof(blob), read_blob, &blob) == -EINVAL);
+    blob.has_selected = 0;
+    blob.brightness = 101;
+    assert(registered_set("state", sizeof(blob), read_blob, &blob) == -EINVAL);
+    blob.brightness = 88;
+    assert(lock_entries == locks_before);
+
+    /* Saving writes the global blob, then one record per persisted effect. */
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
     pending = NULL;
-    assert(!strcmp(saved_path,"keypaw/rgb_matrix/state"));
-    assert(saved_size == sizeof(blob));
-    struct kp_rgb_persist_blob saved;
-    memcpy(&saved,saved_blob,sizeof(saved));
-    assert(saved.selected_index == 1 && saved.effects[0].h == 100);
-    assert(kp_rgb_save_state() == 0 && pending);
-    locks_before = lock_entries; reconciles_before = reconciles;
-    unsigned saves_before = saves;
-    flushes_before=flushes;locked_before=locked_flushes;
+    struct kp_rgb_persist_blob expect;
+    kp_rgb_persist_pack(true, 55, "b", &expect);
+    assert(saved_global_size == sizeof(expect) && !memcmp(saved_global, &expect, sizeof(expect)));
+    assert(saves == 3 && !strcmp(saved_path, "keypaw/rgb_matrix/state/effects/b"));
+
+    /* reset_state deletes the global key and every effect path, then restores. */
+    unsigned resets_before = resets;
     kp_rgb_reset_state();
-    /* Defaults repaint even when power reconciliation itself changes nothing. */
-    assert(flushes==flushes_before+2 && locked_flushes==locked_before+2);
-    assert(lock_entries == locks_before + 1 && reconciles == reconciles_before + 1);
-    assert(saves == saves_before && !held);
-    assert(!pending && !strcmp(deleted_path,"keypaw/rgb_matrix/state"));
-    assert(kp_rgb_selected_effect() == 0 && data[0].color.h == 10);
-    assert(reconciled_user_on && kp_rgb_controller.state.user_on && flushes && resets == 1);
+    assert(!pending && resets == resets_before + 1);
+    assert(deletes == 3 && !strcmp(deleted_path, "keypaw/rgb_matrix/state/effects/b"));
+    assert(kp_rgb_selected_effect() == 0 && kp_rgb_controller.brightness == 70);
+    assert(kp_rgb_controller.state.user_on && data[0].color.h == 10 && !held);
     puts("singleton settings namespace/load/save/reset passed");
     return 0;
 }
@@ -158,7 +179,14 @@ def without_includes(path):
 
 
 def main():
-    code = fixture_code() + MOCKS
+    code = fixture_code().replace(
+        "struct device { void *data; const char *name; };",
+        "struct device { void *data; const char *name; const void *config; };\n"
+        "struct kp_rgb_effect_common_config { uint16_t index; const char *persist_id; "
+        "bool persist_parameters; };\n"
+        "static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg("
+        "const struct device *dev) { return dev->config; }")
+    code += MOCKS
     code += without_includes(ROOT / "include/zmk/rgb_persist.h")
     code += without_includes(ROOT / "src/rgb_persist.c")
     code += without_includes(ROOT / "src/rgb_settings.c") + TESTS
