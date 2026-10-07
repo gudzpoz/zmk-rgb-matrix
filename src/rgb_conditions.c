@@ -5,7 +5,6 @@
 #include "rgb_matrix_internal.h"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zmk/workqueue.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -32,7 +31,7 @@ static struct kp_rgb_condition_registration *lookup(const struct device *dev) {
 static bool on_worker(void) {
   return !k_is_in_isr() &&
          k_current_get() ==
-             k_work_queue_thread_get(zmk_workqueue_lowprio_work_q()) &&
+             k_work_queue_thread_get(kp_rgb_work_q()) &&
          in_control;
 }
 
@@ -77,7 +76,7 @@ void kp_rgb_condition_invalidate(const struct device *dev) {
   if (!on_worker())
     atomic_set(&external_pending, 1);
   if (started && !on_worker()) {
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
                                 K_NO_WAIT);
   }
   k_spin_unlock(&schedule_lock, key);
@@ -88,7 +87,7 @@ void kp_rgb_conditions_request_refresh(uint64_t token) {
   refresh_requested = token;
   atomic_set(&external_pending, 1);
   if (started) {
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
                                 K_NO_WAIT);
   }
   k_spin_unlock(&schedule_lock, key);
@@ -291,10 +290,10 @@ static void control_handler(struct k_work *work) {
   }
 
   if (refresh_requested || pending() || atomic_get(&external_pending)) {
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
                                 K_NO_WAIT);
   } else if (next != KP_RGB_CONDITION_NEVER) {
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
                                 K_MSEC(MAX(INT64_C(0), next - k_uptime_get())));
   }
   k_spin_unlock(&schedule_lock, key);
@@ -305,7 +304,7 @@ void kp_rgb_conditions_start(void) {
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
   if (!started) {
     started = true;
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &control_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
                                 K_NO_WAIT);
   }
   k_spin_unlock(&schedule_lock, key);

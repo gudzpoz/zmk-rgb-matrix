@@ -474,7 +474,8 @@ ZMK_SUBSCRIPTION(kp_cond_caps_lock, zmk_hid_indicators_changed);
 After changing source state, call `kp_rgb_condition_invalidate(dev)`. It is
 any-context, non-blocking, and coalescing; synchronize source data separately.
 There is no polling fallback or guarantee that every intermediate transition
-will be sampled. Sampling runs on the control worker and must not execute
+will be sampled. Sampling runs on the module's own low-priority control work
+queue (sized by `CONFIG_KEYPAW_RGB_WORKQUEUE_STACK_SIZE`) and must not execute
 behaviors, write LEDs, or recursively sample another provider.
 
 ### Source scope, split authority and startup
@@ -561,9 +562,13 @@ Semantics worth knowing:
 - The evaluator runs on the split **central only** (conditions read keymap
   state), but the emitted commands reach both halves because `&kprgb` is
   `BEHAVIOR_LOCALITY_GLOBAL`.
-- The independent control worker samples dirty/due conditions and dispatches
-  edges even while RGB is OFF, inhibited, or has no local LEDs. Providers must
-  invalidate their conditions or supply a deadline; render ticks do not poll them.
+- The independent control worker (run on the module's own low-priority work
+  queue) samples dirty/due conditions and dispatches edges even while RGB is
+  OFF, inhibited, or has no local LEDs. Providers must invalidate their
+  conditions or supply a deadline; render ticks do not poll them. An action is
+  invoked on this queue, so there is a risk of stack overflow; consider tuning
+  `KEYPAW_RGB_WORKQUEUE_STACK_SIZE` up if you are writing an effect that might
+  use up too much stack space.
 - Rules are **independent and edge-triggered**: one never shadows another, so a
   manual `RGB_EFF`/`RGB_EFS` survives between conditions instead of being
   re-fired on the intervening ticks. `on-exit` is how you undo a change when the

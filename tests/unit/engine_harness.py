@@ -212,7 +212,7 @@ typedef struct { bool activity; const struct zmk_position_state_changed *positio
 #define ZMK_EV_EVENT_BUBBLE 0
 static const struct zmk_position_state_changed *as_zmk_position_state_changed(const zmk_event_t *e) { return e->position; }
 static const zmk_event_t *as_zmk_activity_state_changed(const zmk_event_t *e) { return e->activity ? e : NULL; }
-static void *zmk_workqueue_lowprio_work_q(void) { return NULL; }
+static void *kp_rgb_work_q(void) { return NULL; }
 #if HOST_SCHEDULER
 #include "engine_scheduler.h"
 #else

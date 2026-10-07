@@ -3,13 +3,31 @@ config KEYPAW_RGB_MATRIX
     default y
     depends on DT_HAS_KEYPAW_RGB_MATRIX_ENABLED
     select LED_STRIP
-    select ZMK_LOW_PRIORITY_WORK_QUEUE
     help
       Drives a WS2812 strip with per-key, position-aware effects. The LED
       geometry (leds/mapping) comes from the keypaw,rgb-matrix devicetree
       node and the strip itself from its "strip" phandle.
 
 if KEYPAW_RGB_MATRIX
+
+config KEYPAW_RGB_WORKQUEUE_STACK_SIZE
+    int "RGB matrix work queue stack size"
+    default 2048
+    range 1024 8192
+    help
+      Stack for the module's dedicated low-priority work queue, which runs all
+      engine work: render passes, condition and trigger evaluation, split sync
+      and the settings reset. Size it for the deepest chain, not just rendering:
+      a fired trigger invokes an effect behavior, which on the split central
+      reaches the BLE transport. Keep it above the observed high-water mark with
+      margin.
+
+config KEYPAW_RGB_WORKQUEUE_PRIORITY
+    int "RGB matrix work queue thread priority"
+    default 10
+    help
+      Priority of the module's work queue thread. The default matches ZMK's
+      low-priority work queue so RGB work never preempts typing.
 
 config KEYPAW_RGB_CONTROL_AUTO_START
     bool "Start RGB control automatically after source/settings initialization"

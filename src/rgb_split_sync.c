@@ -30,7 +30,6 @@
 #include <zmk/behavior.h>
 #include <zmk/split/central.h>
 #include <zmk/split/transport/central.h>
-#include <zmk/workqueue.h>
 
 #include "rgb_matrix_internal.h"
 
@@ -149,7 +148,7 @@ static void kp_rgb_sync_refresh(void) {
       st->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
       LOG_INF("Queued for source %u", (uint32_t)s);
       /* Align the shared clock once discovery has settled as well. */
-      k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
                                   K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS));
     } else if (!present[s] && st->seen) {
       st->seen = false;
@@ -218,7 +217,7 @@ static void kp_rgb_sync_send_clock(void) {
 static void kp_rgb_sync_clock_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_sync_send_clock();
-  k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+  k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
                               K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
 }
 
@@ -326,7 +325,7 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
   }
 
   if (next_ms >= 0) {
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_step,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_step,
                                 K_MSEC((uint32_t)next_ms));
   }
 }
@@ -337,13 +336,13 @@ static void kp_rgb_sync_poll_handler(struct k_work *work) {
 
   for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
     if (kp_rgb_sync_sources[s].pending) {
-      k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_step,
+      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_step,
                                   K_NO_WAIT);
       break;
     }
   }
 
-  k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_poll,
+  k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_poll,
                               K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
 }
 
@@ -351,12 +350,12 @@ static int kp_rgb_split_sync_init(void) {
   k_work_init_delayable(&kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
   k_work_init_delayable(&kp_rgb_sync_step, kp_rgb_sync_step_handler);
   k_work_init_delayable(&kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
-  /* The low-priority queue is already running (started at POST_KERNEL). The
+  /* The module work queue is started at POST_KERNEL, well before this. The
    * first poll is delayed rather than immediate to stay clear of the
    * settings_load() that runs at the top of main(). */
-  k_work_schedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_poll,
+  k_work_schedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_poll,
                             K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
-  k_work_schedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_sync_clock,
+  k_work_schedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
                             K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
   return 0;
 }

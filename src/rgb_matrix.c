@@ -20,7 +20,6 @@
 #include <zmk/events/position_state_changed.h>
 #include <zmk/physical_layouts.h>
 #include <zmk/rgb_matrix.h>
-#include <zmk/workqueue.h>
 
 #include <zmk/events/activity_state_changed.h>
 
@@ -203,11 +202,11 @@ static K_WORK_DELAYABLE_DEFINE(kp_output_work, kp_rgb_output_handler);
 static int kp_rgb_schedule_locked(int64_t deadline_ms) {
   if (deadline_ms == INT64_MAX) return 0;
   int64_t delay_ms = MAX(INT64_C(0), deadline_ms - k_uptime_get());
-  int err = k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
+  int err = k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_output_work,
                                       delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
   if (err < 0) {
     kp_rgb_pass_requested = true;
-    k_work_reschedule_for_queue(zmk_workqueue_lowprio_work_q(), &kp_output_work,
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_output_work,
                                 K_MSEC(1));
   }
   return err;

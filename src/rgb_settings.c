@@ -13,7 +13,6 @@
 
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
-#include <zmk/workqueue.h>
 
 #include "rgb_matrix_internal.h"
 
@@ -165,6 +164,8 @@ SETTINGS_STATIC_HANDLER_DEFINE(kp_rgb_matrix, KP_RGB_PERSIST_SUBTREE, NULL,
 
 int kp_rgb_save_state(void) {
 #if IS_ENABLED(CONFIG_SETTINGS)
+  /* Deliberate exception to kp_rgb_work_q(): this only does flash I/O and never
+   * invokes a behavior, so it keeps the larger system work queue stack. */
   int ret = k_work_reschedule(&kp_rgb_save_work,
                               K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
   return MIN(ret, 0);
@@ -212,7 +213,7 @@ K_WORK_DEFINE(kp_rgb_reset_work, kp_rgb_reset_work_handler);
 
 void kp_rgb_reset_state(void) {
 #if IS_ENABLED(CONFIG_SETTINGS)
-  k_work_submit_to_queue(zmk_workqueue_lowprio_work_q(), &kp_rgb_reset_work);
+  k_work_submit_to_queue(kp_rgb_work_q(), &kp_rgb_reset_work);
 #else
   kp_rgb_restore_defaults();
 #endif

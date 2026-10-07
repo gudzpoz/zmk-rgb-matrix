@@ -41,7 +41,7 @@ static int k_work_reschedule(struct k_work_delayable *w, int delay) { assert(del
 static int k_work_cancel_delayable_sync(struct k_work_delayable *w, struct k_work_sync *sync) {
     (void)sync; assert(!held); if (pending == w) pending = NULL; return 0;
 }
-static void *zmk_workqueue_lowprio_work_q(void) { return NULL; }
+static void *kp_rgb_work_q(void) { return NULL; }
 static int k_work_submit_to_queue(void *queue, struct k_work *w) { (void)queue; w->handler(w); return 1; }
 typedef int (*settings_read_cb)(void *, void *, size_t);
 #define SETTINGS_STATIC_HANDLER_DEFINE(name,path,get,set,commit,export) \

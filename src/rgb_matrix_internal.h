@@ -77,6 +77,9 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
+/* Every engine work item runs here, including behavior invocation chains. */
+struct k_work_q *kp_rgb_work_q(void);
+
 /* Split-shared animation clock: local uptime plus the peripheral offset, in a
  * wrapping uint32_t. The offset is 0 on the central/standalone half. */
 uint32_t kp_rgb_clock_ms(void);

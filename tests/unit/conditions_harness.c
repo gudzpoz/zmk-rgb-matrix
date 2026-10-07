@@ -37,7 +37,7 @@ static int64_t clock_ms;
 static bool worker, isr;
 static unsigned work_runs, schedules;
 static int queue;
-static void *zmk_workqueue_lowprio_work_q(void) { return &queue; }
+static void *kp_rgb_work_q(void) { return &queue; }
 static void *k_work_queue_thread_get(void *q) { return q; }
 static void *k_current_get(void) { return worker ? &queue : NULL; }
 static bool k_is_in_isr(void) { return isr; }
