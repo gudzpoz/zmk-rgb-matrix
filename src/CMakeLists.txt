@@ -34,6 +34,9 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
 # - Caps Lock pulls in ZMK_HID_INDICATORS.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/caps_lock.c)
 
+# BLE host-profile state exists only on the central.
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_BLE conditions/ble.c)
+
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
   # controller and effect persistence
   behavior_rgb_matrix.c

@@ -507,6 +507,7 @@ selectable effects; private overlay effects are not part of that list.
 | Always-on condition | `keypaw,rgb-condition-always` | / |
 | Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
 | Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
+| BLE condition | `keypaw,rgb-condition-ble` | Central-only; matches the active BLE profile index and connection state |
 | Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
 | And condition | `keypaw,rgb-condition-and` | All listed conditions active |
 | Or condition | `keypaw,rgb-condition-or` | Any listed condition active |

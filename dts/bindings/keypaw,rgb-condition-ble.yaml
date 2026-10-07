@@ -1,0 +1,31 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Bluetooth condition: active while the given test of the active BLE profile
+  holds. Host profile state exists only where the host link does, which on a
+  split is the central half. The condition still compiles and links on a
+  peripheral and returns false there, so a shared devicetree expands on both
+  halves; a default (central-evaluated) overlay consumes the pushed bit.
+
+compatible: "keypaw,rgb-condition-ble"
+
+properties:
+  profile:
+    type: int
+    required: false
+    default: -1
+    description: |
+      Active BLE profile index to match (0-based), or -1 to match any profile.
+      An index at or beyond the built-in profile count never matches.
+
+  state:
+    type: string
+    required: false
+    default: "any"
+    enum: ["any", "connected", "disconnected", "open"]
+    description: |
+      Connection test applied to the active profile. `connected` is a bonded
+      profile that is currently linked; `disconnected` is any profile that is
+      not linked, bonded or not; `open` is a profile with no stored bond, i.e.
+      still pairing. `any` matches regardless of connection state.

@@ -481,11 +481,12 @@ behaviors, write LEDs, or recursively sample another provider.
 ### Source scope, split authority and startup
 
 `KP_RGB_CONDITION_ANY_SIDE` is the default scope. Declare
-`KP_RGB_CONDITION_CENTRAL_ONLY` when source state is available only on the central
-(or standalone device), as with keymap layers. Keep the device linkable on both
-halves and compile out unavailable source reads/listeners on peripherals. Do not
-substitute a false value as permission for a local consumer: the engine rejects a
-local peripheral tree containing a central-only dependency, transitively.
+`KP_RGB_CONDITION_CENTRAL_ONLY` when source state is available only on the
+central (or standalone device), as with keymap layers or the active host BLE
+profile. Keep the device linkable on both halves and compile out unavailable
+source reads/listeners on peripherals. Do not substitute a false value as
+permission for a local consumer: the engine rejects a local peripheral tree
+containing a central-only dependency, transitively.
 
 Scope restricts source evaluation; an overlay's `local` flag chooses gate authority:
 
