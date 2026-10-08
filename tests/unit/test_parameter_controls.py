@@ -42,17 +42,18 @@ static struct device effects[3] = {{true}, {true}, {false}};
 static struct device embedded_fx = {.ready=true};
 static const struct device *const selectable[] = {&effects[0], NULL, &effects[2]};
 static struct kp_rgb_effect_defaults defaults[3];
-static struct {
+struct kp_rgb_global { bool user_on; struct { uint8_t max_brightness, idle_brightness; } tuning; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
+static struct kp_rgb_global kp_rgb_global = {.brightness=100};
+struct kp_rgb_controller {
+    const struct device *dev;
+    struct { const struct device *active_fx; } state;
     const struct device *const *effects;
     struct kp_rgb_effect_defaults *effect_defaults;
-    size_t effect_count, effect_index, initial_effect;
-    bool initial_on;
-    int initial_brightness;
+    size_t effect_count, effect_index;
     int64_t initial_duration_ms;
-    struct { const struct device *active_fx; bool user_on; } state;
-    struct { uint8_t max_brightness; } tuning;
-    uint8_t brightness;
-} kp_rgb_controller = {.effects=selectable, .effect_defaults=defaults, .effect_count=3};
+    uint16_t initial_effect;
+};
+static struct kp_rgb_controller kp_rgb_controller = {.effects=selectable, .effect_defaults=defaults, .effect_count=3};
 static bool isr, locked;
 static unsigned flushes, lock_calls;
 static const struct device *select_on_lock;
@@ -82,6 +83,12 @@ TESTS = r'''
 int main(void) {
     const struct device *private_fx=&effects[1];
     struct kp_rgb_hsb c={360,100,100};
+    kp_rgb_global.user_on=true;
+    kp_rgb_global.tuning.max_brightness=80; kp_rgb_global.tuning.idle_brightness=20;
+    const uint8_t max_brightness=kp_rgb_global.tuning.max_brightness;
+    const uint8_t idle_brightness=kp_rgb_global.tuning.idle_brightness;
+    const bool user_on=kp_rgb_global.user_on;
+    const size_t initial_index=kp_rgb_controller.effect_index;
     assert(zmk_rgb_matrix_set_color(NULL,&c)==-ENODEV);
     assert(zmk_rgb_matrix_set_period(NULL,100)==-ENODEV);
     assert(zmk_rgb_matrix_set_color(&effects[2],&c)==-ENODEV);
@@ -101,6 +108,10 @@ int main(void) {
     unsigned n=flushes;
     assert(zmk_rgb_matrix_set_period(private_fx,100)==0 && flushes==n);
     assert(zmk_rgb_matrix_set_period(private_fx,10000)==0);
+    assert(kp_rgb_global.user_on==user_on && kp_rgb_global.brightness==100 &&
+           kp_rgb_global.tuning.max_brightness==max_brightness &&
+           kp_rgb_global.tuning.idle_brightness==idle_brightness);
+    assert(kp_rgb_controller.effect_index==initial_index && kp_rgb_controller.state.active_fx==NULL);
     kp_rgb_controller.state.active_fx=NULL;
     assert(kp_rgb_set_hsb(c)==-ENODEV && kp_rgb_set_duration(100)==-ENODEV);
     select_on_lock=private_fx;
@@ -113,14 +124,37 @@ int main(void) {
     assert(effects[1].data.color.h<360);
     assert(kp_rgb_change_sat(127)==0 && effects[1].data.color.s==100);
     assert(kp_rgb_change_sat(-128)==0 && effects[1].data.color.s==0);
-    assert(kp_rgb_change_brt(127)==0 && kp_rgb_controller.brightness==100);
-    assert(kp_rgb_change_brt(-128)==0 && kp_rgb_controller.brightness==0);
+    const struct kp_rgb_effect_common_data parameters=effects[1].data;
+    assert(kp_rgb_global.user_on==user_on && kp_rgb_global.brightness==100 &&
+           kp_rgb_global.tuning.max_brightness==max_brightness &&
+           kp_rgb_global.tuning.idle_brightness==idle_brightness);
+    assert(kp_rgb_change_brt(127)==0 && kp_rgb_global.brightness==100);
+    assert(kp_rgb_change_brt(-128)==0 && kp_rgb_global.brightness==0);
+    assert(kp_rgb_controller.state.active_fx==private_fx &&
+           kp_rgb_controller.effect_index==initial_index);
+    assert(effects[1].data.color.h==parameters.color.h &&
+           effects[1].data.color.s==parameters.color.s &&
+           effects[1].data.color.b==parameters.color.b &&
+           effects[1].data.duration_ms==parameters.duration_ms);
+    kp_rgb_controller.state.active_fx=NULL;
+    assert(kp_rgb_change_brt(127)==0 && kp_rgb_global.brightness==100);
+    assert(kp_rgb_change_brt(-128)==0 && kp_rgb_global.brightness==0);
+    assert(kp_rgb_controller.state.active_fx==NULL && kp_rgb_controller.effect_index==initial_index);
+    assert(effects[1].data.color.h==parameters.color.h &&
+           effects[1].data.color.s==parameters.color.s &&
+           effects[1].data.color.b==parameters.color.b &&
+           effects[1].data.duration_ms==parameters.duration_ms);
+    assert(kp_rgb_global.user_on==user_on && kp_rgb_global.tuning.max_brightness==max_brightness &&
+           kp_rgb_global.tuning.idle_brightness==idle_brightness);
     (void)kp_rgb_calc_hue(1); (void)kp_rgb_calc_sat(1); (void)kp_rgb_calc_brt(1);
     assert(kp_rgb_select_effect(3)==-EINVAL);
     assert(kp_rgb_select_effect(1)==-ENOENT);
     assert(zmk_rgb_matrix_select_effect(0)==0);
     n=flushes; assert(zmk_rgb_matrix_select_effect(0)==0 && flushes==n);
     assert(zmk_rgb_matrix_cycle_effect(0)==0 && flushes==n);
+    assert(kp_rgb_global.user_on==user_on && kp_rgb_global.brightness==0 &&
+           kp_rgb_global.tuning.max_brightness==max_brightness &&
+           kp_rgb_global.tuning.idle_brightness==idle_brightness);
     assert(kp_rgb_calc_effect(1)==2);
     isr=true; locks=lock_calls;
     assert(zmk_rgb_matrix_set_color(private_fx,&c)==-EWOULDBLOCK);
@@ -137,10 +171,10 @@ int main(void) {
     defaults[0].duration_ms=UINT32_MAX;
     defaults[2].duration_ms=1;
     kp_rgb_controller.initial_duration_ms=-1;
-    kp_rgb_controller.initial_brightness=30;
+    kp_rgb_global.initial_brightness=30;
     n=flushes; assert(kp_rgb_apply_defaults()==0 && flushes>n);
     assert(effects[0].data.duration_ms==10000 && effects[2].data.duration_ms==100);
-    assert(kp_rgb_controller.brightness==30);
+    assert(kp_rgb_global.brightness==30);
     defaults[0].duration_ms=0;
     assert(kp_rgb_apply_defaults()==0 && effects[0].data.duration_ms==100);
     kp_rgb_controller.initial_duration_ms=UINT32_MAX;

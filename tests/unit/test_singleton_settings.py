@@ -87,13 +87,13 @@ int main(void) {
     kp_rgb_controller.effects = effects;
     kp_rgb_controller.effect_count = 2;
     kp_rgb_controller.effect_defaults = defaults;
-    kp_rgb_controller.initial_on = true;
-    kp_rgb_controller.initial_brightness = 70;
+    kp_rgb_global.initial_on = true;
+    kp_rgb_global.initial_brightness = 70;
     kp_rgb_controller.initial_duration_ms = 1000;
     kp_rgb_controller.initial_effect = 0;
     assert(kp_rgb_apply_defaults() == 0);
     assert(lock_entries == 1 && reconciles == 1 && reconciled_user_on && !held);
-    assert(kp_rgb_controller.brightness == 70 && kp_rgb_controller.state.user_on);
+    assert(kp_rgb_global.brightness == 70 && kp_rgb_global.user_on);
     assert(kp_rgb_selected_effect() == 0);
     assert(!pending && !saves && !strcmp(registered_subtree, "keypaw/rgb_matrix"));
 
@@ -106,7 +106,7 @@ int main(void) {
 
     /* A global record restores brightness, user intent and selection by id. */
     assert(registered_set("state", sizeof(blob), read_blob, &blob) == 0);
-    assert(kp_rgb_controller.brightness == 88 && kp_rgb_controller.state.user_on);
+    assert(kp_rgb_global.brightness == 88 && kp_rgb_global.user_on);
     assert(kp_rgb_selected_effect() == 1 && !held);
     assert(reconciled_user_on && reconciles == 2 && lock_entries == 2);
     assert(flushes == locked_flushes && flushes == 3);
@@ -116,7 +116,7 @@ int main(void) {
     kp_rgb_persist_pack(true, 55, "missing", &unknown);
     unsigned locks_before = lock_entries, flushes_before = flushes;
     assert(registered_set("state", sizeof(unknown), read_blob, &unknown) == 0);
-    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.brightness == 55);
+    assert(kp_rgb_selected_effect() == 1 && kp_rgb_global.brightness == 55);
     assert(lock_entries == locks_before + 1 && flushes == flushes_before + 1);
 
     /* Per-effect records land on the effect with the matching persist id. */
@@ -166,8 +166,8 @@ int main(void) {
     kp_rgb_reset_state();
     assert(!pending && resets == resets_before + 1);
     assert(deletes == 3 && !strcmp(deleted_path, "keypaw/rgb_matrix/state/effects/b"));
-    assert(kp_rgb_selected_effect() == 0 && kp_rgb_controller.brightness == 70);
-    assert(kp_rgb_controller.state.user_on && data[0].color.h == 10 && !held);
+    assert(kp_rgb_selected_effect() == 0 && kp_rgb_global.brightness == 70);
+    assert(kp_rgb_global.user_on && data[0].color.h == 10 && !held);
 
     /* Identity is the persist-id or node name, never the registry ordinal: stored
      * state must follow its effect across reordering, removal and addition. */
@@ -232,11 +232,11 @@ int main(void) {
     unsigned saves_before = saves;
     kp_rgb_persist_pack(false, 61, "fx_solid", &stored);
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
-    assert(!kp_rgb_controller.state.user_on && kp_rgb_selected_effect() == 1);
+    assert(!kp_rgb_global.user_on && kp_rgb_selected_effect() == 1);
     assert(kp_rgb_controller.state.active_fx == &idev[0] && !reconciled_user_on);
     assert(!pending && saves == saves_before);
     assert(zmk_rgb_matrix_select_effect(2) == 0);
-    assert(!pending && saves == saves_before && !kp_rgb_controller.state.user_on);
+    assert(!pending && saves == saves_before && !kp_rgb_global.user_on);
     assert(zmk_rgb_matrix_select_effect(1) == 0);
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
@@ -245,11 +245,11 @@ int main(void) {
     assert(saved_global_size == sizeof(stored));
     assert(!memcmp(saved_global, &stored, sizeof(stored)));
     assert(kp_rgb_apply_defaults() == 0);
-    assert(kp_rgb_controller.state.user_on && kp_rgb_selected_effect() == 0);
+    assert(kp_rgb_global.user_on && kp_rgb_selected_effect() == 0);
     assert(registered_set("state", saved_global_size, read_blob, saved_global) == 0);
-    assert(!kp_rgb_controller.state.user_on && !reconciled_user_on);
+    assert(!kp_rgb_global.user_on && !reconciled_user_on);
     assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.state.active_fx == &idev[0]);
-    assert(kp_rgb_controller.brightness == 61 && !pending && !held);
+    assert(kp_rgb_global.brightness == 61 && !pending && !held);
 
     puts("singleton settings namespace/load/save/reset/identity passed");
     return 0;

@@ -101,7 +101,7 @@ static const struct zmk_split_transport_central transport_b = {&transport_api};
 static void set_scene(const struct device *device, uint16_t index, bool user_on) {
     kp_rgb_matrix_lock();
     kp_rgb_controller.state.active_fx = device;
-    kp_rgb_controller.state.user_on = user_on;
+    kp_rgb_global.user_on = user_on;
     kp_rgb_controller.effect_index = index;
     kp_rgb_matrix_unlock();
 }

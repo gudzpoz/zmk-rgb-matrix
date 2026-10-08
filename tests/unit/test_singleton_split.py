@@ -40,7 +40,7 @@ int main(void) {
     const struct device device = {&data,"rgb"};
     kp_rgb_controller.dev = &device;
     kp_rgb_controller.state.active_fx = &device;
-    kp_rgb_controller.state.user_on = true;
+    kp_rgb_global.user_on = true;
     kp_rgb_controller.effect_index = 3;
     struct kp_rgb_sync_source state = {.phase = KP_RGB_SYNC_SELECT};
     fail = true;
@@ -51,7 +51,7 @@ int main(void) {
     assert(commands[1] == RGB_EFS_CMD && arguments[1] == 3);
     data.color.h = 300; data.duration_ms = 2000;
     kp_rgb_controller.effect_index = 9;
-    kp_rgb_controller.state.user_on = false;
+    kp_rgb_global.user_on = false;
     fail = true;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);
     fail = false;

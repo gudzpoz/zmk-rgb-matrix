@@ -45,8 +45,8 @@ static void kp_rgb_encode(struct kp_rgb_persist_blob *blob) {
   const char *selected_id;
 
   kp_rgb_matrix_lock();
-  user_on = kp_rgb_controller.state.user_on;
-  brightness = kp_rgb_controller.brightness;
+  user_on = kp_rgb_global.user_on;
+  brightness = kp_rgb_global.brightness;
   selected_id = kp_rgb_selected_id();
   kp_rgb_persist_pack(user_on, brightness, selected_id, blob);
   kp_rgb_matrix_unlock();
@@ -143,8 +143,8 @@ static int kp_rgb_load_cb(const char *name, size_t len,
   }
 
   kp_rgb_matrix_lock();
-  kp_rgb_controller.brightness = blob.brightness;
-  kp_rgb_controller.state.user_on = blob.user_on != 0;
+  kp_rgb_global.brightness = blob.brightness;
+  kp_rgb_global.user_on = blob.user_on != 0;
   if (blob.has_selected) {
     int index = kp_rgb_find_id(blob.selected_id);
     if (index >= 0) {

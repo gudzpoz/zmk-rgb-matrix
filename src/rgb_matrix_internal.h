@@ -24,8 +24,15 @@ struct kp_rgb_tuning {
   uint8_t idle_brightness;
 };
 
-struct kp_rgb_state {
+struct kp_rgb_global {
   bool user_on;
+  struct kp_rgb_tuning tuning;
+  uint8_t brightness;
+  bool initial_on;
+  int32_t initial_brightness;
+};
+
+struct kp_rgb_selection_state {
   const struct device *active_fx;
 };
 
@@ -36,19 +43,16 @@ struct kp_rgb_effect_defaults {
 
 struct kp_rgb_controller {
   const struct device *dev;
-  struct kp_rgb_state state;
-  struct kp_rgb_tuning tuning;
-  uint8_t brightness;
+  struct kp_rgb_selection_state state;
   const struct device *const *effects;
   const struct kp_rgb_effect_defaults *effect_defaults;
   size_t effect_count;
   size_t effect_index;
-  bool initial_on;
-  int32_t initial_brightness;
   int64_t initial_duration_ms;
   uint16_t initial_effect;
 };
 
+extern struct kp_rgb_global kp_rgb_global;
 extern struct kp_rgb_controller kp_rgb_controller;
 
 struct kp_rgb_scene_runtime {

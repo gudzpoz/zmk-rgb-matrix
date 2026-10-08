@@ -230,7 +230,7 @@ static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
     case KP_RGB_SYNC_SELECT: {
       kp_rgb_matrix_lock();
       st->effect_index = (uint16_t)kp_rgb_controller.effect_index;
-      st->user_on = kp_rgb_controller.state.user_on;
+      st->user_on = kp_rgb_global.user_on;
       const struct device *fx = kp_rgb_controller.state.active_fx;
       if (fx != NULL) {
         const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);

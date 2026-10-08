@@ -119,14 +119,14 @@ struct kp_rgb_effect_api {
 };
 struct kp_rgb_overlay_api { const struct kp_rgb_effect_callbacks *callbacks; bool replaces_target; };
 typedef void (*scene_visitor)(const struct device *,const struct kp_rgb_effect_callbacks *,struct kp_rgb_scene_runtime *,int64_t);
+struct kp_rgb_global { bool user_on; struct kp_rgb_tuning tuning; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
 struct kp_rgb_controller {
  const struct device *dev;
  uint16_t effect_index;
- struct { bool user_on; const struct device *active_fx; } state;
- struct kp_rgb_tuning tuning;
- uint8_t brightness;
+ struct { const struct device *active_fx; } state;
 };
-static struct kp_rgb_controller kp_rgb_controller={.tuning={100,100},.brightness=100};
+static struct kp_rgb_global kp_rgb_global={.tuning={100,100},.brightness=100};
+static struct kp_rgb_controller kp_rgb_controller;
 #define ctx kp_rgb_controller
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;

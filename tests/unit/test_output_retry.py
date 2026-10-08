@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
     if (!strcmp(name,"unready") && KP_LED_COUNT > 0) {
         pthread_mutex_init(&lock,NULL);
         kp_output_work.work.handler=kp_rgb_output_handler;
-        ctx.dev=&dummy;ctx.state.user_on=true;ctx.state.active_fx=&fx;
+        ctx.dev=&dummy;kp_rgb_global.user_on=true;ctx.state.active_fx=&fx;
         assert(kp_rgb_matrix_init()==-ENODEV);
         zmk_rgb_matrix_flush();host_run_until(1000);
         assert(!writes && !renders && !kp_rgb_output_ready);
@@ -100,12 +100,12 @@ int main(int argc, char **argv) {
         assert(renders==terminal_paints && !runtime.animating);
         assert_debt(KP_RGB_OUTPUT_NONE,0,100);
     } else if (!strcmp(name,"latest-scene")) {
-        host_allow_color_failure=true;failures=1;ctx.tuning.max_brightness=50;
+        host_allow_color_failure=true;failures=1;kp_rgb_global.tuning.max_brightness=50;
         host_render_red=80;host_run_until(7);zmk_rgb_matrix_flush();host_run_ready();
         assert_pixels(2,40);assert_scene(40);
         host_render_red=120;host_run_until(96);
         assert(writes==3);assert_scene(60);
-        int painted=renders;ctx.tuning.max_brightness=25;
+        int painted=renders;kp_rgb_global.tuning.max_brightness=25;
         host_run_until(107);
         assert(renders==painted && writes==4);assert_pixels(3,60);assert_scene(60);
         host_run_until(112);assert_pixels(4,30);assert_scene(30);

@@ -21,7 +21,7 @@ int main(int argc, char **argv) {
         assert(zmk_rgb_matrix_get_state(&state)==-EWOULDBLOCK);
         assert(zmk_rgb_matrix_get_user_state(&user_state)==-EWOULDBLOCK);
         isr=false;
-        assert(ctx.state.user_on);
+        assert(kp_rgb_global.user_on);
         uint64_t initial=kp_rgb_refresh_token;
         assert(kp_rgb_refresh_pending && initial != 0);
         host_run_ready();
@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
         zmk_rgb_matrix_flush();
         kp_rgb_matrix_unlock();
         host_run_ready();
-        assert(!ctx.state.user_on && renders == 1);
+        assert(!kp_rgb_global.user_on && renders == 1);
         assert(!kp_rgb_effect_scenes[1].state.active);
         assert(zmk_rgb_matrix_on() == 0);
         uint64_t resume = kp_rgb_refresh_token;

@@ -139,7 +139,7 @@ int main(void) {
     struct host_overlay state={.child=&child,.gate=true};
     struct device ov={.api=&ov_api,.config=&cfg,.data=&state};
     host_overlays[0]=&ov; host_overlay_count=1;
-    ctx.tuning.max_brightness=43; ctx.tuning.idle_brightness=17;
+    kp_rgb_global.tuning.max_brightness=43; kp_rgb_global.tuning.idle_brightness=17;
     host_run_ready();
     if(!KP_LED_COUNT) { assert(host_transfer_count==0); return 0; }
     struct led_rgb intrinsic=kp_rgb_rgb_mix((struct led_rgb){17,0,0},(struct led_rgb){104,73,101},37);

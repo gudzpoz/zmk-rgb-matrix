@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
         assert(scene[0].r == 9 && scene[0].b == 0);
         assert(scene[1].r == 0 && scene[1].b == 60);
     } else if (!strcmp(name, "brightness")) {
-        ctx.tuning.max_brightness = 50;
+        kp_rgb_global.tuning.max_brightness = 50;
         host_render_red = 100;
         host_render_animating = false;
         ov_anim[0] = true; ov_rgb[0][2] = 200;
@@ -133,8 +133,8 @@ int main(int argc, char **argv) {
         /* The cache holds pre-brightness pixels; a post-scale cache would read 25. */
         assert(renders == 1 && scene[0].r == 50);
     } else if (!strcmp(name, "idle")) {
-        ctx.tuning.max_brightness = 100;
-        ctx.tuning.idle_brightness = 50;
+        kp_rgb_global.tuning.max_brightness = 100;
+        kp_rgb_global.tuning.idle_brightness = 50;
         host_render_red = 40;
         host_render_animating = false;
         ov_anim[0] = true; ov_rgb[0][2] = 200;

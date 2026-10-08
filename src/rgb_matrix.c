@@ -161,7 +161,7 @@ static struct kp_rgb_scene_runtime *kp_rgb_overlay_scene(const struct device *de
 }
 
 static bool kp_rgb_logical_on_locked(void) {
-  return kp_rgb_controller.state.user_on &&
+  return kp_rgb_global.user_on &&
          (!IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE) ||
           zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
 }
@@ -482,9 +482,9 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
       kp_rgb_prefix_valid = prefix_count > 0;
     }
 
-    uint8_t cap = frame.is_idle ? kp_rgb_controller.tuning.idle_brightness
-                                : kp_rgb_controller.tuning.max_brightness;
-    uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_controller.brightness) /
+    uint8_t cap = frame.is_idle ? kp_rgb_global.tuning.idle_brightness
+                                : kp_rgb_global.tuning.max_brightness;
+    uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_global.brightness) /
                                    KP_RGB_BRT_MAX);
     for (size_t i = 0; i < KP_LED_COUNT; i++) {
       scene[i] = kp_rgb_rgb_scale(scene[i], brightness);
@@ -729,7 +729,7 @@ static int kp_rgb_set_user_on(bool on) {
   if (ret < 0) {
     return ret;
   }
-  kp_rgb_controller.state.user_on = on;
+  kp_rgb_global.user_on = on;
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
@@ -745,7 +745,7 @@ int zmk_rgb_matrix_toggle(void) {
   if (ret < 0) {
     return ret;
   }
-  kp_rgb_controller.state.user_on = !kp_rgb_controller.state.user_on;
+  kp_rgb_global.user_on = !kp_rgb_global.user_on;
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
@@ -765,7 +765,7 @@ int zmk_rgb_matrix_get_user_state(bool *user_on) {
   if (k_is_in_isr()) return -EWOULDBLOCK;
   if (user_on == NULL) return -EINVAL;
   kp_rgb_matrix_lock();
-  *user_on = kp_rgb_controller.state.user_on;
+  *user_on = kp_rgb_global.user_on;
   kp_rgb_matrix_unlock();
   return 0;
 }

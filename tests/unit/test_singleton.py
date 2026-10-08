@@ -77,15 +77,17 @@ int main(void) {
     kp_rgb_controller.effects = effects;
     kp_rgb_controller.effect_count = 4;
     kp_rgb_controller.effect_defaults = defaults;
-    kp_rgb_controller.initial_on = true;
-    kp_rgb_controller.initial_brightness = 120;
+    kp_rgb_global.initial_on = true;
+    kp_rgb_global.initial_brightness = 120;
     kp_rgb_controller.initial_duration_ms = 1;
     kp_rgb_controller.initial_effect = 0;
     data[3].color.h = 321;
     data[3].duration_ms = 456;
     assert(kp_rgb_apply_defaults() == 0);
     assert(flushes == 1 && locked_flushes == 1);
-    assert(kp_rgb_controller.state.user_on);
+    assert(kp_rgb_global.user_on);
+    assert(kp_rgb_global.brightness == 100);
+    assert(kp_rgb_global.tuning.max_brightness == 40 && kp_rgb_global.tuning.idle_brightness == 30);
     assert(kp_rgb_controller.state.active_fx == &devices[0]);
     assert(data[0].color.h == 10 && data[0].color.b == 100);
     assert(data[0].duration_ms == 100 && data[1].duration_ms == 700);
@@ -150,9 +152,9 @@ int main(void) {
     assert(data[1].color.h == 222 && data[0].color.h == 10 && data[3].color.h == 321);
     assert(data[1].duration_ms == 1234 && data[0].duration_ms == 100 && data[3].duration_ms == 456);
     kp_rgb_controller.initial_effect = 99;
-    kp_rgb_controller.initial_on = false;
+    kp_rgb_global.initial_on = false;
     assert(kp_rgb_apply_defaults() == 0);
-    assert(kp_rgb_selected_effect() == 0 && !kp_rgb_controller.state.user_on);
+    assert(kp_rgb_selected_effect() == 0 && !kp_rgb_global.user_on);
     assert(data[1].color.h == 40 && data[3].color.h == 321);
     before=flushes; locked_before=locked_flushes;
     assert(kp_rgb_apply_defaults() == 0);
@@ -169,7 +171,7 @@ int main(void) {
     kp_rgb_controller.initial_duration_ms = -1;
     assert(kp_rgb_apply_defaults() == 0 && data[0].duration_ms==100);
 
-    assert(!kp_rgb_controller.state.user_on);
+    assert(!kp_rgb_global.user_on);
     unsigned power_before = reconciles;
     before = flushes;
     locked_before = locked_flushes;
@@ -177,7 +179,10 @@ int main(void) {
     assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.state.active_fx == &devices[1]);
     assert(zmk_rgb_matrix_cycle_effect(1) == 0);
     assert(kp_rgb_selected_effect() == 3 && kp_rgb_controller.state.active_fx == &devices[2]);
-    assert(!kp_rgb_controller.state.user_on && reconciles == power_before);
+    assert(!kp_rgb_global.user_on && reconciles == power_before);
+    assert(kp_rgb_global.brightness == 100 && kp_rgb_global.tuning.max_brightness == 40 &&
+           kp_rgb_global.tuning.idle_brightness == 30);
+    assert(data[1].color.h == 40 && data[1].duration_ms == 10000);
     assert(flushes == before + 2 && locked_flushes == locked_before + 2);
     assert(zmk_rgb_matrix_select_effect(2) == -ENOENT);
     assert(kp_rgb_selected_effect() == 3 && flushes == before + 2);
@@ -192,8 +197,9 @@ def fixture_code():
     internal = (ROOT / "src/rgb_matrix_internal.h").read_text()
     source = (ROOT / "src/behavior_rgb_matrix.c").read_text()
     code = PRELUDE + "\n".join(structure(internal, name) for name in (
-        "kp_rgb_state", "kp_rgb_effect_defaults", "kp_rgb_controller"))
+        "kp_rgb_global", "kp_rgb_selection_state", "kp_rgb_effect_defaults", "kp_rgb_controller"))
     code += r'''
+static struct kp_rgb_global kp_rgb_global = {.tuning={40,30}};
 static struct kp_rgb_controller kp_rgb_controller;
 static bool host_device_ready = true;
 static bool device_is_ready(const struct device *dev) {
@@ -205,7 +211,7 @@ static bool reconciled_user_on;
 static void kp_rgb_reconcile_power_locked(void) {
     assert(held >= 1);
     reconciles++;
-    reconciled_user_on = kp_rgb_controller.state.user_on;
+    reconciled_user_on = kp_rgb_global.user_on;
 }
 '''
     code += "\n".join(function(source, name) for name in (
@@ -244,14 +250,14 @@ static void check_conversion(const struct device *dev, int expected, uint16_t in
     const char *original_name = "effect";
     uint16_t selected = kp_rgb_controller.effect_index;
     const struct device *active = kp_rgb_controller.state.active_fx;
-    bool user_on = kp_rgb_controller.state.user_on;
+    bool user_on = kp_rgb_global.user_on;
     unsigned before = flushes;
     struct zmk_behavior_binding binding = {original_name, 123, 456};
     struct zmk_behavior_binding_event event = {0};
     assert(kp_rgb_effect_convert_central_state_dependent_params(&binding, event) == expected);
     assert(kp_rgb_controller.effect_index == selected);
     assert(kp_rgb_controller.state.active_fx == active);
-    assert(kp_rgb_controller.state.user_on == user_on && flushes == before);
+    assert(kp_rgb_global.user_on == user_on && flushes == before);
     if (expected == 0) {
         assert(binding.behavior_dev == kp_rgb_controller.dev->name);
         assert(binding.param1 == RGB_EFS_CMD && binding.param2 == index);
@@ -282,7 +288,7 @@ int main(void) {
     check_conversion(NULL, -ENODEV, 0);
     kp_rgb_controller.effect_index = 2;
     kp_rgb_controller.state.active_fx = &devices[1];
-    kp_rgb_controller.state.user_on = false;
+    kp_rgb_global.user_on = false;
     check_conversion(&devices[0], 0, 0);
     check_conversion(&devices[1], 0, 2);
     host_device_ready = false;

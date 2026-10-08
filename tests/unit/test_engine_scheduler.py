@@ -22,7 +22,7 @@ static void fixture(bool on, bool inhibit) {
     assert(pthread_mutexattr_destroy(&attr) == 0);
     kp_output_work.work.handler = kp_rgb_output_handler;
     ctx.dev = &dummy;
-    ctx.state.user_on = on;
+    kp_rgb_global.user_on = on;
     ctx.state.active_fx = &fx;
     assert(zmk_rgb_matrix_set_inhibited(inhibit) == 0);
     assert(kp_rgb_matrix_init() == 0);
@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
         if (KP_LED_COUNT) assert_pixels(host_transfer_count - 1, 0);
         assert(zmk_rgb_matrix_on() == 0); host_run_ready();
         host_activity(false); host_run_ready();
-        assert(!kp_rgb_logical_on_locked() && ctx.state.user_on && kp_rgb_next_frame_ms == INT64_MAX);
+        assert(!kp_rgb_logical_on_locked() && kp_rgb_global.user_on && kp_rgb_next_frame_ms == INT64_MAX);
         host_activity(true); host_run_ready();
         assert(kp_rgb_logical_on_locked());
         assert((kp_rgb_next_frame_ms != INT64_MAX) == (KP_LED_COUNT > 0));
@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
     } else if (!strcmp(name, "idle-policy")) {
         fixture(true,false); host_run_until(7); host_activity(false); host_run_ready();
         bool logical; assert(zmk_rgb_matrix_get_state(&logical)==0);
-        assert(logical==!CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE && ctx.state.user_on);
+        assert(logical==!CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE && kp_rgb_global.user_on);
         assert((kp_rgb_next_frame_ms!=INT64_MAX)==(logical && KP_LED_COUNT>0));
         int after_change=renders;
         host_activity(false); host_run_ready(); assert(renders==after_change);
@@ -244,9 +244,9 @@ int main(int argc, char **argv) {
         bool logical=true; assert(zmk_rgb_matrix_get_state(&logical)==0 && !logical);
         struct binding binding={.param1=RGB_TOG_CMD};
         assert(convert_toggle(&ctx,&binding)==0 && binding.param1==RGB_OFF_CMD);
-        assert(zmk_rgb_matrix_toggle()==0 && !ctx.state.user_on); host_activity(true);
+        assert(zmk_rgb_matrix_toggle()==0 && !kp_rgb_global.user_on); host_activity(true);
         assert(!atomic_get(&kp_rgb_output_allowed) && kp_rgb_next_frame_ms==INT64_MAX);
-        host_activity(false); assert(zmk_rgb_matrix_toggle()==0 && ctx.state.user_on);
+        host_activity(false); assert(zmk_rgb_matrix_toggle()==0 && kp_rgb_global.user_on);
         assert(!atomic_get(&kp_rgb_output_allowed)); host_activity(true);
         assert(atomic_get(&kp_rgb_output_allowed)==(KP_LED_COUNT>0));
     } else if (!strcmp(name, "purge")) {
