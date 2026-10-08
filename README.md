@@ -526,8 +526,7 @@ renders one effect while its condition holds.
 
 Third-party modules can add effects, conditions and overlays without editing
 this module; overlays and triggers are then configured in devicetree from them.
-The full authoring guide is [`docs/extending.md`](./docs/extending.md); module
-internals are documented in [`docs/development.md`](./docs/development.md).
+The full authoring guide is [`docs/extending.md`](./docs/extending.md).
 
 As a quick taste, a third-party effect module includes the public API as
 `<zmk/rgb_matrix.h>`, provides a binding that includes

@@ -505,9 +505,7 @@ Provider sources must be ready before initial sampling and startup actions.
 settings disabled. It does not guarantee readiness after equal-priority commits,
 later asynchronous initialization or subtree loads. Such integrations must disable
 auto-start and call the idempotent, thread-only `zmk_rgb_matrix_start()` after
-defaults, full settings restoration and provider readiness. See
-[startup readiness](development.md#startup-readiness) for the init-priority
-constraint and full contract; no ZMK patch/private symbols are needed.
+defaults, full settings restoration and provider readiness.
 
 ### Repainting on an event
 
@@ -585,9 +583,7 @@ Semantics worth knowing:
 
 > There is deliberately no `triggers = <...>;` phandle list on the table or on
 > `&kprgb`: a parent pointing at its own child is a devicetree cycle, and the
-> failure mode is obscure. See
-> [development.md](development.md#why-there-is-no-triggers-list) for the full
-> story.
+> failure mode is obscure.
 
 ## Writing an overlayed filter
 

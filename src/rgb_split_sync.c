@@ -12,7 +12,7 @@
  * peripheral stays present.
  *
  * Central only; the trigger is a poll, as there is no central-side "peripheral
- * connected" event. See docs/development.md.
+ * connected" event.
  */
 
 #include <stdbool.h>

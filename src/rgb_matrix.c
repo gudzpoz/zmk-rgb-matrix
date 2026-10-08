@@ -360,8 +360,7 @@ static void kp_rgb_activate_scene(const struct device *dev,
 }
 
 /* Returns the index of the last overlay covering every LED, or SIZE_MAX when
- * none does; the caller then renders the effect and starts painting at 0. See
- * docs/development.md#an-opaque-full-cover-overlay-skips-what-it-hides. */
+ * none does; the caller then renders the effect and starts painting at 0. */
 static size_t kp_last_covering_overlay(const struct device *const *overlays,
                                        size_t count) {
   size_t last = SIZE_MAX;
