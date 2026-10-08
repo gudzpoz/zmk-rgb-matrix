@@ -84,6 +84,16 @@ jobs:
             -d "$GITHUB_WORKSPACE/build/unit" -p
           west build -d "$GITHUB_WORKSPACE/build/unit" -t run
 
+      - name: Composite strip driver contracts
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        run: python3 tests/run-led-strip-composite.py --build-dir "$GITHUB_WORKSPACE/build/composite"
+
+      - name: Composite strip engine integration
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        run: python3 tests/sim/test_composite.py
+
       - name: Smoke tests
         env:
           ZMK_WS: ${{ github.workspace }}/zmk-ws

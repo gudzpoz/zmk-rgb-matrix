@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Position-aware WS2812 matrix.
+  Position-aware RGB LED matrix.
 
   Every LED carries an (x, y) position in the same units as the
   zmk,physical-layout (keypaw48: 100 = one key width) plus the key position it
@@ -22,10 +22,11 @@ properties:
     type: phandle
     required: false
     description: |
-      The LED strip device driving this half's LEDs. Omit it when the half has
-      no local LEDs (a USB-dongle central): nothing is rendered and "mapping"
-      must then be empty. When present, its chain-length is the single source of
-      truth for the LED count and the "mapping" length must agree with it.
+      The physical or composite LED strip device driving this half's LEDs.
+      Omit it when the half has no local LEDs (a USB-dongle central): nothing
+      is rendered and "mapping" must then be empty. When present, its
+      chain-length is the single source of truth for the LED count and the
+      "mapping" length must agree with it.
 
   physical-layout:
     type: phandle

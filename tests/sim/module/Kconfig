@@ -12,3 +12,8 @@ config KEYPAW_SIM_CAPTURE
       offline preview harness to turn the module's effects into GIFs. Never
       built into real firmware: the module is only added to the build when the
       harness passes it in ZMK_EXTRA_MODULES, and this depends on ARCH_POSIX.
+
+config KEYPAW_SIM_COMPOSITE_TEST
+    bool "native_sim composite strip engine integration test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP

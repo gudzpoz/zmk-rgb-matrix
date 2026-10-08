@@ -1,0 +1,31 @@
+/*
+ * Copyright (c) 2026 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+/ {
+    a: strip-a { compatible = "test,composite-mock-strip"; chain-length = <2>; };
+    b: strip-b { compatible = "test,composite-mock-strip"; chain-length = <3>; };
+    c: strip-c { compatible = "test,composite-mock-strip"; chain-length = <1>; };
+    unready: strip-unready { compatible = "test,composite-mock-strip"; chain-length = <2>; init-error = <5>; };
+    no_rgb: strip-no-rgb { compatible = "test,composite-mock-strip"; chain-length = <2>; api-kind = <1>; };
+    no_length: strip-no-length { compatible = "test,composite-mock-strip"; chain-length = <2>; api-kind = <2>; };
+    mismatch: strip-mismatch { compatible = "test,composite-mock-strip"; chain-length = <2>; runtime-length = <3>; };
+    no_api: strip-no-api { compatible = "test,composite-mock-strip"; chain-length = <2>; api-kind = <3>; };
+
+    one: composite-one { compatible = "zmk,led-strip-composite"; strips = <&c>; chain-length = <1>; };
+    many: composite-many { compatible = "zmk,led-strip-composite"; strips = <&a &b>; chain-length = <5>; };
+    reverse: composite-reverse { compatible = "zmk,led-strip-composite"; strips = <&b &a>; chain-length = <5>; };
+    nested: composite-nested { compatible = "zmk,led-strip-composite"; strips = <&many &one>; chain-length = <6>; };
+    deeper: composite-deeper { compatible = "zmk,led-strip-composite"; strips = <&nested>; chain-length = <6>; };
+
+    bad_ready: composite-bad-ready { compatible = "zmk,led-strip-composite"; strips = <&unready>; chain-length = <2>; };
+    bad_rgb: composite-bad-rgb { compatible = "zmk,led-strip-composite"; strips = <&no_rgb>; chain-length = <2>; };
+    bad_length: composite-bad-length { compatible = "zmk,led-strip-composite"; strips = <&no_length>; chain-length = <2>; };
+    bad_runtime: composite-bad-runtime { compatible = "zmk,led-strip-composite"; strips = <&mismatch>; chain-length = <2>; };
+    bad_api: composite-bad-api { compatible = "zmk,led-strip-composite"; strips = <&no_api>; chain-length = <2>; };
+    bad_overlap: composite-bad-overlap { compatible = "zmk,led-strip-composite"; strips = <&many &a>; chain-length = <7>; };
+    alias_c: composite-alias-c { compatible = "zmk,led-strip-composite"; strips = <&c>; chain-length = <1>; };
+    bad_siblings: composite-bad-siblings { compatible = "zmk,led-strip-composite"; strips = <&one &alias_c>; chain-length = <2>; };
+};

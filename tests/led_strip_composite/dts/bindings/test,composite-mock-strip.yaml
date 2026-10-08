@@ -1,0 +1,23 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Instrumented LED strip for composite driver tests
+compatible: "test,composite-mock-strip"
+include: base.yaml
+properties:
+  chain-length:
+    type: int
+    required: true
+  runtime-length:
+    type: int
+    default: 0
+    description: Nonzero overrides the length callback result.
+  init-error:
+    type: int
+    default: 0
+    description: Positive errno returned negatively by init.
+  api-kind:
+    type: int
+    default: 0
+    enum: [0, 1, 2, 3]
+    description: 0 is complete, 1 omits update_rgb, 2 omits length, 3 has no API.

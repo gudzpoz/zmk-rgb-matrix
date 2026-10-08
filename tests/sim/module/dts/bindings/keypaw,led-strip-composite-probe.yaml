@@ -1,0 +1,13 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: RGB output probe for the composite engine integration test
+
+compatible: "keypaw,led-strip-composite-probe"
+
+include: base.yaml
+
+properties:
+  chain-length:
+    type: int
+    required: true

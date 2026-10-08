@@ -3,6 +3,8 @@
 
 zephyr_library()
 
+zephyr_library_sources_ifdef(CONFIG_LED_STRIP_COMPOSITE drivers/led_strip_composite.c)
+
 # ZMK app headers
 zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 

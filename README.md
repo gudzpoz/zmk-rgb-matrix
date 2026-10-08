@@ -161,6 +161,11 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 > and [the `physical_layout` they map
 > to](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48-layouts.dtsi).
 
+> If your board contains multiple LED strips, you can use the
+> `zmk,led-strip-composite` driver implemented by this module to concatenate
+> them into one single strip, which can then be used in the RGB matrix
+> definition.
+
 ### Effect configurations
 
 With the LEDs specified, you can now configure your RGB effects. Basically, you

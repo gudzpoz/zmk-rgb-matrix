@@ -1,10 +1,29 @@
+config LED_STRIP_COMPOSITE
+    bool "Composite RGB LED strip"
+    default y
+    depends on DT_HAS_ZMK_LED_STRIP_COMPOSITE_ENABLED
+    select LED_STRIP
+    help
+      Concatenates the devices referenced by a zmk,led-strip-composite node
+      into one RGB LED strip. Available independently of the RGB matrix.
+
+config LED_STRIP_COMPOSITE_INIT_PRIORITY
+    int "Composite LED strip initialization priority"
+    default 91
+    range 0 99
+    depends on LED_STRIP_COMPOSITE
+    help
+      POST_KERNEL-level initialization priority. Child devices must initialize
+      earlier and consumers later. Nested composites at the same priority are
+      ordered by devicetree dependencies on Zephyr 4.1.
+
 config KEYPAW_RGB_MATRIX
     bool "Keypaw position-aware RGB matrix"
     default y
     depends on DT_HAS_KEYPAW_RGB_MATRIX_ENABLED
     select LED_STRIP
     help
-      Drives a WS2812 strip with per-key, position-aware effects. The LED
+      Drives an RGB LED strip with per-key, position-aware effects. The LED
       geometry (leds/mapping) comes from the keypaw,rgb-matrix devicetree
       node and the strip itself from its "strip" phandle.
 

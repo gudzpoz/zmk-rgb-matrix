@@ -1,0 +1,49 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Concatenates RGB LED-strip devices into one logical strip. The first device
+  in strips receives the first pixels, followed by each subsequent device.
+  Child devices may themselves be composites. Each physical strip must appear
+  only once within a composite's complete tree.
+
+  Updates are sequential, not simultaneous. If a child fails, the remaining
+  covered children are still updated and the first error is returned. A failed
+  call may therefore have changed some physical strips. Submitted pixels may
+  be overwritten even when an update fails.
+
+  Short updates cover a prefix of the logical strip and leave later children
+  untouched; the final covered child must support the shorter update. An empty
+  update succeeds without accessing the buffer. A nonempty update with a NULL
+  buffer returns -EINVAL; a count exceeding chain-length returns -ERANGE.
+  Raw-channel updates return -ENOSYS.
+
+  Callers must serialize access to shared physical outputs, including access
+  through other composites or directly to children. This device provides no
+  additional ISR-safety guarantee beyond its children.
+
+  Initialization requires ready child devices with RGB-update and length
+  callbacks. Each child's reported length must match its chain-length. By
+  default, composites initialize at POST_KERNEL priority 91; consumers must
+  initialize later and child devices earlier. Nested composites may share the
+  same priority on Zephyr 4.1. Adjust LED_STRIP_COMPOSITE_INIT_PRIORITY when
+  children initialize later. Children retain their own color-mapping settings.
+
+compatible: "zmk,led-strip-composite"
+
+include: base.yaml
+
+properties:
+  strips:
+    type: phandles
+    required: true
+    description: |
+      Nonempty ordered list of enabled RGB LED-strip devices. References must
+      be distinct, must not include this device and must not form cycles.
+
+  chain-length:
+    type: int
+    required: true
+    description: |
+      Total logical pixel count (1..2147483647). Must equal the sum of the
+      child devices' positive chain-length properties.
