@@ -228,6 +228,29 @@ int main(void) {
     kp_rgb_persist_pack(true, 40, "fx_removed", &stored);
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
     assert(kp_rgb_controller.state.active_fx == &idev[2]);
+
+    unsigned saves_before = saves;
+    kp_rgb_persist_pack(false, 61, "fx_solid", &stored);
+    assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
+    assert(!kp_rgb_controller.state.user_on && kp_rgb_selected_effect() == 1);
+    assert(kp_rgb_controller.state.active_fx == &idev[0] && !reconciled_user_on);
+    assert(!pending && saves == saves_before);
+    assert(zmk_rgb_matrix_select_effect(2) == 0);
+    assert(!pending && saves == saves_before && !kp_rgb_controller.state.user_on);
+    assert(zmk_rgb_matrix_select_effect(1) == 0);
+    assert(kp_rgb_save_state() == 0 && pending);
+    pending->work.handler(&pending->work);
+    pending = NULL;
+    assert(saves == saves_before + 4);
+    assert(saved_global_size == sizeof(stored));
+    assert(!memcmp(saved_global, &stored, sizeof(stored)));
+    assert(kp_rgb_apply_defaults() == 0);
+    assert(kp_rgb_controller.state.user_on && kp_rgb_selected_effect() == 0);
+    assert(registered_set("state", saved_global_size, read_blob, saved_global) == 0);
+    assert(!kp_rgb_controller.state.user_on && !reconciled_user_on);
+    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.state.active_fx == &idev[0]);
+    assert(kp_rgb_controller.brightness == 61 && !pending && !held);
+
     puts("singleton settings namespace/load/save/reset/identity passed");
     return 0;
 }

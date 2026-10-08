@@ -61,6 +61,43 @@ int main(int argc, char **argv) {
         assert(!kp_rgb_refresh_pending);
         assert(renders==before+(KP_LED_COUNT?1:0));
         if(KP_LED_COUNT) assert(rendered_elapsed==0);
+    } else if(!strcmp(name,"resume-selection")) {
+        static const struct kp_rgb_effect_config second_config = {.index = 1};
+        const struct device second = {.api = &api, .config = &second_config};
+        host_effects[1] = &second;
+        host_effect_count = 2;
+        fixture(true,false);
+        kp_rgb_conditions_refreshed(kp_rgb_refresh_token);
+        host_run_ready();
+        assert(renders == 1 && kp_rgb_effect_scenes[0].state.active);
+        assert(zmk_rgb_matrix_off() == 0);
+        host_run_ready();
+        assert(ctx.state.active_fx == &fx && !kp_rgb_effect_scenes[0].state.active);
+        kp_rgb_matrix_lock();
+        ctx.effect_index = 1;
+        ctx.state.active_fx = &second;
+        zmk_rgb_matrix_flush();
+        kp_rgb_matrix_unlock();
+        host_run_ready();
+        assert(!ctx.state.user_on && renders == 1);
+        assert(!kp_rgb_effect_scenes[1].state.active);
+        assert(zmk_rgb_matrix_on() == 0);
+        uint64_t resume = kp_rgb_refresh_token;
+        assert(kp_rgb_refresh_pending);
+        struct kp_rgb_key_event ev = {.position=0,.pressed=true,.timestamp_ms=123};
+        assert(kp_rgb_pending_push(&ev));
+        kp_rgb_request_output_pass(false);
+        int before = writes;
+        host_run_ready();
+        assert(renders == 1 && writes == before && !feedback);
+        assert(kp_rgb_pending_available() && !kp_rgb_effect_scenes[1].state.active);
+        assert(kp_rgb_effect_scenes[1].reset_pending);
+        assert(ctx.state.active_fx == &second);
+        kp_rgb_conditions_refreshed(resume);
+        host_run_ready();
+        assert(!kp_rgb_refresh_pending && !kp_rgb_pending_available());
+        assert(feedback == 1 && renders == 2 && rendered_elapsed == 0);
+        assert(!kp_rgb_effect_scenes[0].state.active && kp_rgb_effect_scenes[1].state.active);
     } else { assert(!"unknown case"); }
     assert(!polls && !refreshes && !dispatches);
     assert(pthread_mutex_destroy(&lock)==0);
@@ -69,4 +106,6 @@ int main(int argc, char **argv) {
 '''
 
 if __name__ == '__main__':
-    run_tests(TESTS, scheduler=True, cases=("refresh-barrier", "stale-refresh"), allow_unused=True)
+    run_tests(TESTS, scheduler=True,
+              cases=("refresh-barrier", "stale-refresh", "resume-selection"),
+              allow_unused=True)

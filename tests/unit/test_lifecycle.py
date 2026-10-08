@@ -96,7 +96,9 @@ int main(void) {
     assert(a->elapsed==0);
     host_run_until(64); assert(a->elapsed==16 && c->elapsed==0);
     // Selection is sampled at delivery, not admission; unobserved transitions coalesce.
+    clear_order();
     key(77); ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    assert(!strcmp(order,"DRAEEPP"));
     assert(a->deactivations==1 && b->resets==1 && b->activations==1 && b->events==1);
     assert(a->events==1 && c->events==2 && b->timestamp==77);
     ctx.state.active_fx=&devices[0]; ctx.state.active_fx=&devices[1];
@@ -143,6 +145,7 @@ int main(void) {
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
     assert(!a_state.active && !c_state.active);
+    assert(ctx.state.active_fx == &devices[0]);
     unsigned runs=kp_output_work.work.runs;
     host_run_until(now+1000); assert(kp_output_work.work.runs==runs && kp_rgb_next_frame_ms==INT64_MAX);
     assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(a->elapsed==0);

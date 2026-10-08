@@ -168,6 +168,19 @@ int main(void) {
     assert(kp_rgb_apply_defaults() == 0 && data[0].duration_ms==10000);
     kp_rgb_controller.initial_duration_ms = -1;
     assert(kp_rgb_apply_defaults() == 0 && data[0].duration_ms==100);
+
+    assert(!kp_rgb_controller.state.user_on);
+    unsigned power_before = reconciles;
+    before = flushes;
+    locked_before = locked_flushes;
+    assert(zmk_rgb_matrix_select_effect(1) == 0);
+    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.state.active_fx == &devices[1]);
+    assert(zmk_rgb_matrix_cycle_effect(1) == 0);
+    assert(kp_rgb_selected_effect() == 3 && kp_rgb_controller.state.active_fx == &devices[2]);
+    assert(!kp_rgb_controller.state.user_on && reconciles == power_before);
+    assert(flushes == before + 2 && locked_flushes == locked_before + 2);
+    assert(zmk_rgb_matrix_select_effect(2) == -ENOENT);
+    assert(kp_rgb_selected_effect() == 3 && flushes == before + 2);
     assert(held == 0);
     puts("singleton selection/defaults/private parameter isolation passed");
     return 0;
@@ -182,9 +195,10 @@ def fixture_code():
         "kp_rgb_state", "kp_rgb_effect_defaults", "kp_rgb_controller"))
     code += r'''
 static struct kp_rgb_controller kp_rgb_controller;
+static bool host_device_ready = true;
 static bool device_is_ready(const struct device *dev) {
     assert(dev != NULL);
-    return true;
+    return host_device_ready;
 }
 static unsigned reconciles;
 static bool reconciled_user_on;
@@ -228,9 +242,16 @@ static const struct device *zmk_behavior_get_binding(const char *name) {
 static void check_conversion(const struct device *dev, int expected, uint16_t index) {
     bound_device = dev;
     const char *original_name = "effect";
+    uint16_t selected = kp_rgb_controller.effect_index;
+    const struct device *active = kp_rgb_controller.state.active_fx;
+    bool user_on = kp_rgb_controller.state.user_on;
+    unsigned before = flushes;
     struct zmk_behavior_binding binding = {original_name, 123, 456};
     struct zmk_behavior_binding_event event = {0};
     assert(kp_rgb_effect_convert_central_state_dependent_params(&binding, event) == expected);
+    assert(kp_rgb_controller.effect_index == selected);
+    assert(kp_rgb_controller.state.active_fx == active);
+    assert(kp_rgb_controller.state.user_on == user_on && flushes == before);
     if (expected == 0) {
         assert(binding.behavior_dev == kp_rgb_controller.dev->name);
         assert(binding.param1 == RGB_EFS_CMD && binding.param2 == index);
@@ -259,6 +280,14 @@ int main(void) {
     check_conversion(&devices[4], -ENODEV, 0); /* Disabled slot. */
     check_conversion(&devices[5], -ENODEV, 0); /* Missing config. */
     check_conversion(NULL, -ENODEV, 0);
+    kp_rgb_controller.effect_index = 2;
+    kp_rgb_controller.state.active_fx = &devices[1];
+    kp_rgb_controller.state.user_on = false;
+    check_conversion(&devices[0], 0, 0);
+    check_conversion(&devices[1], 0, 2);
+    host_device_ready = false;
+    check_conversion(&devices[0], -ENODEV, 0);
+    host_device_ready = true;
     configs[1].index = 0;
     check_conversion(&devices[1], -ENODEV, 0); /* Do not fall back to an array scan. */
     puts("singleton direct-index binding conversion passed");

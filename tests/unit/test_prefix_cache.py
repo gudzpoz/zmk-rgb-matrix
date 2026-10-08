@@ -6,7 +6,10 @@ from engine_harness import run_tests
 from test_engine_scheduler import TESTS as SCHEDULER_TESTS
 
 FIXTURE = SCHEDULER_TESTS[:SCHEDULER_TESTS.index('static void assert_pixels')]
-CASES = ("static-base", "multi-prefix", "invalidate", "animating-base", "cover", "brightness", "idle")
+CASES = (
+    "static-base", "multi-prefix", "invalidate", "animating-base", "cover",
+    "brightness", "idle", "selection", "gate-change",
+)
 
 TESTS = r'''
 static struct host_overlay ov_state[8];
@@ -145,6 +148,57 @@ int main(int argc, char **argv) {
         host_activity(false); host_run_ready();
         assert(renders == 2 && scene[0].r == 20);
         assert(scene[1].b == 100);
+    } else if (!strcmp(name, "selection")) {
+        static const struct kp_rgb_effect_config second_config = {.index = 1};
+        const struct device second = {.api = &api, .config = &second_config};
+        host_effects[1] = &second;
+        host_effect_count = 2;
+        host_render_red = 5;
+        host_render_animating = false;
+        ov_anim[0] = true; ov_rgb[0][2] = 200;
+        add_overlay(0, sparse, 1, false);
+        fixture(true, false); host_run_ready();
+        if (!KP_LED_COUNT) { assert(!renders && !kp_rgb_prefix_valid); return 0; }
+        assert(renders == 1 && kp_rgb_prefix_len == 1);
+        host_run_until(now + 16);
+        assert(renders == 1 && scene[0].r == 5);
+        kp_rgb_matrix_lock();
+        ctx.effect_index = 1;
+        ctx.state.active_fx = &second;
+        host_render_red = 99;
+        zmk_rgb_matrix_flush();
+        kp_rgb_matrix_unlock();
+        host_run_ready();
+        assert(renders == 2 && scene[0].r == 99 && scene[1].b == 200);
+        assert(!kp_rgb_effect_scenes[0].state.active && kp_rgb_effect_scenes[1].state.active);
+        assert(kp_rgb_prefix_valid && kp_rgb_prefix_len == 1);
+        host_run_until(now + 16);
+        assert(renders == 2 && scene[0].r == 99);
+    } else if (!strcmp(name, "gate-change")) {
+        const size_t zero[] = {0};
+        host_render_red = 7;
+        host_render_animating = false;
+        ov_anim[0] = false; ov_rgb[0][0] = 40;
+        ov_anim[1] = true; ov_rgb[1][2] = 80;
+        add_overlay(0, zero, 1, false);
+        add_overlay(1, sparse, 1, false);
+        fixture(true, false); host_run_ready();
+        if (!KP_LED_COUNT) { assert(!renders && !kp_rgb_prefix_valid); return 0; }
+        assert(kp_rgb_prefix_len == 2 && scene[0].r == 40);
+        host_run_until(now + 16);
+        assert(renders == 1 && ov_paints[0] == 1 && ov_paints[1] == 2);
+        kp_rgb_matrix_lock();
+        ov_state[0].gate = false;
+        zmk_rgb_matrix_flush();
+        kp_rgb_matrix_unlock();
+        host_run_ready();
+        assert(renders == 2 && ov_paints[0] == 1 && ov_paints[1] == 3);
+        assert(!kp_rgb_overlay_scenes[0].state.active);
+        assert(kp_rgb_prefix_valid && kp_rgb_prefix_len == 1);
+        assert(scene[0].r == 7 && scene[1].b == 80);
+        host_run_until(now + 16);
+        assert(renders == 2 && ov_paints[0] == 1 && ov_paints[1] == 4);
+        assert(scene[0].r == 7 && scene[1].b == 80);
     } else { assert(!"unknown case"); }
     assert(!polls && !refreshes && !dispatches);
     printf("%s leds=%d renders=%d prefix_len=%zu: passed\n",
