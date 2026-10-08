@@ -34,7 +34,7 @@ int main(void) {
  assert(pthread_mutexattr_destroy(&attributes)==0);
  assert(!zmk_rgb_matrix_is_inhibited());
  isr=true;assert(zmk_rgb_matrix_set_inhibited(true)==-EWOULDBLOCK);isr=false;
- kp_rgb_global.user_on=true;ctx.state.active_fx=&fx;kp_rgb_global.tuning.idle_brightness=23;
+ kp_rgb_global.user_on=true;ctx.selector.active_fx=&fx;kp_rgb_global.tuning.idle_brightness=23;
  assert(zmk_rgb_matrix_on()==0 && !atomic_get(&kp_rgb_output_allowed));
  host_try_lock_error=-EBUSY;
  assert(zmk_rgb_matrix_off()==-EBUSY && kp_rgb_global.user_on);
@@ -54,7 +54,7 @@ int main(void) {
  assert(!kp_rgb_output_ready && writes==0);ctx.dev=&dummy;
  failures=KP_LED_COUNT?1:0;assert(kp_rgb_matrix_init()==0);
  assert(kp_rgb_output_ready && kp_rgb_global.user_on && kp_rgb_global.tuning.idle_brightness==23);
- assert(ctx.state.active_fx==&fx);
+ assert(ctx.selector.active_fx==&fx);
  bool state=false;assert(zmk_rgb_matrix_get_state(&state)==0 && state);
  assert(!kp_rgb_pending_push(&ev) && kp_rgb_next_frame_ms==INT64_MAX);
  if(KP_LED_COUNT) {
@@ -163,15 +163,15 @@ int main(void) {
  assert(zmk_rgb_matrix_get_state(NULL)==-EINVAL);assert(zmk_rgb_matrix_off()==0);
  assert(zmk_rgb_matrix_toggle()==0 && kp_rgb_global.user_on);
  assert(zmk_rgb_matrix_toggle()==0 && !kp_rgb_global.user_on);
- assert(ctx.state.active_fx==&fx && ctx.effect_index==0);
+ assert(ctx.selector.active_fx==&fx && ctx.selector.effect_index==0);
  assert(kp_rgb_global.brightness==100 && kp_rgb_global.tuning.max_brightness==100 &&
         kp_rgb_global.tuning.idle_brightness==23);
- ctx.state.active_fx=NULL;
- assert(zmk_rgb_matrix_on()==0 && ctx.state.active_fx==NULL);
+ ctx.selector.active_fx=NULL;
+ assert(zmk_rgb_matrix_on()==0 && ctx.selector.active_fx==NULL);
  bool user_on=false;
  assert(zmk_rgb_matrix_get_user_state(&user_on)==0 && user_on);
- assert(zmk_rgb_matrix_toggle()==0 && ctx.state.active_fx==NULL && !kp_rgb_global.user_on);
- assert(ctx.effect_index==0 && kp_rgb_global.brightness==100 &&
+ assert(zmk_rgb_matrix_toggle()==0 && ctx.selector.active_fx==NULL && !kp_rgb_global.user_on);
+ assert(ctx.selector.effect_index==0 && kp_rgb_global.brightness==100 &&
         kp_rgb_global.tuning.max_brightness==100 && kp_rgb_global.tuning.idle_brightness==23);
  puts("production-extracted output gate tests passed");
 }

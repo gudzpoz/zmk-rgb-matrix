@@ -16,7 +16,7 @@ CASES = (
 TESTS = (function(BEHAVIOR_SOURCE, "kp_rgb_select_effect")
          + SCHEDULER_TESTS.split("static void flush_from_render(", 1)[0]) + r'''
 #define selected_runtime (kp_rgb_effect_scenes[1].state)
-static const struct kp_rgb_effect_config selected_config={.index=1};
+static const struct kp_rgb_effect_config selected_config={.owner=&controller_dev,.slot=1};
 static unsigned selected_paints;
 static bool selected_render(const struct device *dev, const struct kp_rgb_frame *frame) {
     (void)dev;
@@ -58,7 +58,7 @@ int main(int argc, char **argv) {
     if (!strcmp(name,"unready") && KP_LED_COUNT > 0) {
         pthread_mutex_init(&lock,NULL);
         kp_output_work.work.handler=kp_rgb_output_handler;
-        ctx.dev=&dummy;kp_rgb_global.user_on=true;ctx.state.active_fx=&fx;
+        ctx.dev=&dummy;kp_rgb_global.user_on=true;ctx.selector.active_fx=&fx;
         assert(kp_rgb_matrix_init()==-ENODEV);
         zmk_rgb_matrix_flush();host_run_until(1000);
         assert(!writes && !renders && !kp_rgb_output_ready);
@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
         host_run_until(7);zmk_rgb_matrix_flush();host_run_ready();
         assert_pixels(2,17);assert_debt(KP_RGB_OUTPUT_SCENE,107,200);
         host_run_until(8);assert(kp_rgb_select_effect(1)==0);
-        assert(ctx.state.active_fx==&selected_fx && ctx.effect_index==1);
+        assert(ctx.selector.active_fx==&selected_fx && ctx.selector.effect_index==1);
         assert_debt(KP_RGB_OUTPUT_SCENE,107,200);
         host_run_ready();assert(writes==3 && selected_paints==1);
         assert(!runtime.active && selected_runtime.active);assert_scene(127);

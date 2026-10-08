@@ -13,6 +13,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   rgb_matrix.c
   rgb_utils.c
   rgb_instance.c
+  rgb_selector.c
   rgb_workqueue.c
   rgb_conditions.c
   rgb_control_start.c

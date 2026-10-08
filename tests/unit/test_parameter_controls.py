@@ -5,11 +5,25 @@
 import os
 from pathlib import Path
 import shlex
+import re
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def function(source, name):
+    match = re.search(r"^(?:static )?(?:inline )?[\w\s*]+\b" + name + r"\([^;]*?\) \{", source, re.M)
+    assert match, name
+    start = match.start()
+    end = source.index("{", start) + 1
+    depth = 1
+    while depth:
+        depth += (source[end] == "{") - (source[end] == "}")
+        end += 1
+    return source[start:end]
 SOURCE = ROOT / "src/behavior_rgb_matrix.c"
+SELECTOR_SOURCE = ROOT / "src/rgb_selector.c"
 
 MOCKS = r'''
 #include <assert.h>
@@ -37,23 +51,31 @@ struct zmk_behavior_binding_event { int unused; };
 struct kp_rgb_hsb { uint16_t h; uint8_t s, b; };
 struct kp_rgb_effect_common_data { struct kp_rgb_hsb color; uint16_t duration_ms; };
 struct kp_rgb_effect_defaults { struct kp_rgb_hsb color; uint32_t duration_ms; };
-struct device { bool ready; struct kp_rgb_effect_common_data data; };
-static struct device effects[3] = {{true}, {true}, {false}};
+struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };
+struct device { bool ready; struct kp_rgb_effect_common_data data; const struct kp_rgb_effect_common_config *config; };
+static struct device effects[3] = {{.ready=true}, {.ready=true}, {.ready=false}};
 static struct device embedded_fx = {.ready=true};
+static const struct device foreign_owner = {.ready=true};
+static const struct kp_rgb_effect_common_config foreign_config = {.owner=&foreign_owner, .slot=0};
+static struct device foreign_fx = {.ready=true, .config=&foreign_config};
+static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct device *dev) { return dev->config; }
 static const struct device *const selectable[] = {&effects[0], NULL, &effects[2]};
 static struct kp_rgb_effect_defaults defaults[3];
-struct kp_rgb_global { bool user_on; struct { uint8_t max_brightness, idle_brightness; } tuning; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
-static struct kp_rgb_global kp_rgb_global = {.brightness=100};
-struct kp_rgb_controller {
-    const struct device *dev;
-    struct { const struct device *active_fx; } state;
+struct kp_rgb_selector {
+    const struct device *owner;
     const struct device *const *effects;
-    struct kp_rgb_effect_defaults *effect_defaults;
+    const struct kp_rgb_effect_defaults *effect_defaults;
     size_t effect_count, effect_index;
+    const struct device *active_fx;
     int64_t initial_duration_ms;
     uint16_t initial_effect;
 };
-static struct kp_rgb_controller kp_rgb_controller = {.effects=selectable, .effect_defaults=defaults, .effect_count=3};
+struct kp_rgb_global { bool user_on; struct { uint8_t max_brightness, idle_brightness; } tuning; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
+static struct kp_rgb_global kp_rgb_global = {.brightness=100};
+struct kp_rgb_controller { const struct device *dev; struct kp_rgb_selector selector; };
+static struct kp_rgb_controller kp_rgb_controller = {
+    .selector={.effects=selectable, .effect_defaults=defaults, .effect_count=3}
+};
 static bool isr, locked;
 static unsigned flushes, lock_calls;
 static const struct device *select_on_lock;
@@ -61,7 +83,7 @@ static bool k_is_in_isr(void) { return isr; }
 static void kp_rgb_matrix_lock(void) {
     assert(!locked && !isr); locked=true; lock_calls++;
     if (select_on_lock) {
-        kp_rgb_controller.state.active_fx=select_on_lock; select_on_lock=NULL;
+        kp_rgb_controller.selector.active_fx=select_on_lock; select_on_lock=NULL;
     }
 }
 static void kp_rgb_matrix_unlock(void) { assert(locked); locked=false; }
@@ -88,7 +110,7 @@ int main(void) {
     const uint8_t max_brightness=kp_rgb_global.tuning.max_brightness;
     const uint8_t idle_brightness=kp_rgb_global.tuning.idle_brightness;
     const bool user_on=kp_rgb_global.user_on;
-    const size_t initial_index=kp_rgb_controller.effect_index;
+    const size_t initial_index=kp_rgb_controller.selector.effect_index;
     assert(zmk_rgb_matrix_set_color(NULL,&c)==-ENODEV);
     assert(zmk_rgb_matrix_set_period(NULL,100)==-ENODEV);
     assert(zmk_rgb_matrix_set_color(&effects[2],&c)==-ENODEV);
@@ -111,8 +133,8 @@ int main(void) {
     assert(kp_rgb_global.user_on==user_on && kp_rgb_global.brightness==100 &&
            kp_rgb_global.tuning.max_brightness==max_brightness &&
            kp_rgb_global.tuning.idle_brightness==idle_brightness);
-    assert(kp_rgb_controller.effect_index==initial_index && kp_rgb_controller.state.active_fx==NULL);
-    kp_rgb_controller.state.active_fx=NULL;
+    assert(kp_rgb_controller.selector.effect_index==initial_index && kp_rgb_controller.selector.active_fx==NULL);
+    kp_rgb_controller.selector.active_fx=NULL;
     assert(kp_rgb_set_hsb(c)==-ENODEV && kp_rgb_set_duration(100)==-ENODEV);
     select_on_lock=private_fx;
     assert(kp_rgb_set_duration(100)==0 && effects[1].data.duration_ms==100);
@@ -130,16 +152,16 @@ int main(void) {
            kp_rgb_global.tuning.idle_brightness==idle_brightness);
     assert(kp_rgb_change_brt(127)==0 && kp_rgb_global.brightness==100);
     assert(kp_rgb_change_brt(-128)==0 && kp_rgb_global.brightness==0);
-    assert(kp_rgb_controller.state.active_fx==private_fx &&
-           kp_rgb_controller.effect_index==initial_index);
+    assert(kp_rgb_controller.selector.active_fx==private_fx &&
+           kp_rgb_controller.selector.effect_index==initial_index);
     assert(effects[1].data.color.h==parameters.color.h &&
            effects[1].data.color.s==parameters.color.s &&
            effects[1].data.color.b==parameters.color.b &&
            effects[1].data.duration_ms==parameters.duration_ms);
-    kp_rgb_controller.state.active_fx=NULL;
+    kp_rgb_controller.selector.active_fx=NULL;
     assert(kp_rgb_change_brt(127)==0 && kp_rgb_global.brightness==100);
     assert(kp_rgb_change_brt(-128)==0 && kp_rgb_global.brightness==0);
-    assert(kp_rgb_controller.state.active_fx==NULL && kp_rgb_controller.effect_index==initial_index);
+    assert(kp_rgb_controller.selector.active_fx==NULL && kp_rgb_controller.selector.effect_index==initial_index);
     assert(effects[1].data.color.h==parameters.color.h &&
            effects[1].data.color.s==parameters.color.s &&
            effects[1].data.color.b==parameters.color.b &&
@@ -170,14 +192,14 @@ int main(void) {
     assert(lock_calls==locks); isr=false;
     defaults[0].duration_ms=UINT32_MAX;
     defaults[2].duration_ms=1;
-    kp_rgb_controller.initial_duration_ms=-1;
+    kp_rgb_controller.selector.initial_duration_ms=-1;
     kp_rgb_global.initial_brightness=30;
     n=flushes; assert(kp_rgb_apply_defaults()==0 && flushes>n);
     assert(effects[0].data.duration_ms==10000 && effects[2].data.duration_ms==100);
     assert(kp_rgb_global.brightness==30);
     defaults[0].duration_ms=0;
     assert(kp_rgb_apply_defaults()==0 && effects[0].data.duration_ms==100);
-    kp_rgb_controller.initial_duration_ms=UINT32_MAX;
+    kp_rgb_controller.selector.initial_duration_ms=UINT32_MAX;
     assert(kp_rgb_apply_defaults()==0 && effects[0].data.duration_ms==10000);
     struct zmk_behavior_binding binding={.param1=RGB_SPD_CMD};
     struct zmk_behavior_binding_event event={0};
@@ -205,6 +227,10 @@ int main(void) {
     assert(zmk_rgb_matrix_set_color(&embedded_fx,&c)==-ENODEV);
     assert(zmk_rgb_matrix_set_period(&embedded_fx,100)==-ENODEV);
     assert(flushes==n+2 && embedded_fx.data.duration_ms==2345);
+    c=(struct kp_rgb_hsb){81,42,33};
+    assert(zmk_rgb_matrix_set_color(&foreign_fx,&c)==0 && foreign_fx.data.color.h==81);
+    assert(zmk_rgb_matrix_set_period(&foreign_fx,3456)==0 && foreign_fx.data.duration_ms==3456);
+    assert(flushes==n+4); /* Public parameter APIs also accept effects owned elsewhere. */
     assert(!locked);
 }
 '''
@@ -213,7 +239,12 @@ int main(void) {
 def main():
     text = SOURCE.read_text()
     # No persistence/split mocks: any direct side effect fails compilation/linking.
-    production = text[text.index("size_t kp_rgb_effect_count("):
+    selector_text = SELECTOR_SOURCE.read_text()
+    selector_services = "\n".join(function(selector_text, name) for name in (
+        "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
+        "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",
+        "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot"))
+    production = selector_services + "\n" + text[text.index("size_t kp_rgb_effect_count("):
                       text.index("int kp_rgb_effect_convert_central_state_dependent_params(")]
     production += text[text.index("static int on_keymap_binding_convert_central_state_dependent_params("):
                        text.index("static int on_keymap_binding_pressed(")]

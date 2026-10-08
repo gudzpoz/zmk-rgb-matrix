@@ -42,7 +42,7 @@ static const struct kp_rgb_effect_callbacks optional={.render=paint};
 static struct observation observations[3];
 static struct kp_rgb_effect_api apis[3];
 static struct device devices[3];
-static const struct kp_rgb_effect_config configs[3]={{.index=0},{.index=1},{.index=7}};
+static const struct kp_rgb_effect_config configs[3]={{.owner=&controller_dev,.slot=0},{.owner=&controller_dev,.slot=1},{.owner=NULL,.slot=7}};
 #define a_state (kp_rgb_effect_scenes[0].state)
 #define b_state (kp_rgb_effect_scenes[1].state)
 #define c_state (kp_rgb_overlay_scenes[0].state)
@@ -71,7 +71,7 @@ static void setup(void) {
     host_effects[0]=&devices[0]; host_effects[1]=&devices[1]; host_effect_count=2;
     overlay_state=(struct host_overlay){.child=&devices[2],.gate=true};
     host_overlays[0]=&overlay; host_overlay_count=1;
-    ctx.state.active_fx=&devices[0];
+    ctx.selector.active_fx=&devices[0];
 }
 static void key(int64_t timestamp) {
     const struct zmk_position_state_changed p={.position=0,.state=true,.timestamp=timestamp};
@@ -97,11 +97,11 @@ int main(void) {
     host_run_until(64); assert(a->elapsed==16 && c->elapsed==0);
     // Selection is sampled at delivery, not admission; unobserved transitions coalesce.
     clear_order();
-    key(77); ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    key(77); ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DRAEEPP"));
     assert(a->deactivations==1 && b->resets==1 && b->activations==1 && b->events==1);
     assert(a->events==1 && c->events==2 && b->timestamp==77);
-    ctx.state.active_fx=&devices[0]; ctx.state.active_fx=&devices[1];
+    ctx.selector.active_fx=&devices[0]; ctx.selector.active_fx=&devices[1];
     zmk_rgb_matrix_flush(); host_run_ready(); assert(b->activations==1 && b->deactivations==0);
     // A full cover hides the base; disabling the overlay resumes it without reset.
     overlay_state.cover=true; key(88); host_run_ready();
@@ -114,7 +114,7 @@ int main(void) {
     for(size_t i=0;i<3;i++) assert(observations[i].parameter==123+(int)i && observations[i].resets==2);
     assert(b->elapsed==0);
     // Optional callbacks and independent private instance storage.
-    apis[0].callbacks=&optional; ctx.state.active_fx=&devices[0];
+    apis[0].callbacks=&optional; ctx.selector.active_fx=&devices[0];
     overlay_state.gate=true; overlay_state.cover=false; zmk_rgb_matrix_flush(); host_run_ready();
     assert(a_state.active && c_state.active && !b_state.active);
     unsigned a_events=a->events, c_events=c->events;
@@ -145,19 +145,19 @@ int main(void) {
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
     assert(!a_state.active && !c_state.active);
-    assert(ctx.state.active_fx == &devices[0]);
+    assert(ctx.selector.active_fx == &devices[0]);
     unsigned runs=kp_output_work.work.runs;
     host_run_until(now+1000); assert(kp_output_work.work.runs==runs && kp_rgb_next_frame_ms==INT64_MAX);
     assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(a->elapsed==0);
     host_activity(false); host_run_ready(); assert(!a_state.active);
     host_activity(true); host_run_ready(); assert(a->elapsed==0);
-    clear_order(); ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DAP"));
     // Reverse registry order must still deactivate before activating.
-    clear_order(); ctx.state.active_fx=&devices[0]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); ctx.selector.active_fx=&devices[0]; zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DAP"));
-    ctx.state.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
-    clear_order(); ctx.state.active_fx=&devices[0];
+    ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); ctx.selector.active_fx=&devices[0];
     overlay_state.gate=true; overlay_state.cover=false;
     kp_rgb_matrix_lock(); kp_rgb_request_runtime_reset_locked(); kp_rgb_matrix_unlock();
     host_run_ready();

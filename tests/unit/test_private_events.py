@@ -59,7 +59,7 @@ static const struct kp_rgb_effect_callbacks owner_callbacks={.render=owner_rende
 static const struct kp_rgb_overlay_api owner_api={.callbacks=&owner_callbacks};
 static void test_optional_children(void) {
     overlays[0].api=&owner_api; host_overlays[0]=&overlays[0]; host_overlay_count=1;
-    ctx.state.active_fx=&fx; data[0].gate=true; data[0].cover=false;
+    host_effects[0]=&fx; ctx.selector.active_fx=&fx; data[0].gate=true; data[0].cover=false;
     zmk_rgb_matrix_flush(); host_run_ready();
     assert(child_paints[0]==1 && child_paints[1]==1 && child_elapsed[0]==0 && child_elapsed[1]==0);
     host_run_until(now+16);
@@ -98,7 +98,7 @@ int main(void) {
     // A controller-local overlay list does not change registry ordinals.
     const struct device *local[]={&overlays[1]};
     struct kp_rgb_effect_api selected_api=api; selected_api.overlays=local; selected_api.overlays_len=1;
-    struct device selected=fx; selected.api=&selected_api; ctx.state.active_fx=&selected;
+    struct device selected=fx; selected.api=&selected_api; host_effects[0]=&selected; ctx.selector.active_fx=&selected;
     data[1].gate=true; data[1].cover=false; key();
     assert(counts[0]==2 && counts[1]==3 && !kp_rgb_overlay_scenes[0].state.active);
     animate[1]=false; host_run_until(48); unsigned terminal=paints[1];
@@ -108,7 +108,7 @@ int main(void) {
     kp_rgb_matrix_lock(); assert(!kp_rgb_deliver_position(&unmapped)); kp_rgb_matrix_unlock();
     assert(counts[1]==before);
     selected_api.overlays_len=0; key(); assert(counts[1]==before);
-    ctx.state.active_fx=NULL; key(); assert(counts[1]==before);
+    ctx.selector.active_fx=NULL; key(); assert(counts[1]==before);
     test_optional_children();
     puts("native overlay clocks, full-cover lifecycle, contributing frames, optional children and non-short-circuit input passed");
 }

@@ -100,9 +100,9 @@ static const struct zmk_split_transport_central transport_b = {&transport_api};
 
 static void set_scene(const struct device *device, uint16_t index, bool user_on) {
     kp_rgb_matrix_lock();
-    kp_rgb_controller.state.active_fx = device;
+    kp_rgb_controller.selector.active_fx = device;
     kp_rgb_global.user_on = user_on;
-    kp_rgb_controller.effect_index = index;
+    kp_rgb_controller.selector.effect_index = index;
     kp_rgb_matrix_unlock();
 }
 
@@ -142,7 +142,7 @@ static void finish_source(unsigned source) {
 static void test_initial_connection_and_off_snapshot(void) {
     reset_test();
     struct kp_rgb_effect_common_data data = {{123, 45, 67}, 890};
-    const struct device device = {&data, "rgb"};
+    const struct device device = {&data, "rgb", NULL};
     set_scene(&device, 3, false);
 
     kp_rgb_sync_refresh();
@@ -177,7 +177,7 @@ static void test_initial_connection_and_off_snapshot(void) {
 static void test_disconnect_reconnect_and_transport_replacement(void) {
     reset_test();
     struct kp_rgb_effect_common_data data = {{10, 20, 30}, 700};
-    const struct device device = {&data, "rgb"};
+    const struct device device = {&data, "rgb", NULL};
     set_scene(&device, 1, true);
     available_count = 1;
     available_ids[0] = 0;
@@ -236,7 +236,7 @@ static void test_disconnect_reconnect_and_transport_replacement(void) {
 static void test_failure_backoff_does_not_block_other_source(void) {
     reset_test();
     struct kp_rgb_effect_common_data data = {{1, 2, 3}, 400};
-    const struct device device = {&data, "rgb"};
+    const struct device device = {&data, "rgb", NULL};
     set_scene(&device, 2, true);
     fail_source[0] = true;
     kp_rgb_sync_refresh();

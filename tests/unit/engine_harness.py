@@ -51,10 +51,12 @@ PRELUDE = r'''
 #include <sched.h>
 #define ARG_UNUSED(x) (void)(x)
 #define __ASSERT(cond, ...) assert(cond)
+#define __ASSERT_NO_MSG(cond) assert(cond)
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define KP_RGB_LOCK_RETRY_MS 1
 #define KP_RGB_BRT_MAX 100
+#define KP_RGB_SCENE_EFFECT_COUNT 8
 #define K_NO_WAIT 0
 #define K_MSEC(x) (x)
 #define CONFIG_KEYPAW_RGB_MATRIX_TICK_MS 16
@@ -104,8 +106,10 @@ struct kp_rgb_effect_instance { const struct device *effect; struct kp_rgb_callb
 #define KP_RGB_EFFECT_INSTANCE_INIT(dev) {.effect=(dev)}
 struct kp_rgb_scene_runtime { struct kp_rgb_callback_state state; bool wanted,reset_pending; };
 static struct kp_rgb_scene_runtime kp_rgb_effect_scenes[8],kp_rgb_overlay_scenes[8];
-struct kp_rgb_effect_config { size_t index; };
-static const struct kp_rgb_effect_config *kp_rgb_effect_cfg(const struct device *d) { return d->config; }
+struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };
+#define kp_rgb_effect_config kp_rgb_effect_common_config
+static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct device *d) { return d->config; }
+static const struct device controller_dev = {.name="rgb-controller"};
 struct kp_rgb_overlay_common_data { size_t index; };
 struct kp_rgb_effect_callbacks {
  bool (*render)(const struct device *,const struct kp_rgb_frame *);
@@ -120,14 +124,18 @@ struct kp_rgb_effect_api {
 struct kp_rgb_overlay_api { const struct kp_rgb_effect_callbacks *callbacks; bool replaces_target; };
 typedef void (*scene_visitor)(const struct device *,const struct kp_rgb_effect_callbacks *,struct kp_rgb_scene_runtime *,int64_t);
 struct kp_rgb_global { bool user_on; struct kp_rgb_tuning tuning; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
-struct kp_rgb_controller {
- const struct device *dev;
- uint16_t effect_index;
- struct { const struct device *active_fx; } state;
+struct kp_rgb_hsb { uint16_t h; uint8_t s,b; };
+struct kp_rgb_effect_defaults { struct kp_rgb_hsb color; uint32_t duration_ms; };
+struct kp_rgb_selector {
+ const struct device *owner; const struct device *const *effects;
+ const struct kp_rgb_effect_defaults *effect_defaults;
+ size_t effect_count,effect_index; const struct device *active_fx;
+ int64_t initial_duration_ms; uint16_t initial_effect;
 };
-static struct kp_rgb_global kp_rgb_global={.tuning={100,100},.brightness=100};
-static struct kp_rgb_controller kp_rgb_controller;
+struct kp_rgb_controller { const struct device *dev; struct kp_rgb_selector selector; };
+static struct kp_rgb_controller kp_rgb_controller={.selector={.owner=&controller_dev}};
 #define ctx kp_rgb_controller
+static struct kp_rgb_global kp_rgb_global={.tuning={100,100},.brightness=100};
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;
 static void kp_rgb_matrix_lock(void) { pthread_mutex_lock(&lock); held++; }
@@ -270,7 +278,7 @@ static bool on_event(const struct device *d,const struct kp_rgb_key_event *e) {
 }
 static const struct kp_rgb_effect_callbacks callbacks={.render=render,.on_event=on_event};
 static const struct kp_rgb_effect_api api={.callbacks=&callbacks};
-static const struct kp_rgb_effect_config fx_config={.index=0};
+static const struct kp_rgb_effect_config fx_config={.owner=&controller_dev,.slot=0};
 static const struct device fx={.api=&api,.config=&fx_config};
 static const struct device *host_effects[8]={&fx};
 static size_t host_effect_count=1;
@@ -280,7 +288,7 @@ void kp_rgb_request_runtime_reset_locked(void);
 void kp_rgb_reconcile_power_locked(void);
 static __attribute__((unused)) int kp_rgb_select_effect_locked(uint16_t index) {
  if (index >= host_effect_count) return -EINVAL;
- ctx.effect_index=index; ctx.state.active_fx=host_effects[index];
+ ctx.selector.effect_index=index; ctx.selector.active_fx=host_effects[index];
  kp_rgb_request_runtime_reset_locked(); kp_rgb_reconcile_power_locked();
  return 0;
 }

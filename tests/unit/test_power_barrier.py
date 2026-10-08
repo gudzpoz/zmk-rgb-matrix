@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
         assert(renders==before+(KP_LED_COUNT?1:0));
         if(KP_LED_COUNT) assert(rendered_elapsed==0);
     } else if(!strcmp(name,"resume-selection")) {
-        static const struct kp_rgb_effect_config second_config = {.index = 1};
+        static const struct kp_rgb_effect_config second_config = {.owner = &controller_dev, .slot = 1};
         const struct device second = {.api = &api, .config = &second_config};
         host_effects[1] = &second;
         host_effect_count = 2;
@@ -72,10 +72,10 @@ int main(int argc, char **argv) {
         assert(renders == 1 && kp_rgb_effect_scenes[0].state.active);
         assert(zmk_rgb_matrix_off() == 0);
         host_run_ready();
-        assert(ctx.state.active_fx == &fx && !kp_rgb_effect_scenes[0].state.active);
+        assert(ctx.selector.active_fx == &fx && !kp_rgb_effect_scenes[0].state.active);
         kp_rgb_matrix_lock();
-        ctx.effect_index = 1;
-        ctx.state.active_fx = &second;
+        ctx.selector.effect_index = 1;
+        ctx.selector.active_fx = &second;
         zmk_rgb_matrix_flush();
         kp_rgb_matrix_unlock();
         host_run_ready();
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
         assert(renders == 1 && writes == before && !feedback);
         assert(kp_rgb_pending_available() && !kp_rgb_effect_scenes[1].state.active);
         assert(kp_rgb_effect_scenes[1].reset_pending);
-        assert(ctx.state.active_fx == &second);
+        assert(ctx.selector.active_fx == &second);
         kp_rgb_conditions_refreshed(resume);
         host_run_ready();
         assert(!kp_rgb_refresh_pending && !kp_rgb_pending_available());

@@ -13,6 +13,7 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/__assert.h>
 #include <zephyr/sys/util.h>
 
 #include <zmk/activity.h>
@@ -152,7 +153,11 @@ static struct kp_rgb_scene_runtime kp_rgb_effect_scenes[MAX(1, KP_RGB_SCENE_EFFE
 static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[MAX(1, KP_RGB_OVERLAY_COUNT)];
 
 static struct kp_rgb_scene_runtime *kp_rgb_effect_scene(const struct device *dev) {
-  return &kp_rgb_effect_scenes[kp_rgb_effect_cfg(dev)->index];
+  const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(dev);
+  __ASSERT_NO_MSG(cfg->owner == kp_rgb_controller.selector.owner &&
+                  cfg->slot < KP_RGB_SCENE_EFFECT_COUNT &&
+                  kp_rgb_effect_at(cfg->slot) == dev);
+  return &kp_rgb_effect_scenes[cfg->slot];
 }
 
 static struct kp_rgb_scene_runtime *kp_rgb_overlay_scene(const struct device *dev) {
@@ -386,7 +391,7 @@ static inline void kp_rgb_try_cache_prefix(const struct kp_rgb_frame *local,
 }
 
 static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
-  const struct device *fx = kp_rgb_controller.state.active_fx;
+  const struct device *fx = kp_rgb_controller.selector.active_fx;
   const struct device *const *overlays = NULL;
   size_t overlay_count = 0, first = SIZE_MAX;
   kp_rgb_each_scene(kp_rgb_clear_wanted, now_ms);
@@ -594,7 +599,7 @@ bool zmk_rgb_matrix_is_inhibited(void) {
 
 /* Caller holds kp_rgb_lock. */
 static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
-  const struct device *fx = kp_rgb_controller.state.active_fx;
+  const struct device *fx = kp_rgb_controller.selector.active_fx;
   if (fx == NULL || kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
     return false;
   }

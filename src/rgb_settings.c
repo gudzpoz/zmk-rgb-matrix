@@ -26,7 +26,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_RGB_PERSIST_EFFECT_PATH KP_RGB_PERSIST_SUBTREE "/state/effects/"
 
 static const char *kp_rgb_selected_id(void) {
-  const struct device *fx = kp_rgb_controller.state.active_fx;
+  const struct device *fx = kp_rgb_controller.selector.active_fx;
   if (fx == NULL) {
     return NULL;
   }

@@ -129,7 +129,7 @@ static void kp_rgb_sync_refresh(void) {
   }
 
   kp_rgb_matrix_lock();
-  uint16_t active = (uint16_t)kp_rgb_controller.effect_index;
+  uint16_t active = (uint16_t)kp_rgb_controller.selector.effect_index;
   kp_rgb_matrix_unlock();
 
   int64_t now = k_uptime_get();
@@ -229,9 +229,9 @@ static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
     switch (st->phase) {
     case KP_RGB_SYNC_SELECT: {
       kp_rgb_matrix_lock();
-      st->effect_index = (uint16_t)kp_rgb_controller.effect_index;
+      st->effect_index = (uint16_t)kp_rgb_controller.selector.effect_index;
       st->user_on = kp_rgb_global.user_on;
-      const struct device *fx = kp_rgb_controller.state.active_fx;
+      const struct device *fx = kp_rgb_controller.selector.active_fx;
       if (fx != NULL) {
         const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
         st->color = data->color;

@@ -37,11 +37,11 @@ static bool kp_rgb_sync_send(uint8_t source,uint32_t cmd,uint32_t arg) {
 TESTS = r'''
 int main(void) {
     struct kp_rgb_effect_common_data data = {{123,45,67},890};
-    const struct device device = {&data,"rgb"};
+    const struct device device = {&data,"rgb",NULL};
     kp_rgb_controller.dev = &device;
-    kp_rgb_controller.state.active_fx = &device;
+    kp_rgb_controller.selector.active_fx = &device;
     kp_rgb_global.user_on = true;
-    kp_rgb_controller.effect_index = 3;
+    kp_rgb_controller.selector.effect_index = 3;
     struct kp_rgb_sync_source state = {.phase = KP_RGB_SYNC_SELECT};
     fail = true;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);
@@ -50,7 +50,7 @@ int main(void) {
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
     assert(commands[1] == RGB_EFS_CMD && arguments[1] == 3);
     data.color.h = 300; data.duration_ms = 2000;
-    kp_rgb_controller.effect_index = 9;
+    kp_rgb_controller.selector.effect_index = 9;
     kp_rgb_global.user_on = false;
     fail = true;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);

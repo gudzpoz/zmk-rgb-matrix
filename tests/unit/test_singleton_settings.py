@@ -78,19 +78,19 @@ TESTS = r'''
 int main(void) {
     struct kp_rgb_effect_common_data data[2] = {0};
     static const struct kp_rgb_effect_common_config cfg[2] = {
-        {.index = 0, .persist_id = "a", .persist_parameters = true},
-        {.index = 1, .persist_id = "b", .persist_parameters = true},
+        {.slot = 0, .persist_id = "a", .persist_parameters = true},
+        {.slot = 1, .persist_id = "b", .persist_parameters = true},
     };
     const struct device devices[] = {{&data[0], "a", &cfg[0]}, {&data[1], "b", &cfg[1]}};
     const struct device *effects[] = {&devices[0], &devices[1]};
     const struct kp_rgb_effect_defaults defaults[] = {{{10,20,30},500},{{40,50,60},600}};
-    kp_rgb_controller.effects = effects;
-    kp_rgb_controller.effect_count = 2;
-    kp_rgb_controller.effect_defaults = defaults;
+    kp_rgb_controller.selector.effects = effects;
+    kp_rgb_controller.selector.effect_count = 2;
+    kp_rgb_controller.selector.effect_defaults = defaults;
     kp_rgb_global.initial_on = true;
     kp_rgb_global.initial_brightness = 70;
-    kp_rgb_controller.initial_duration_ms = 1000;
-    kp_rgb_controller.initial_effect = 0;
+    kp_rgb_controller.selector.initial_duration_ms = 1000;
+    kp_rgb_controller.selector.initial_effect = 0;
     assert(kp_rgb_apply_defaults() == 0);
     assert(lock_entries == 1 && reconciles == 1 && reconciled_user_on && !held);
     assert(kp_rgb_global.brightness == 70 && kp_rgb_global.user_on);
@@ -183,10 +183,10 @@ int main(void) {
     const struct device *ieffects[3] = {&idev[0], &idev[1], &idev[2]};
     static const struct kp_rgb_effect_defaults idefaults[3] = {
         {{1, 10, 100}, 101}, {{2, 20, 100}, 202}, {{3, 30, 100}, 303}};
-    kp_rgb_controller.effects = ieffects;
-    kp_rgb_controller.effect_count = 3;
-    kp_rgb_controller.effect_defaults = idefaults;
-    kp_rgb_controller.initial_effect = 0;
+    kp_rgb_controller.selector.effects = ieffects;
+    kp_rgb_controller.selector.effect_count = 3;
+    kp_rgb_controller.selector.effect_defaults = idefaults;
+    kp_rgb_controller.selector.initial_effect = 0;
     assert(kp_rgb_apply_defaults() == 0);
 
     /* A node name longer than the old 16-byte id survives intact. */
@@ -194,7 +194,7 @@ int main(void) {
     kp_rgb_persist_pack(true, 40, "fx_starlight_smooth", &stored);
     assert(!strcmp(stored.selected_id, "fx_starlight_smooth"));
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
-    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+    assert(kp_rgb_controller.selector.active_fx == &idev[2]);
 
     struct kp_rgb_persist_effect ident = {.duration_ms = 777, .h = 111, .s = 22};
     assert(registered_set("state/effects/fx_solid", sizeof(ident), read_blob, &ident) == 0);
@@ -203,18 +203,18 @@ int main(void) {
     assert(registered_set("state/effects/fx_reactive_gradient", sizeof(ident), read_blob,
                           &ident) == 0);
     assert(idata[1].color.h == 222 && idata[1].duration_ms == 777);
-    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+    assert(kp_rgb_controller.selector.active_fx == &idev[2]);
     assert(idata[2].color.h == 3 && idata[2].duration_ms == 303);
 
     /* Reordering the registry re-attaches each id to its effect, not its slot. */
     const struct device *reordered[3] = {&idev[2], &idev[0], &idev[1]};
     static const struct kp_rgb_effect_defaults reordered_presets[3] = {
         {{3, 30, 100}, 303}, {{1, 10, 100}, 101}, {{2, 20, 100}, 202}};
-    kp_rgb_controller.effects = reordered;
-    kp_rgb_controller.effect_defaults = reordered_presets;
+    kp_rgb_controller.selector.effects = reordered;
+    kp_rgb_controller.selector.effect_defaults = reordered_presets;
     assert(kp_rgb_apply_defaults() == 0);
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
-    assert(kp_rgb_controller.state.active_fx == &idev[2]); /* fx_starlight_smooth now slot 0 */
+    assert(kp_rgb_controller.selector.active_fx == &idev[2]); /* fx_starlight_smooth now slot 0 */
     ident.h = 333;
     assert(registered_set("state/effects/fx_solid", sizeof(ident), read_blob, &ident) == 0);
     assert(idata[0].color.h == 333); /* fx_solid moved to slot 1 */
@@ -227,13 +227,13 @@ int main(void) {
     /* A stored selection for a removed effect leaves the current one alone. */
     kp_rgb_persist_pack(true, 40, "fx_removed", &stored);
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
-    assert(kp_rgb_controller.state.active_fx == &idev[2]);
+    assert(kp_rgb_controller.selector.active_fx == &idev[2]);
 
     unsigned saves_before = saves;
     kp_rgb_persist_pack(false, 61, "fx_solid", &stored);
     assert(registered_set("state", sizeof(stored), read_blob, &stored) == 0);
     assert(!kp_rgb_global.user_on && kp_rgb_selected_effect() == 1);
-    assert(kp_rgb_controller.state.active_fx == &idev[0] && !reconciled_user_on);
+    assert(kp_rgb_controller.selector.active_fx == &idev[0] && !reconciled_user_on);
     assert(!pending && saves == saves_before);
     assert(zmk_rgb_matrix_select_effect(2) == 0);
     assert(!pending && saves == saves_before && !kp_rgb_global.user_on);
@@ -248,7 +248,7 @@ int main(void) {
     assert(kp_rgb_global.user_on && kp_rgb_selected_effect() == 0);
     assert(registered_set("state", saved_global_size, read_blob, saved_global) == 0);
     assert(!kp_rgb_global.user_on && !reconciled_user_on);
-    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.state.active_fx == &idev[0]);
+    assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.selector.active_fx == &idev[0]);
     assert(kp_rgb_global.brightness == 61 && !pending && !held);
 
     puts("singleton settings namespace/load/save/reset/identity passed");
@@ -263,12 +263,9 @@ def without_includes(path):
 
 def main():
     code = fixture_code().replace(
-        "struct device { void *data; const char *name; };",
-        "struct device { void *data; const char *name; const void *config; };\n"
-        "struct kp_rgb_effect_common_config { uint16_t index; const char *persist_id; "
-        "bool persist_parameters; };\n"
-        "static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg("
-        "const struct device *dev) { return dev->config; }")
+        "struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };",
+        "struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; "
+        "const char *persist_id; bool persist_parameters; };")
     code += MOCKS
     code += without_includes(ROOT / "include/zmk/rgb_persist.h")
     code += without_includes(ROOT / "src/rgb_persist.c")

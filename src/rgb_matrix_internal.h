@@ -19,6 +19,8 @@
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_persist.h>
 
+#include "rgb_selector_internal.h"
+
 struct kp_rgb_tuning {
   uint8_t max_brightness;
   uint8_t idle_brightness;
@@ -32,24 +34,9 @@ struct kp_rgb_global {
   int32_t initial_brightness;
 };
 
-struct kp_rgb_selection_state {
-  const struct device *active_fx;
-};
-
-struct kp_rgb_effect_defaults {
-  struct kp_rgb_hsb color;
-  uint32_t duration_ms;    /* 0 -> initial_duration_ms */
-};
-
 struct kp_rgb_controller {
   const struct device *dev;
-  struct kp_rgb_selection_state state;
-  const struct device *const *effects;
-  const struct kp_rgb_effect_defaults *effect_defaults;
-  size_t effect_count;
-  size_t effect_index;
-  int64_t initial_duration_ms;
-  uint16_t initial_effect;
+  struct kp_rgb_selector selector;
 };
 
 extern struct kp_rgb_global kp_rgb_global;

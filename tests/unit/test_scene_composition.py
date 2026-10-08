@@ -104,7 +104,7 @@ static void test_engine_composition(void) {
     struct kp_rgb_effect_api reordered_api=api;
     reordered_api.overlays=ordered; reordered_api.overlays_len=3;
     struct device composed_fx=fx; composed_fx.api=&reordered_api;
-    host_effects[0]=&composed_fx; ctx.state.active_fx=&composed_fx;
+    host_effects[0]=&composed_fx; ctx.selector.active_fx=&composed_fx;
     paint_order=0; zmk_rgb_matrix_flush(); host_run_ready();
     assert(paint_order==21);
     expect_output((struct led_rgb){55,10,2},(struct led_rgb){51,18,17});
@@ -130,7 +130,7 @@ static void test_engine_composition(void) {
     zmk_rgb_matrix_flush(); host_run_ready();
     assert(filter_paints==1 && runtime.active && renders==before+1 && !second_state_runtime.active);
     expect_output((struct led_rgb){7,0,0},(struct led_rgb){21,10,3});
-    host_overlay_count=0; host_effects[0]=&fx; ctx.state.active_fx=&fx;
+    host_overlay_count=0; host_effects[0]=&fx; ctx.selector.active_fx=&fx;
     expected_child_targets=NULL;
 }
 int main(void) {

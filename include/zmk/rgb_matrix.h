@@ -245,7 +245,8 @@ int kp_rgb_effect_convert_central_state_dependent_params(
 
 #define KP_RGB_EFFECT_COMMON_CONFIG(inst)                                      \
   .common = {                                                                  \
-      .index = KP_RGB_EFFECT_INDEX(inst),                                      \
+      .owner = KP_RGB_EFFECT_OWNER(DT_DRV_INST(inst)),                         \
+      .slot = KP_RGB_EFFECT_SLOT(inst),                                        \
       .persist_id = DT_PROP_OR(DT_DRV_INST(inst), persist_id,                  \
                                DT_NODE_FULL_NAME(DT_DRV_INST(inst))),          \
       .persist_parameters = DT_NODE_HAS_PROP(DT_DRV_INST(inst), persist_id),   \
@@ -261,7 +262,8 @@ int kp_rgb_effect_convert_central_state_dependent_params(
   }
 
 struct kp_rgb_effect_common_config {
-  uint16_t index; /* registry slot; the effect's child position */
+  const struct device *owner; /* Selector device, or NULL for a non-selectable effect. */
+  uint16_t slot; /* Child position within its parent, including disabled siblings. */
   const char *persist_id;
   bool persist_parameters;
 };
@@ -316,15 +318,16 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
               (COND_CODE_1(DT_NODE_HAS_PROP(node_id, overlays),                \
                            (cfg_inst##_overlays), (NULL))))
 
-/* An effect's registry slot: its position among the owning behavior's children.
- * Declaration order is the identity; the shared convert hook reads the baked
- * copy, since it has no `inst` in scope. */
-#define KP_RGB_EFFECT_INDEX(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
+#define KP_RGB_EFFECT_SLOT(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
 
 /* Only controller children are selectable, persisted and split-addressed.
  * Effects under other parents belong to their owners and retain their own defaults. */
 #define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
   DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
+
+#define KP_RGB_EFFECT_OWNER(node_id)                                           \
+  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
+              (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
 
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
   COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id), (),                          \

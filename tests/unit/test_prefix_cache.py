@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
         assert(renders == 2 && scene[0].r == 20);
         assert(scene[1].b == 100);
     } else if (!strcmp(name, "selection")) {
-        static const struct kp_rgb_effect_config second_config = {.index = 1};
+        static const struct kp_rgb_effect_config second_config = {.owner = &controller_dev, .slot = 1};
         const struct device second = {.api = &api, .config = &second_config};
         host_effects[1] = &second;
         host_effect_count = 2;
@@ -163,8 +163,8 @@ int main(int argc, char **argv) {
         host_run_until(now + 16);
         assert(renders == 1 && scene[0].r == 5);
         kp_rgb_matrix_lock();
-        ctx.effect_index = 1;
-        ctx.state.active_fx = &second;
+        ctx.selector.effect_index = 1;
+        ctx.selector.active_fx = &second;
         host_render_red = 99;
         zmk_rgb_matrix_flush();
         kp_rgb_matrix_unlock();
