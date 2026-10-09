@@ -1,0 +1,34 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  RGB effect selector. Renders its selected nested effect onto the overlay's
+  targets and blends it over earlier output at the configured opacity.
+  Each selector owns separate effect devices and retains its selection while
+  hidden, OFF or inhibited. Declare at least one enabled effect child; at least
+  one child must be ready before RGB control starts.
+
+compatible: "keypaw,rgb-overlay-selector"
+
+include: ["keypaw,rgb-overlay-common.yaml"]
+
+properties:
+  condition:
+    type: phandle
+    description: Condition gating the selector's contribution; omit for unconditional output.
+
+  initial-effect:
+    type: int
+    default: 0
+    description: |
+      Initial child slot, in declaration order including disabled children.
+      Valid range is 0..65535. If this slot is unavailable, the first ready
+      enabled child is selected instead.
+
+  initial-duration-ms:
+    type: int
+    default: 1000
+    description: |
+      Default period in milliseconds for children whose duration is zero or
+      omitted. Clamped to KEYPAW_RGB_MATRIX_DURATION_MIN_MS and
+      KEYPAW_RGB_MATRIX_DURATION_MAX_MS. A child's nonzero duration overrides it.

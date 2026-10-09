@@ -9,8 +9,8 @@
 
 void zmk_rgb_matrix_start(void) {
   __ASSERT(!k_is_in_isr(), "RGB startup requires thread context");
-  if (!k_is_in_isr())
-    kp_rgb_conditions_start();
+  if (k_is_in_isr() || kp_rgb_selector_overlays_start() < 0) return;
+  kp_rgb_conditions_start();
 }
 
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_CONTROL_AUTO_START)

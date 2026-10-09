@@ -3,6 +3,7 @@
  * Host seams only; the runner inserts production API/storage and coordinator.
  */
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -68,6 +69,12 @@ static void zmk_rgb_matrix_flush(void);
 static void kp_rgb_triggers_evaluate(int64_t now);
 static void kp_rgb_triggers_quarantine(void);
 static void kp_rgb_conditions_refreshed(uint64_t token);
+static int selector_start_error;
+static unsigned selector_starts;
+static int kp_rgb_selector_overlays_start(void) {
+    selector_starts++;
+    return selector_start_error;
+}
 /* PRODUCTION_COORDINATOR */
 
 #define N 6
@@ -254,6 +261,17 @@ int main(int argc, char **argv) {
         start();
         assert(entries[0].fault && refresh_completions == 1 && completed_token == 2);
         assert(!control_work.queued && !control_work.scheduled);
+    } else if (!strcmp(name, "startup-unready-selector")) {
+        sources[0].value = true;
+        selector_start_error = -ENODEV;
+        start();
+        assert(selector_starts == 1 && !evaluations && !schedules && !sources[0].calls);
+        selector_start_error = 0;
+        start();
+        assert(selector_starts == 2 && evaluations == 1 && sources[0].calls == 1 && gate);
+        zmk_rgb_matrix_start();
+        ready();
+        assert(selector_starts == 3 && evaluations == 1 && sources[0].calls == 1);
     } else if (!strcmp(name, "startup")) {
         sources[0].value = true;
         kp_rgb_condition_invalidate(&devices[0]);

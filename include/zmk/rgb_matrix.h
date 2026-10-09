@@ -320,13 +320,13 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 
 #define KP_RGB_EFFECT_SLOT(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
 
-/* Only controller children are selectable, persisted and split-addressed.
- * Effects under other parents belong to their owners and retain their own defaults. */
 #define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
   DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
 
 #define KP_RGB_EFFECT_OWNER(node_id)                                           \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
+  COND_CODE_1(UTIL_OR(KP_RGB_EFFECT_IS_REGISTRY(node_id),                      \
+                      DT_NODE_HAS_COMPAT(DT_PARENT(node_id),                   \
+                                         keypaw_rgb_overlay_selector)),        \
               (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
 
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
@@ -414,6 +414,8 @@ struct kp_rgb_condition_api {
 /* Start control once defaults, all settings, and all provider sources are ready.
  * Idempotent, thread-context only. Required when CONTROL_AUTO_START is disabled;
  * otherwise called by the late settings commit or APPLICATION startup hook.
+ * Each configured selector must have a ready child. Otherwise startup is deferred;
+ * call again after its children are ready.
  */
 void zmk_rgb_matrix_start(void);
 

@@ -1,0 +1,8 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+description: Private selector callback probe for native runtime tests
+compatible: "keypaw,rgb-matrix-selector-probe"
+include: keypaw,rgb-matrix-effect-common.yaml
+properties:
+  animate:
+    type: boolean

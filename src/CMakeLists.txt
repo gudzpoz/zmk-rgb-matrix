@@ -29,6 +29,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   conditions/and.c
   conditions/or.c
   overlays/overlay.c
+  overlays/selector.c
   overlays/battery.c
   behaviors/overlay_toggle.c
 )
