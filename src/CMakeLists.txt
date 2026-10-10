@@ -32,6 +32,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   overlays/selector.c
   overlays/battery.c
   behaviors/overlay_toggle.c
+  behaviors/selector.c
 )
 
 # Non-zero cost when there's no DTS definitions:

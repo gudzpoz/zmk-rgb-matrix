@@ -177,6 +177,7 @@ int kp_rgb_save_state(void) {
 static void kp_rgb_restore_defaults(void) {
   kp_rgb_matrix_lock();
   (void)kp_rgb_apply_defaults();
+  kp_rgb_selector_overlays_defaults_locked();
   kp_rgb_request_runtime_reset_locked();
   kp_rgb_matrix_unlock();
 }

@@ -175,7 +175,9 @@ def production_fixture():
     callback_def = OVERLAY[OVERLAY.index('static const struct kp_rgb_effect_callbacks kp_selector_callbacks ='):]
     callback_def = callback_def[:callback_def.index('};') + 2]
     parts.append(callback_def)
+    parts.append(function(OVERLAY, 'kp_rgb_selector_overlay_state_locked'))
     parts.append(function(OVERLAY, 'kp_rgb_selector_overlay_select_locked'))
+    parts.append('static const struct device *kp_rgb_selector_control(const struct device *dev) { return dev; }')
     parts.append(TESTS + MAIN)
     return '\n'.join(parts)
 
@@ -232,7 +234,7 @@ int main(void) {
     ready=false; assert(kp_rgb_selector_overlay_select_locked(&selectors[1],0)==-ENODEV); ready=true;
     assert(kp_rgb_selector_overlay_select_locked(NULL,0)==-ENODEV);
     struct kp_rgb_overlay_api wrong_api={0}; struct device wrong={.api=&wrong_api};
-    assert(kp_rgb_selector_overlay_select_locked(&wrong,0)==-EINVAL);
+    assert(kp_rgb_selector_overlay_select_locked(&wrong,0)==-ENODEV);
 
     /* Continuous active switch deactivates old child before lazy reset/activation. */
     unsigned switch_trace=trace_length;

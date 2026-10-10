@@ -46,9 +46,24 @@ SELECTORS = '''
     ordinary: ordinary {
         compatible = "keypaw,rgb-overlay";
         leds = <1>;
-        white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
+        private_white: white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
     };
 };
+/ {
+    behaviors {
+        rgbs_a: rgbs_a {
+            compatible = "keypaw,behavior-rgb-selector";
+            #binding-cells = <2>;
+            selector = <&selector_a>;
+        };
+        rgbs_b: rgbs_b {
+            compatible = "keypaw,behavior-rgb-selector";
+            #binding-cells = <2>;
+            selector = <&selector_b>;
+        };
+    };
+};
+&kprgb { selector = <&selector_a>; };
 &fx_solid_v { no-overlays; };
 &kscan { events = <>; };
 '''
@@ -63,16 +78,46 @@ CASES = {
 }
 
 
-def build(root, name, fragment, runtime=False):
+CONTROL_CASES = {
+    "missing-control": ('&rgbs_a { status = "disabled"; };',
+                        r"RGB selector requires exactly one enabled canonical control"),
+    "duplicate-control": ('''/ { behaviors { rgbs_dup {
+        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
+        selector = <&selector_a>; }; }; };''',
+                          r"RGB selector requires exactly one enabled canonical control"),
+    "wrong-kind-control": ('''/ { behaviors { badctl {
+        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
+        selector = <&ordinary>; }; }; };''',
+                           r"RGB selector control must reference a selector overlay"),
+    "disabled-control-target": ('''&rgb_overlays { disabled_selector: disabled_selector {
+        compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
+        child { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
+        }; }; / { behaviors { badctl {
+        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
+        selector = <&disabled_selector>; }; }; };''',
+                               r"RGB selector control must reference an enabled selector"),
+    "wrong-kind-alias": ('&kprgb { selector = <&ordinary>; };',
+                         r"RGB matrix selector alias must reference a selector overlay"),
+    "disabled-alias": ('&selector_a { status = "disabled"; }; &rgbs_a { status = "disabled"; };',
+                       r"RGB matrix selector alias must reference an enabled selector"),
+    "oversized-control": ('&rgbs_a { label = "control_name_too_long"; };',
+                          r"RGB selector control name must fit the 9-byte split behavior_dev field"),
+    "oversized-global": ('&kprgb { label = "global_name_too_long"; };',
+                         r"RGB controller name must fit the split behavior_dev field"),
+}
+
+
+def build(root, name, fragment, runtime=False, selectors=SELECTORS, extra_conf=""):
     config = root / name / "config"
     config.mkdir(parents=True)
     for filename in ("native_sim.conf", "native_sim.keymap"):
         (config / filename).write_text((SIM / "config" / filename).read_text())
     if runtime:
         with (config / "native_sim.conf").open("a") as output:
-            output.write("\nCONFIG_KEYPAW_SIM_SELECTOR_TEST=y\nCONFIG_ASSERT=y\n")
+            output.write("\nCONFIG_KEYPAW_SIM_SELECTOR_TEST=y\nCONFIG_ASSERT=y\n"
+                         "CONFIG_ZMK_BEHAVIOR_METADATA=y\n" + extra_conf)
     (config / "native_sim.overlay").write_text(
-        f'#include "{SIM / "config/native_sim.overlay"}"\n' + SELECTORS + fragment)
+        f'#include "{SIM / "config/native_sim.overlay"}"\n' + selectors + fragment)
     command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
                "-b", "native_sim//zmk_test_mock", "-p", "--",
                f"-DZMK_CONFIG={config}", f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
@@ -125,11 +170,28 @@ def main():
         assert result.returncode != 0, name
         assert re.search(diagnostic, result.stdout), result.stdout[-12000:]
         print(f"PASS selector configuration {name}", flush=True)
+    for name, (fragment, diagnostic) in CONTROL_CASES.items():
+        result = build(root, name, fragment)
+        assert result.returncode != 0, name
+        assert re.search(diagnostic, result.stdout), result.stdout[-12000:]
+        print(f"PASS selector configuration {name}", flush=True)
+    long_selectors = SELECTORS.replace("selector_a: selector_a {",
+                                      "selector_a: selector_with_a_long_overlay_name {")
+    result = build(root, "long-overlay", "", runtime=True, selectors=long_selectors)
+    assert result.returncode == 0, result.stdout[-12000:]
+    command = [str(root / "long-overlay/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
+    print("COMMAND", " ".join(command), flush=True)
+    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT)
+    (root / "long-overlay.log").write_text(run.stdout)
+    assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout
+    assert "<err>" not in run.stdout, run.stdout
+    print("PASS long overlay with short canonical control", flush=True)
     result = build(root, "runtime", "", runtime=True)
     assert result.returncode == 0, result.stdout[-12000:]
     capture = root / "selector.bin"
     command = [str(root / "runtime/build/zephyr/zmk.exe"), f"--capture={capture}",
-               "--stop_at=4", "-no-rt"]
+               "--stop_at=6", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
     run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT)
@@ -143,6 +205,35 @@ def main():
     assert re.search(r"render elapsed=[1-9]\d* demand=1", run.stdout), run.stdout
     print("PASS selector lifecycle/input/retained selection/clock restart")
     check_capture(capture, run.stdout)
+
+    result = build(root, "absent-alias", '&kprgb { /delete-property/ selector; };', runtime=True)
+    assert result.returncode == 0, result.stdout[-12000:]
+    command = [str(root / "absent-alias/build/zephyr/zmk.exe"), "--stop_at=1", "-no-rt"]
+    print("COMMAND", " ".join(command), flush=True)
+    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT)
+    (root / "absent-alias.log").write_text(run.stdout)
+    assert run.returncode == 0 and "PASS absent public selector alias" in run.stdout, run.stdout
+    assert "<err>" not in run.stdout, run.stdout
+    print("PASS absent public selector alias", flush=True)
+
+    result = build(root, "late-control", '''&rgbs_a {
+        compatible = "test,rgb-selector-late-control", "keypaw,behavior-rgb-selector";
+        zephyr,deferred-init;
+        };''', runtime=True,
+                   extra_conf="CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n")
+    assert result.returncode == 0, result.stdout[-12000:]
+    command = [str(root / "late-control/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
+    print("COMMAND", " ".join(command), flush=True)
+    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT)
+    (root / "late-control.log").write_text(run.stdout)
+    assert run.returncode == 0, run.stdout[-12000:]
+    assert "PASS canonical readiness deferred start" in run.stdout, run.stdout
+    assert "PASS selector runtime" in run.stdout, run.stdout
+    errors = [line for line in run.stdout.splitlines() if "<err>" in line]
+    assert errors and all("canonical control is not ready" in line for line in errors), errors
+    print("PASS canonical readiness deferred start", flush=True)
 
 
 if __name__ == "__main__":

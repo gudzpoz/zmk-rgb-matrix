@@ -34,6 +34,7 @@ struct kp_selector_data {
   bool active;
   bool prepared;
   bool ready;
+  bool reset_requested;
 };
 
 static void kp_selector_reconcile(const struct device *dev, int64_t now_ms) {
@@ -41,10 +42,21 @@ static void kp_selector_reconcile(const struct device *dev, int64_t now_ms) {
   size_t wanted = data->active ? data->selector.effect_index : SIZE_MAX;
 
   if (data->live_slot != wanted && data->live_slot != SIZE_MAX) {
-    kp_rgb_effect_instance_set_active(&data->instances[data->live_slot], false, now_ms);
+    kp_rgb_effect_instance_set_active(&data->instances[data->live_slot], false,
+                                      now_ms);
     data->live_slot = SIZE_MAX;
   }
-  if (wanted == SIZE_MAX) return;
+  if (data->reset_requested) {
+    for (size_t i = 0; i < data->selector.effect_count; i++) {
+      data->reset_pending[i] = true;
+      if (kp_rgb_selector_at(&data->selector, i) != NULL) {
+        kp_rgb_effect_instance_restart_clock(&data->instances[i]);
+      }
+    }
+    data->reset_requested = false;
+  }
+  if (wanted == SIZE_MAX)
+    return;
 
   struct kp_rgb_effect_instance *instance = &data->instances[wanted];
   if (data->reset_pending[wanted]) {
@@ -57,36 +69,37 @@ static void kp_selector_reconcile(const struct device *dev, int64_t now_ms) {
 
 static void kp_selector_reset(const struct device *dev, int64_t now_ms) {
   struct kp_selector_data *data = dev->data;
-  if (!data->ready) return;
+  if (!data->ready)
+    return;
 
-  for (size_t i = 0; i < data->selector.effect_count; i++) {
-    data->reset_pending[i] = true;
-    if (kp_rgb_selector_at(&data->selector, i) != NULL) {
-      kp_rgb_effect_instance_restart_clock(&data->instances[i]);
-    }
-  }
+  data->reset_requested = true;
   kp_selector_reconcile(dev, now_ms);
 }
 
-static void kp_selector_set_active(const struct device *dev, bool active, int64_t now_ms) {
+static void kp_selector_set_active(const struct device *dev, bool active,
+                                   int64_t now_ms) {
   struct kp_selector_data *data = dev->data;
-  if (!data->ready) return;
+  if (!data->ready)
+    return;
 
   data->active = active;
   kp_selector_reconcile(dev, now_ms);
 }
 
 static bool kp_selector_on_event(const struct device *dev,
-                                  const struct kp_rgb_key_event *event) {
+                                 const struct kp_rgb_key_event *event) {
   struct kp_selector_data *data = dev->data;
-  if (!data->ready) return false;
+  if (!data->ready)
+    return false;
 
   kp_selector_reconcile(dev, k_uptime_get());
   return data->live_slot != SIZE_MAX &&
-         kp_rgb_effect_instance_on_event(&data->instances[data->live_slot], event);
+         kp_rgb_effect_instance_on_event(&data->instances[data->live_slot],
+                                         event);
 }
 
-static bool kp_selector_render(const struct device *dev, const struct kp_rgb_frame *frame) {
+static bool kp_selector_render(const struct device *dev,
+                               const struct kp_rgb_frame *frame) {
   struct kp_selector_data *data = dev->data;
   const struct kp_selector_config *cfg = dev->config;
   bool animating = false;
@@ -109,7 +122,8 @@ static bool kp_selector_render(const struct device *dev, const struct kp_rgb_fra
     child_frame.pixels[frame->targets[i]] = (struct led_rgb){0};
   }
   if (data->ready && data->live_slot != SIZE_MAX) {
-    animating = kp_rgb_effect_instance_render(&data->instances[data->live_slot], &child_frame);
+    animating = kp_rgb_effect_instance_render(&data->instances[data->live_slot],
+                                              &child_frame);
   }
   kp_rgb_overlay_paint_pixels(frame, frame->targets, frame->target_count,
                               frame->scratch, cfg->common.opacity);
@@ -123,27 +137,57 @@ static const struct kp_rgb_effect_callbacks kp_selector_callbacks = {
     .reset = kp_selector_reset,
 };
 
-int kp_rgb_selector_overlay_select_locked(const struct device *dev, uint16_t slot) {
-  if (dev == NULL || !device_is_ready(dev)) return -ENODEV;
+struct kp_rgb_selector *
+kp_rgb_selector_overlay_state_locked(const struct device *dev) {
+  if (dev == NULL || !device_is_ready(dev))
+    return NULL;
   const struct kp_rgb_overlay_api *api = dev->api;
-  if (api == NULL || api->callbacks != &kp_selector_callbacks) return -EINVAL;
+  if (api == NULL || api->callbacks != &kp_selector_callbacks)
+    return NULL;
   struct kp_selector_data *data = dev->data;
-  if (!data->ready) return -ENODEV;
+  return data->ready ? &data->selector : NULL;
+}
 
-  int changed = kp_rgb_selector_select_locked(&data->selector, slot);
-  if (changed > 0) zmk_rgb_matrix_flush();
+int kp_rgb_selector_overlay_select_locked(const struct device *dev,
+                                          uint16_t slot) {
+  struct kp_rgb_selector *selector = kp_rgb_selector_overlay_state_locked(dev);
+  if (selector == NULL)
+    return -ENODEV;
+  const struct device *target = kp_rgb_selector_at(selector, slot);
+  if (target != NULL && !device_is_ready(target))
+    return -ENODEV;
+  int changed = kp_rgb_selector_select_locked(selector, slot);
+  if (changed > 0)
+    zmk_rgb_matrix_flush();
   return changed;
+}
+
+int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
+  struct kp_rgb_selector *selector = kp_rgb_selector_overlay_state_locked(dev);
+  if (selector == NULL)
+    return -ENODEV;
+  struct kp_selector_data *data = dev->data;
+  int err = kp_rgb_selector_apply_defaults_locked(selector);
+  if (kp_rgb_selector_at(selector, selector->initial_effect) == NULL) {
+    selector->effect_index = 0;
+    err = kp_rgb_selector_resolve_locked(selector);
+  }
+  data->reset_requested = true;
+  zmk_rgb_matrix_flush();
+  return err;
 }
 
 static void kp_selector_refresh_members(struct kp_selector_data *data) {
   for (size_t i = 0; i < data->selector.effect_count; i++) {
     const struct device *effect = data->instances[i].effect;
-    data->members[i] = effect != NULL && device_is_ready(effect) ? effect : NULL;
+    data->members[i] =
+        effect != NULL && device_is_ready(effect) ? effect : NULL;
   }
 }
 
 static void kp_selector_prepare_locked(struct kp_selector_data *data) {
-  if (data->prepared) return;
+  if (data->prepared)
+    return;
   kp_selector_refresh_members(data);
   struct kp_rgb_selector defaults = data->selector;
   kp_rgb_selector_apply_defaults_locked(&defaults);
@@ -153,7 +197,8 @@ static void kp_selector_prepare_locked(struct kp_selector_data *data) {
 }
 
 static int kp_selector_prepare(const struct device *dev) {
-  if (!device_is_ready(dev)) return 0;
+  if (!device_is_ready(dev))
+    return 0;
   kp_rgb_matrix_lock();
   kp_selector_prepare_locked(dev->data);
   kp_rgb_matrix_unlock();
@@ -163,6 +208,11 @@ static int kp_selector_prepare(const struct device *dev) {
 static int kp_selector_start(const struct device *dev) {
   if (!device_is_ready(dev)) {
     LOG_ERR("RGB selector %s is not ready", dev->name);
+    return -ENODEV;
+  }
+  const struct device *control = kp_rgb_selector_control(dev);
+  if (control == NULL || !device_is_ready(control)) {
+    LOG_ERR("RGB selector %s canonical control is not ready", dev->name);
     return -ENODEV;
   }
   struct kp_selector_data *data = dev->data;
@@ -175,7 +225,8 @@ static int kp_selector_start(const struct device *dev) {
   /* Settings may restore existing member parameters before startup. */
   for (size_t i = 0; i < data->selector.effect_count; i++) {
     const struct device *effect = data->instances[i].effect;
-    bool newly_ready = data->members[i] == NULL && effect != NULL && device_is_ready(effect);
+    bool newly_ready =
+        data->members[i] == NULL && effect != NULL && device_is_ready(effect);
     data->members[i] = newly_ready ? effect : NULL;
   }
   struct kp_rgb_selector defaults = data->selector;
@@ -184,13 +235,15 @@ static int kp_selector_start(const struct device *dev) {
   if (data->selector.active_fx == NULL) {
     data->selector.effect_index = data->selector.initial_effect;
   }
-  if (kp_rgb_selector_at(&data->selector, data->selector.effect_index) == NULL) {
+  if (kp_rgb_selector_at(&data->selector, data->selector.effect_index) ==
+      NULL) {
     data->selector.effect_index = 0;
   }
   int err = kp_rgb_selector_resolve_locked(&data->selector);
   data->ready = err == 0;
   kp_rgb_matrix_unlock();
-  if (err < 0) LOG_ERR("RGB selector %s has no ready effect", dev->name);
+  if (err < 0)
+    LOG_ERR("RGB selector %s has no ready effect", dev->name);
   return err < 0 ? -ENODEV : 0;
 }
 
@@ -262,11 +315,50 @@ int kp_rgb_selector_overlays_start(void) {
   return result;
 }
 
+static void kp_selector_defaults_locked(const struct device *dev) {
+  if (!device_is_ready(dev))
+    return;
+  struct kp_selector_data *data = dev->data;
+  if (data->ready) {
+    (void)kp_rgb_selector_overlay_reset_locked(dev);
+    return;
+  }
+  kp_selector_prepare_locked(data);
+  kp_selector_refresh_members(data);
+  struct kp_rgb_selector defaults = data->selector;
+  kp_rgb_selector_apply_defaults_locked(&defaults);
+  data->selector.effect_index = data->selector.initial_effect;
+  data->selector.active_fx = NULL;
+  data->reset_requested = true;
+  zmk_rgb_matrix_flush();
+}
+
+#define KP_SELECTOR_DEFAULTS(inst)                                             \
+  kp_selector_defaults_locked(DEVICE_DT_GET(DT_DRV_INST(inst)));
+
+void kp_rgb_selector_overlays_defaults_locked(void) {
+  DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_DEFAULTS)
+}
+
 #else
 
 int kp_rgb_selector_overlays_start(void) { return 0; }
 
-int kp_rgb_selector_overlay_select_locked(const struct device *dev, uint16_t slot) {
+void kp_rgb_selector_overlays_defaults_locked(void) {}
+
+struct kp_rgb_selector *
+kp_rgb_selector_overlay_state_locked(const struct device *dev) {
+  ARG_UNUSED(dev);
+  return NULL;
+}
+
+int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
+  ARG_UNUSED(dev);
+  return -ENODEV;
+}
+
+int kp_rgb_selector_overlay_select_locked(const struct device *dev,
+                                          uint16_t slot) {
   ARG_UNUSED(dev);
   ARG_UNUSED(slot);
   return -ENODEV;

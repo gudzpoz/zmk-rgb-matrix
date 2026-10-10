@@ -42,10 +42,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
 
 enum kp_rgb_sync_phase {
-  KP_RGB_SYNC_SELECT,   /* RGB_EFS_CMD: must precede colour/period */
-  KP_RGB_SYNC_COLOR,    /* RGB_COLOR_HSB_CMD on the now-active effect */
-  KP_RGB_SYNC_DURATION, /* RGB_SPI_CMD on the now-active effect */
-  KP_RGB_SYNC_POWER,    /* RGB_ON_CMD / RGB_OFF_CMD */
+  KP_RGB_SYNC_SELECT,
+  KP_RGB_SYNC_COLOR,
+  KP_RGB_SYNC_DURATION,
+  KP_RGB_SYNC_BRIGHTNESS,
+  KP_RGB_SYNC_POWER,
   KP_RGB_SYNC_OVERLAYS,
 };
 
@@ -70,6 +71,7 @@ struct kp_rgb_sync_source {
   uint16_t duration_ms;
   struct kp_rgb_hsb color;
   bool user_on;
+  uint8_t brightness;
 };
 
 static struct k_work_delayable kp_rgb_sync_poll;
@@ -231,6 +233,7 @@ static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
       kp_rgb_matrix_lock();
       st->effect_index = (uint16_t)kp_rgb_controller.selector.effect_index;
       st->user_on = kp_rgb_global.user_on;
+      st->brightness = kp_rgb_global.brightness;
       const struct device *fx = kp_rgb_controller.selector.active_fx;
       if (fx != NULL) {
         const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
@@ -240,20 +243,24 @@ static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
       }
       kp_rgb_matrix_unlock();
       if (fx == NULL) {
-        st->phase = KP_RGB_SYNC_POWER;
+        st->phase = KP_RGB_SYNC_BRIGHTNESS;
         return KP_RGB_SYNC_EMIT_SENT;
       }
-      cmd = RGB_EFS_CMD;
+      cmd = RGB_LEGACY_EFS_CMD;
       arg = st->effect_index;
       break;
     }
     case KP_RGB_SYNC_COLOR:
-      cmd = RGB_COLOR_HSB_CMD;
+      cmd = RGB_LEGACY_COLOR_CMD;
       arg = RGB_COLOR_HSB_VAL(st->color.h, st->color.s, st->color.b);
       break;
     case KP_RGB_SYNC_DURATION:
-      cmd = RGB_SPI_CMD;
+      cmd = RGB_LEGACY_PERIOD_CMD;
       arg = st->duration_ms;
+      break;
+    case KP_RGB_SYNC_BRIGHTNESS:
+      cmd = RGB_BRT_SET_CMD;
+      arg = st->brightness;
       break;
     case KP_RGB_SYNC_POWER:
       cmd = st->user_on ? RGB_ON_CMD : RGB_OFF_CMD;

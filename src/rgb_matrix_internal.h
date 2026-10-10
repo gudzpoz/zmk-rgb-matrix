@@ -87,6 +87,7 @@ void kp_rgb_request_runtime_reset_locked(void);
 int kp_rgb_resolve_active(void);
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
 int kp_rgb_select_effect(uint16_t index);
+int kp_rgb_cycle_effect(int16_t direction);
 
 extern const size_t kp_rgb_all_targets[MAX(1, KP_LED_COUNT)];
 const size_t *kp_rgb_overlay_targets(const struct device *dev);
@@ -122,6 +123,12 @@ static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
 }
 static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
+
+/* Temporary flat-controller transport endpoints bypass the explicit selector alias. */
+#define RGB_LEGACY_EFS_CMD 0x104
+#define RGB_LEGACY_COLOR_CMD 0x105
+#define RGB_LEGACY_PERIOD_CMD 0x106
+#define RGB_BRT_SET_CMD 0x107
 
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word. */
 #define RGB_OVL_STATE_VAL(word, value)                                         \

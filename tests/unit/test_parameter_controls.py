@@ -33,9 +33,11 @@ MOCKS = r'''
 #include <errno.h>
 #define ARG_UNUSED(v) (void)(v)
 #define RGB_COLOR_HSB_VAL(h,s,b) (((uint32_t)(h)<<16) | ((s)<<8) | (b))
+#define RGB_LEGACY_EFS_CMD 0x104
+#define RGB_BRT_SET_CMD 0x107
 enum {RGB_TOG_CMD, RGB_OFF_CMD, RGB_ON_CMD, RGB_BRI_CMD, RGB_BRD_CMD,
       RGB_HUI_CMD, RGB_HUD_CMD, RGB_SAI_CMD, RGB_SAD_CMD, RGB_COLOR_HSB_CMD,
-      RGB_EFR_CMD, RGB_EFF_CMD, RGB_EFS_CMD, RGB_SPI_CMD, RGB_SPD_CMD};
+      RGB_EFR_CMD, RGB_EFF_CMD, RGB_EFS_CMD, RGB_SPI_CMD, RGB_SPD_CMD, RGB_RESET_CMD};
 struct zmk_behavior_binding { uint32_t param1, param2; };
 struct zmk_behavior_binding_event { int unused; };
 #define CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : ((v) > (hi) ? (hi) : (v)))
@@ -99,6 +101,12 @@ static uint32_t kp_rgb_effect_period(const struct device *dev) {
 }
 static void zmk_rgb_matrix_flush(void) { assert(locked); flushes++; }
 static void kp_rgb_reconcile_power_locked(void) { assert(locked); }
+static const struct device *kp_rgb_selector_alias(void) { return NULL; }
+static struct kp_rgb_selector *kp_rgb_selector_overlay_state_locked(const struct device *dev) { (void)dev; return NULL; }
+static int kp_rgb_selector_binding_convert(const struct device *dev, struct zmk_behavior_binding *binding) { (void)dev; (void)binding; return -ENODEV; }
+static int kp_rgb_selector_binding_apply(const struct device *dev, uint32_t command, uint32_t argument) { (void)dev; (void)command; (void)argument; return -ENODEV; }
+static int kp_rgb_set_color_locked(const struct device *fx, const struct kp_rgb_hsb *color);
+static int kp_rgb_set_period_locked(const struct device *fx, uint32_t period);
 '''
 
 TESTS = r'''
@@ -171,9 +179,9 @@ int main(void) {
     (void)kp_rgb_calc_hue(1); (void)kp_rgb_calc_sat(1); (void)kp_rgb_calc_brt(1);
     assert(kp_rgb_select_effect(3)==-EINVAL);
     assert(kp_rgb_select_effect(1)==-ENOENT);
-    assert(zmk_rgb_matrix_select_effect(0)==0);
-    n=flushes; assert(zmk_rgb_matrix_select_effect(0)==0 && flushes==n);
-    assert(zmk_rgb_matrix_cycle_effect(0)==0 && flushes==n);
+    assert(kp_rgb_select_effect(0)==0);
+    n=flushes; assert(kp_rgb_select_effect(0)==0 && flushes==n);
+    assert(kp_rgb_cycle_effect(0)==0 && flushes==n);
     assert(kp_rgb_global.user_on==user_on && kp_rgb_global.brightness==0 &&
            kp_rgb_global.tuning.max_brightness==max_brightness &&
            kp_rgb_global.tuning.idle_brightness==idle_brightness);
@@ -187,8 +195,8 @@ int main(void) {
     assert(kp_rgb_change_sat(1)==-EWOULDBLOCK);
     assert(kp_rgb_change_brt(1)==-EWOULDBLOCK);
     assert(kp_rgb_change_duration(1)==-EWOULDBLOCK);
-    assert(zmk_rgb_matrix_select_effect(0)==-EWOULDBLOCK);
-    assert(zmk_rgb_matrix_cycle_effect(1)==-EWOULDBLOCK);
+    assert(kp_rgb_select_effect(0)==-EWOULDBLOCK);
+    assert(kp_rgb_cycle_effect(1)==-EWOULDBLOCK);
     assert(lock_calls==locks); isr=false;
     defaults[0].duration_ms=UINT32_MAX;
     defaults[2].duration_ms=1;
@@ -206,12 +214,26 @@ int main(void) {
     locks=lock_calls;
     assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==0);
     assert(binding.param1==RGB_SPI_CMD && binding.param2==100 && lock_calls==locks+1);
-    binding.param1=RGB_HUI_CMD;
+    binding.param1=RGB_HUI_CMD; binding.param2=1;
+    assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==-EINVAL);
+    assert(binding.param1==RGB_HUI_CMD && binding.param2==1);
+    binding.param2=0;
     assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==0);
     assert(binding.param1==RGB_COLOR_HSB_CMD && (binding.param2>>16)==37);
-    binding.param1=RGB_EFF_CMD;
+    effects[2].ready=true;
+    binding.param1=RGB_EFF_CMD; binding.param2=1;
+    assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==-EINVAL);
+    assert(binding.param1==RGB_EFF_CMD && binding.param2==1);
+    binding.param2=0;
     assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==0);
     assert(binding.param1==RGB_EFS_CMD && binding.param2==2);
+    binding.param1=RGB_RESET_CMD; binding.param2=1;
+    kp_rgb_matrix_lock();
+    assert(kp_rgb_selector_convert_locked(&kp_rgb_controller.selector,&binding)==-EINVAL);
+    assert(binding.param1==RGB_RESET_CMD && binding.param2==1);
+    binding.param2=0;
+    assert(kp_rgb_selector_convert_locked(&kp_rgb_controller.selector,&binding)==0);
+    kp_rgb_matrix_unlock();
     binding.param1=999;
     assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==0);
     c=(struct kp_rgb_hsb){47,66,88}; n=flushes;
@@ -243,7 +265,9 @@ def main():
     selector_services = "\n".join(function(selector_text, name) for name in (
         "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
         "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",
-        "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot"))
+        "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot",
+        "kp_rgb_selector_command", "kp_rgb_selector_convert_locked",
+        "kp_rgb_selector_dispatch_locked"))
     production = selector_services + "\n" + text[text.index("size_t kp_rgb_effect_count("):
                       text.index("int kp_rgb_effect_convert_central_state_dependent_params(")]
     production += text[text.index("static int on_keymap_binding_convert_central_state_dependent_params("):

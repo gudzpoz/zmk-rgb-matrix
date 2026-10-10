@@ -98,22 +98,22 @@ int main(void) {
     assert(data[3].color.h == 321 && data[3].duration_ms == 456);
     assert(kp_rgb_effect_count() == 4);
     assert(kp_rgb_effect_at(2) == NULL && kp_rgb_effect_at(4) == NULL);
-    assert(zmk_rgb_matrix_select_effect(2) == -ENOENT);
-    assert(zmk_rgb_matrix_select_effect(4) == -EINVAL);
+    assert(kp_rgb_select_effect(2) == -ENOENT);
+    assert(kp_rgb_select_effect(4) == -EINVAL);
     assert(kp_rgb_selected_effect() == 0);
-    assert(zmk_rgb_matrix_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 1);
-    assert(zmk_rgb_matrix_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 3); /* Skip disabled. */
-    assert(zmk_rgb_matrix_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 0); /* Wrap. */
-    assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 3); /* Wrap. */
-    assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 1); /* Skip disabled. */
-    assert(zmk_rgb_matrix_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 0);
-    assert(zmk_rgb_matrix_select_effect(1) == 0 && kp_rgb_selected_effect() == 1);
+    assert(kp_rgb_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 1);
+    assert(kp_rgb_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 3); /* Skip disabled. */
+    assert(kp_rgb_cycle_effect(1) == 0 && kp_rgb_selected_effect() == 0); /* Wrap. */
+    assert(kp_rgb_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 3); /* Wrap. */
+    assert(kp_rgb_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 1); /* Skip disabled. */
+    assert(kp_rgb_cycle_effect(-1) == 0 && kp_rgb_selected_effect() == 0);
+    assert(kp_rgb_select_effect(1) == 0 && kp_rgb_selected_effect() == 1);
     unsigned before=flushes, locked_before=locked_flushes;
-    assert(zmk_rgb_matrix_select_effect(1) == 0 && flushes == before);
-    assert(zmk_rgb_matrix_cycle_effect(0) == 0 && flushes == before);
+    assert(kp_rgb_select_effect(1) == 0 && flushes == before);
+    assert(kp_rgb_cycle_effect(0) == 0 && flushes == before);
     isr = true;
-    assert(zmk_rgb_matrix_select_effect(0) == -EWOULDBLOCK);
-    assert(zmk_rgb_matrix_cycle_effect(1) == -EWOULDBLOCK);
+    assert(kp_rgb_select_effect(0) == -EWOULDBLOCK);
+    assert(kp_rgb_cycle_effect(1) == -EWOULDBLOCK);
     assert(kp_rgb_set_duration(100) == -EWOULDBLOCK);
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){0,0,0}) == -EWOULDBLOCK);
     assert(flushes == before && !held);
@@ -152,7 +152,7 @@ int main(void) {
     assert(kp_rgb_set_hsb((struct kp_rgb_hsb){222,50,80}) == -ENODEV);
     assert(kp_rgb_set_duration(500) == -ENODEV && flushes==before);
     kp_rgb_controller.selector.active_fx=&devices[1];
-    assert(zmk_rgb_matrix_select_effect(0) == 0);
+    assert(kp_rgb_select_effect(0) == 0);
     assert(data[1].color.h == 222 && data[0].color.h == 10 && data[3].color.h == 321);
     assert(data[1].duration_ms == 1234 && data[0].duration_ms == 100 && data[3].duration_ms == 456);
     kp_rgb_controller.selector.initial_effect = 99;
@@ -179,16 +179,16 @@ int main(void) {
     unsigned power_before = reconciles;
     before = flushes;
     locked_before = locked_flushes;
-    assert(zmk_rgb_matrix_select_effect(1) == 0);
+    assert(kp_rgb_select_effect(1) == 0);
     assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.selector.active_fx == &devices[1]);
-    assert(zmk_rgb_matrix_cycle_effect(1) == 0);
+    assert(kp_rgb_cycle_effect(1) == 0);
     assert(kp_rgb_selected_effect() == 3 && kp_rgb_controller.selector.active_fx == &devices[2]);
     assert(!kp_rgb_global.user_on && reconciles == power_before);
     assert(kp_rgb_global.brightness == 100 && kp_rgb_global.tuning.max_brightness == 40 &&
            kp_rgb_global.tuning.idle_brightness == 30);
     assert(data[1].color.h == 40 && data[1].duration_ms == 10000);
     assert(flushes == before + 2 && locked_flushes == locked_before + 2);
-    assert(zmk_rgb_matrix_select_effect(2) == -ENOENT);
+    assert(kp_rgb_select_effect(2) == -ENOENT);
     assert(kp_rgb_selected_effect() == 3 && flushes == before + 2);
     assert(held == 0);
     puts("singleton selection/defaults/private parameter isolation passed");
@@ -231,9 +231,9 @@ static void kp_rgb_reconcile_power_locked(void) {
         "kp_rgb_effect_count", "kp_rgb_effect_at", "kp_rgb_selected_effect",
         "kp_rgb_calc_effect_index", "kp_rgb_resolve_active",
         "kp_rgb_apply_defaults", "kp_rgb_select_effect_locked", "kp_rgb_select_effect",
-        "zmk_rgb_matrix_select_effect", "kp_rgb_parameter_target_ready",
+        "kp_rgb_cycle_effect", "kp_rgb_parameter_target_ready",
         "kp_rgb_set_color_locked", "kp_rgb_set_period_locked",
-        "zmk_rgb_matrix_cycle_effect", "kp_rgb_set_hsb", "kp_rgb_set_duration"))
+        "kp_rgb_set_hsb", "kp_rgb_set_duration"))
     return code
 
 
@@ -250,6 +250,9 @@ def conversion_fixture_code():
     code += r'''
 #define ARG_UNUSED(x) (void)(x)
 #define RGB_EFS_CMD 13
+#define RGB_LEGACY_EFS_CMD 0x104
+static struct kp_rgb_selector *kp_rgb_selector_overlay_state_locked(const struct device *dev) { (void)dev; return NULL; }
+static const struct device *kp_rgb_selector_control(const struct device *dev) { (void)dev; return NULL; }
 struct zmk_behavior_binding { const char *behavior_dev; uint32_t param1, param2; };
 struct zmk_behavior_binding_event { int64_t timestamp; };
 static const struct device *bound_device;
@@ -275,7 +278,7 @@ static void check_conversion(const struct device *dev, int expected, uint16_t in
     assert(kp_rgb_global.user_on == user_on && flushes == before);
     if (expected == 0) {
         assert(binding.behavior_dev == kp_rgb_controller.dev->name);
-        assert(binding.param1 == RGB_EFS_CMD && binding.param2 == index);
+        assert(binding.param1 == RGB_LEGACY_EFS_CMD && binding.param2 == index);
     } else {
         assert(binding.behavior_dev == original_name);
         assert(binding.param1 == 123 && binding.param2 == 456);
@@ -287,11 +290,12 @@ int main(void) {
     struct kp_rgb_effect_common_config configs[] = {
         {.owner=&controller, .slot=0}, {.owner=&controller, .slot=2},
         {.owner=&controller, .slot=0}, {.owner=&controller, .slot=3},
-        {.owner=&controller, .slot=1}, {.owner=&foreign_controller, .slot=0}};
+        {.owner=&controller, .slot=1}, {.owner=&foreign_controller, .slot=0},
+        {.owner=NULL, .slot=0}};
     const struct device devices[] = {
         {.config = &configs[0]}, {.config = &configs[1]},
         {.config = &configs[2]}, {.config = &configs[3]},
-        {.config = &configs[4]}, {.config = &configs[5]}, {0}
+        {.config = &configs[4]}, {.config = &configs[5]}, {.config = &configs[6]}, {0}
     };
     const struct device *effects[] = {&devices[0], NULL, &devices[1]};
     kp_rgb_controller.dev = &controller;
@@ -304,7 +308,8 @@ int main(void) {
     check_conversion(&devices[3], -ENODEV, 0); /* Out of range. */
     check_conversion(&devices[4], -ENODEV, 0); /* Disabled slot. */
     check_conversion(&devices[5], -ENODEV, 0); /* Foreign owner with a colliding slot. */
-    check_conversion(&devices[6], -ENODEV, 0); /* Missing config. */
+    check_conversion(&devices[6], -ENODEV, 0); /* Unowned metadata. */
+    check_conversion(&devices[7], -ENODEV, 0); /* Missing config. */
     check_conversion(NULL, -ENODEV, 0);
     kp_rgb_controller.selector.effect_index = 2;
     kp_rgb_controller.selector.active_fx = &devices[1];

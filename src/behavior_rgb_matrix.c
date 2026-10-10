@@ -33,6 +33,20 @@ BUILD_ASSERT(!DT_NODE_HAS_PROP(KP_CONTROLLER, leds),
 BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_CONTROLLER)) <= 9,
              "RGB controller name must fit the split behavior_dev field");
 
+#if DT_NODE_HAS_PROP(KP_CONTROLLER, selector)
+BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(KP_CONTROLLER, selector),
+                                keypaw_rgb_overlay_selector),
+             "RGB matrix selector alias must reference a selector overlay");
+BUILD_ASSERT(DT_NODE_HAS_STATUS(DT_PHANDLE(KP_CONTROLLER, selector), okay),
+             "RGB matrix selector alias must reference an enabled selector");
+#endif
+
+const struct device *kp_rgb_selector_alias(void) {
+  return COND_CODE_1(DT_NODE_HAS_PROP(KP_CONTROLLER, selector),
+                     (DEVICE_DT_GET(DT_PHANDLE(KP_CONTROLLER, selector))),
+                     (NULL));
+}
+
 #define KP_RGB_EFFECT_ID_TOKEN(node_id)                                        \
   COND_CODE_1(DT_NODE_HAS_PROP(node_id, persist_id),                           \
               (DT_STRING_TOKEN(node_id, persist_id)),                          \
@@ -80,13 +94,15 @@ struct kp_rgb_global kp_rgb_global = {
 };
 
 struct kp_rgb_controller kp_rgb_controller = {
-    .selector = {
-        .effects = kp_rgb_effects,
-        .effect_defaults = kp_rgb_effect_defaults,
-        .effect_count = DT_CHILD_NUM(KP_CONTROLLER),
-        .initial_duration_ms = DT_PROP_OR(KP_CONTROLLER, initial_duration_ms, 1000),
-        .initial_effect = DT_PROP_OR(KP_CONTROLLER, initial_effect, 0),
-    },
+    .selector =
+        {
+            .effects = kp_rgb_effects,
+            .effect_defaults = kp_rgb_effect_defaults,
+            .effect_count = DT_CHILD_NUM(KP_CONTROLLER),
+            .initial_duration_ms =
+                DT_PROP_OR(KP_CONTROLLER, initial_duration_ms, 1000),
+            .initial_effect = DT_PROP_OR(KP_CONTROLLER, initial_effect, 0),
+        },
 };
 
 static int kp_rgb_behavior_init(const struct device *dev) {
@@ -146,7 +162,29 @@ static const struct behavior_parameter_metadata_set no_args_set = {
     .param1_values = no_arg_values,
     .param1_values_len = ARRAY_SIZE(no_arg_values),
 };
-static const struct behavior_parameter_metadata sets[] = {no_args_set};
+static const struct behavior_parameter_value_metadata absolute_commands[] = {
+    {.display_name = "Select Effect",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_EFS_CMD},
+    {.display_name = "Hue/Saturation",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_COLOR_HSB_CMD},
+    {.display_name = "Duration Up/Set",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
+     .value = RGB_SPI_CMD},
+};
+static const struct behavior_parameter_value_metadata absolute_values[] = {
+    {.display_name = "Argument",
+     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
+     .range = {.min = 0, .max = UINT32_MAX}},
+};
+static const struct behavior_parameter_metadata_set sets[] = {
+    no_args_set,
+    {.param1_values = absolute_commands,
+     .param1_values_len = ARRAY_SIZE(absolute_commands),
+     .param2_values = absolute_values,
+     .param2_values_len = ARRAY_SIZE(absolute_values)},
+};
 static const struct behavior_parameter_metadata metadata = {
     .sets_len = ARRAY_SIZE(sets),
     .sets = sets,
@@ -166,7 +204,8 @@ size_t kp_rgb_selected_effect(void) {
 }
 
 uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta) {
-  return kp_rgb_selector_calc_index(&kp_rgb_controller.selector, current, delta);
+  return kp_rgb_selector_calc_index(&kp_rgb_controller.selector, current,
+                                    delta);
 }
 
 int kp_rgb_resolve_active(void) {
@@ -205,23 +244,41 @@ int kp_rgb_select_effect(uint16_t index) {
 }
 
 int zmk_rgb_matrix_select_effect(uint16_t index) {
-  return kp_rgb_select_effect(index);
+  return kp_rgb_selector_binding_apply(kp_rgb_selector_alias(), RGB_EFS_CMD,
+                                       index);
 }
 
-int zmk_rgb_matrix_cycle_effect(int16_t direction) {
+int kp_rgb_cycle_effect(int16_t direction) {
   if (k_is_in_isr()) {
     return -EWOULDBLOCK;
   }
   kp_rgb_matrix_lock();
-  int ret = kp_rgb_select_effect_locked(
-      kp_rgb_calc_effect_index(kp_rgb_controller.selector.effect_index, direction));
+  int ret = kp_rgb_select_effect_locked(kp_rgb_calc_effect_index(
+      kp_rgb_controller.selector.effect_index, direction));
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+int zmk_rgb_matrix_cycle_effect(int16_t direction) {
+  if (k_is_in_isr())
+    return -EWOULDBLOCK;
+  kp_rgb_matrix_lock();
+  struct kp_rgb_selector *selector =
+      kp_rgb_selector_overlay_state_locked(kp_rgb_selector_alias());
+  int ret = selector == NULL
+                ? -ENODEV
+                : kp_rgb_selector_dispatch_locked(
+                      selector, RGB_EFS_CMD,
+                      kp_rgb_selector_calc_index(
+                          selector, selector->effect_index, direction));
   kp_rgb_matrix_unlock();
   return ret;
 }
 
 int kp_rgb_calc_effect(int16_t direction) {
   kp_rgb_matrix_lock();
-  int index = kp_rgb_calc_effect_index(kp_rgb_controller.selector.effect_index, direction);
+  int index = kp_rgb_calc_effect_index(kp_rgb_controller.selector.effect_index,
+                                       direction);
   kp_rgb_matrix_unlock();
   return index;
 }
@@ -230,20 +287,20 @@ static bool kp_rgb_parameter_target_ready(const struct device *fx) {
   return fx != NULL && device_is_ready(fx);
 }
 
-static int kp_rgb_set_color_locked(const struct device *fx,
-                                   const struct kp_rgb_hsb *color) {
+int kp_rgb_set_color_locked(const struct device *fx,
+                            const struct kp_rgb_hsb *color) {
   if (!kp_rgb_parameter_target_ready(fx)) {
     return -ENODEV;
   }
-  if (color == NULL || color->h > KP_RGB_HUE_MAX ||
-      color->s > KP_RGB_SAT_MAX || color->b > KP_RGB_BRT_MAX) {
+  if (color == NULL || color->h > KP_RGB_HUE_MAX || color->s > KP_RGB_SAT_MAX ||
+      color->b > KP_RGB_BRT_MAX) {
     return -EINVAL;
   }
   struct kp_rgb_hsb next = *color;
   next.h %= KP_RGB_HUE_MAX;
   struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-  if (data->color.h != next.h || data->color.s != next.s
-  ) {
+  if (data->color.h != next.h || data->color.s != next.s ||
+      data->color.b != KP_RGB_BRT_MAX) {
     data->color.h = next.h;
     data->color.s = next.s;
     data->color.b = KP_RGB_BRT_MAX;
@@ -252,7 +309,7 @@ static int kp_rgb_set_color_locked(const struct device *fx,
   return 0;
 }
 
-static int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
+int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
   if (!kp_rgb_parameter_target_ready(fx)) {
     return -ENODEV;
   }
@@ -294,7 +351,8 @@ int kp_rgb_set_hsb(struct kp_rgb_hsb color) {
     return -EWOULDBLOCK;
   }
   kp_rgb_matrix_lock();
-  int ret = kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
+  int ret =
+      kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
   kp_rgb_matrix_unlock();
   return ret;
 }
@@ -332,16 +390,17 @@ int kp_rgb_change_hue(int8_t direction) {
   }
   kp_rgb_matrix_lock();
   struct kp_rgb_hsb color = kp_rgb_calc_hue_locked(direction);
-  int ret = kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
+  int ret =
+      kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
   kp_rgb_matrix_unlock();
   return ret;
 }
 
 static struct kp_rgb_hsb kp_rgb_calc_sat_locked(int8_t direction) {
   struct kp_rgb_hsb color = kp_active_hsb();
-  color.s = (uint8_t)CLAMP((int64_t)color.s + (int64_t)direction *
-                                                  CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP,
-                           0, KP_RGB_SAT_MAX);
+  color.s = (uint8_t)CLAMP(
+      (int64_t)color.s + (int64_t)direction * CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP,
+      0, KP_RGB_SAT_MAX);
   return color;
 }
 
@@ -358,7 +417,8 @@ int kp_rgb_change_sat(int8_t direction) {
   }
   kp_rgb_matrix_lock();
   struct kp_rgb_hsb color = kp_rgb_calc_sat_locked(direction);
-  int ret = kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
+  int ret =
+      kp_rgb_set_color_locked(kp_rgb_controller.selector.active_fx, &color);
   kp_rgb_matrix_unlock();
   return ret;
 }
@@ -401,7 +461,7 @@ static uint32_t kp_rgb_calc_duration_locked(int16_t direction) {
   int64_t next = (int64_t)kp_active_duration() +
                  (int64_t)direction * CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP;
   return (uint32_t)CLAMP(next, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                        CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+                         CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 
 int kp_rgb_set_duration(uint32_t duration_ms) {
@@ -409,7 +469,8 @@ int kp_rgb_set_duration(uint32_t duration_ms) {
     return -EWOULDBLOCK;
   }
   kp_rgb_matrix_lock();
-  int ret = kp_rgb_set_period_locked(kp_rgb_controller.selector.active_fx, duration_ms);
+  int ret = kp_rgb_set_period_locked(kp_rgb_controller.selector.active_fx,
+                                     duration_ms);
   kp_rgb_matrix_unlock();
   return ret;
 }
@@ -429,94 +490,83 @@ int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  if (k_is_in_isr())
+    return -EWOULDBLOCK;
   const struct device *fx = zmk_behavior_get_binding(binding->behavior_dev);
-  if (!kp_rgb_parameter_target_ready(fx)) {
+  if (!kp_rgb_parameter_target_ready(fx))
+    return -ENODEV;
+  kp_rgb_matrix_lock();
+  const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(fx);
+  if (cfg == NULL) {
+    kp_rgb_matrix_unlock();
     return -ENODEV;
   }
-  int slot = kp_rgb_selector_member_slot(&kp_rgb_controller.selector, fx);
-  if (slot < 0) {
-    return -ENODEV;
+  const struct device *owner = cfg->owner;
+  bool legacy = owner == kp_rgb_controller.dev;
+  struct kp_rgb_selector *selector =
+      legacy ? &kp_rgb_controller.selector
+             : kp_rgb_selector_overlay_state_locked(owner);
+  const struct device *control =
+      legacy ? kp_rgb_controller.dev : kp_rgb_selector_control(owner);
+  int slot =
+      selector == NULL ? -ENOENT : kp_rgb_selector_member_slot(selector, fx);
+  int err =
+      slot < 0 || control == NULL || !device_is_ready(control) ? -ENODEV : 0;
+  if (err == 0) {
+    binding->behavior_dev = control->name;
+    binding->param1 = legacy ? RGB_LEGACY_EFS_CMD : RGB_EFS_CMD;
+    binding->param2 = (uint32_t)slot;
   }
-  binding->behavior_dev = kp_rgb_controller.dev->name;
-  binding->param1 = RGB_EFS_CMD;
-  binding->param2 = (uint32_t)slot;
-  return 0;
+  kp_rgb_matrix_unlock();
+  return err;
 }
 
 static int on_keymap_binding_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  if (k_is_in_isr()) {
+  if (k_is_in_isr())
     return -EWOULDBLOCK;
+  const struct device *alias = kp_rgb_selector_alias();
+  if (kp_rgb_selector_command(binding->param1) && alias != NULL) {
+    return kp_rgb_selector_binding_convert(alias, binding);
   }
   kp_rgb_matrix_lock();
+  int ret = 0;
   switch (binding->param1) {
-  case RGB_TOG_CMD: {
+  case RGB_TOG_CMD:
     binding->param1 = kp_rgb_global.user_on ? RGB_OFF_CMD : RGB_ON_CMD;
     break;
-  }
   case RGB_BRI_CMD:
   case RGB_BRD_CMD:
-  case RGB_HUI_CMD:
-  case RGB_HUD_CMD:
-  case RGB_SAI_CMD:
-  case RGB_SAD_CMD: {
-    struct kp_rgb_hsb color;
-    switch (binding->param1) {
-    case RGB_BRI_CMD:
-      color = kp_rgb_calc_brt_locked(1);
-      break;
-    case RGB_BRD_CMD:
-      color = kp_rgb_calc_brt_locked(-1);
-      break;
-    case RGB_HUI_CMD:
-      color = kp_rgb_calc_hue_locked(1);
-      break;
-    case RGB_HUD_CMD:
-      color = kp_rgb_calc_hue_locked(-1);
-      break;
-    case RGB_SAI_CMD:
-      color = kp_rgb_calc_sat_locked(1);
-      break;
-    default:
-      color = kp_rgb_calc_sat_locked(-1);
-      break;
-    }
-    binding->param1 = RGB_COLOR_HSB_CMD;
-    binding->param2 = RGB_COLOR_HSB_VAL(color.h, color.s, color.b);
+    binding->param2 =
+        kp_rgb_calc_brt_locked(binding->param1 == RGB_BRI_CMD ? 1 : -1).b;
+    binding->param1 = RGB_BRT_SET_CMD;
     break;
-  }
-  case RGB_EFR_CMD:
-    binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)kp_rgb_calc_effect_index(
-        kp_rgb_controller.selector.effect_index, -1);
-    break;
-  case RGB_EFF_CMD:
-    binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)kp_rgb_calc_effect_index(
-        kp_rgb_controller.selector.effect_index, 1);
-    break;
-  case RGB_SPI_CMD:
-  case RGB_SPD_CMD: {
-    uint32_t duration = kp_rgb_calc_duration_locked(
-        binding->param1 == RGB_SPI_CMD ? 1 : -1);
-    binding->param1 = RGB_SPI_CMD;
-    binding->param2 = (uint32_t)duration;
-    break;
-  }
   default:
+    if (kp_rgb_selector_command(binding->param1)) {
+      ret =
+          kp_rgb_selector_convert_locked(&kp_rgb_controller.selector, binding);
+    }
     break;
   }
   kp_rgb_matrix_unlock();
-  return 0;
+  return ret;
 }
 
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  if (k_is_in_isr())
+    return -EWOULDBLOCK;
+  uint32_t command = binding->param1;
+  uint32_t argument = binding->param2;
+  const struct device *alias = kp_rgb_selector_alias();
+  if (kp_rgb_selector_command(command) && alias != NULL) {
+    return kp_rgb_selector_binding_apply(alias, command, argument);
+  }
   int ret;
-  switch (binding->param1) {
+  switch (command) {
   case RGB_TOG_CMD:
     ret = zmk_rgb_matrix_toggle();
     break;
@@ -526,65 +576,54 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
   case RGB_OFF_CMD:
     ret = zmk_rgb_matrix_off();
     break;
-  case RGB_HUI_CMD:
-    ret = kp_rgb_change_hue(1);
-    break;
-  case RGB_HUD_CMD:
-    ret = kp_rgb_change_hue(-1);
-    break;
-  case RGB_SAI_CMD:
-    ret = kp_rgb_change_sat(1);
-    break;
-  case RGB_SAD_CMD:
-    ret = kp_rgb_change_sat(-1);
-    break;
   case RGB_BRI_CMD:
-    ret = kp_rgb_change_brt(1);
-    break;
   case RGB_BRD_CMD:
-    ret = kp_rgb_change_brt(-1);
+    ret = kp_rgb_change_brt(command == RGB_BRI_CMD ? 1 : -1);
     break;
-  case RGB_SPI_CMD:
-    ret = binding->param2 != 0 ? kp_rgb_set_duration(binding->param2)
-                               : kp_rgb_change_duration(1);
-    break;
-  case RGB_SPD_CMD:
-    ret = kp_rgb_change_duration(-1);
-    break;
-  case RGB_EFS_CMD:
-    ret = kp_rgb_select_effect((uint16_t)binding->param2);
-    break;
-  case RGB_EFF_CMD:
-    ret = zmk_rgb_matrix_cycle_effect(1);
-    break;
-  case RGB_EFR_CMD:
-    ret = zmk_rgb_matrix_cycle_effect(-1);
-    break;
-  case RGB_COLOR_HSB_CMD:
-    ret = kp_rgb_set_hsb(
-        (struct kp_rgb_hsb){.h = (binding->param2 >> 16) & 0xFFFF,
-                            .s = (binding->param2 >> 8) & 0xFF,
-                            .b = binding->param2 & 0xFF});
+  case RGB_BRT_SET_CMD:
+    if (argument > KP_RGB_BRT_MAX)
+      return -EINVAL;
+    kp_rgb_matrix_lock();
+    if (kp_rgb_global.brightness != argument) {
+      kp_rgb_global.brightness = (uint8_t)argument;
+      zmk_rgb_matrix_flush();
+    }
+    kp_rgb_matrix_unlock();
+    ret = 0;
     break;
   case RGB_RESET_CMD:
+    if (argument != 0)
+      return -EINVAL;
     kp_rgb_reset_state();
     return 0;
   case RGB_OVL_STATE_CMD:
-    kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(binding->param2),
-                            RGB_OVL_STATE_BITS(binding->param2));
+    kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(argument),
+                            RGB_OVL_STATE_BITS(argument));
     return 0;
   case RGB_CLOCK_CMD:
-    /* uint32 subtraction then an int32 cast is exact modulo 2^32; valid while
-     * the true offset is under 2^31 ms. */
-    kp_rgb_set_clock_offset(
-        (int32_t)(binding->param2 - (uint32_t)k_uptime_get()));
+    /* Valid modulo 2^32 while the true offset is under 2^31 ms. */
+    kp_rgb_set_clock_offset((int32_t)(argument - (uint32_t)k_uptime_get()));
     return 0;
   default:
-    return -ENOTSUP;
+    if (command == RGB_LEGACY_EFS_CMD)
+      command = RGB_EFS_CMD;
+    else if (command == RGB_LEGACY_COLOR_CMD)
+      command = RGB_COLOR_HSB_CMD;
+    else if (command == RGB_LEGACY_PERIOD_CMD) {
+      if (argument == 0)
+        return -EINVAL;
+      command = RGB_SPI_CMD;
+    }
+    if (!kp_rgb_selector_command(command))
+      return -ENOTSUP;
+    kp_rgb_matrix_lock();
+    ret = kp_rgb_selector_dispatch_locked(&kp_rgb_controller.selector, command,
+                                          argument);
+    kp_rgb_matrix_unlock();
+    break;
   }
-  if (ret < 0) {
+  if (ret < 0)
     return ret;
-  }
   kp_rgb_save_state();
   return ret;
 }

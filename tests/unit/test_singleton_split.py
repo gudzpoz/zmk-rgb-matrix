@@ -14,9 +14,10 @@ MOCKS = r'''
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define LOG_WRN(...) ((void)0)
 #define LOG_INF(...) ((void)0)
-#define RGB_EFS_CMD 1
-#define RGB_COLOR_HSB_CMD 2
-#define RGB_SPI_CMD 3
+#define RGB_LEGACY_EFS_CMD 0x104
+#define RGB_LEGACY_COLOR_CMD 0x105
+#define RGB_LEGACY_PERIOD_CMD 0x106
+#define RGB_BRT_SET_CMD 0x107
 #define RGB_ON_CMD 4
 #define RGB_OFF_CMD 5
 #define RGB_OVL_STATE_CMD 6
@@ -41,14 +42,15 @@ int main(void) {
     kp_rgb_controller.dev = &device;
     kp_rgb_controller.selector.active_fx = &device;
     kp_rgb_global.user_on = true;
+    kp_rgb_global.brightness = 61;
     kp_rgb_controller.selector.effect_index = 3;
     struct kp_rgb_sync_source state = {.phase = KP_RGB_SYNC_SELECT};
     fail = true;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);
-    assert(commands[0] == RGB_EFS_CMD && arguments[0] == 3);
+    assert(commands[0] == RGB_LEGACY_EFS_CMD && arguments[0] == 3);
     fail = false;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(commands[1] == RGB_EFS_CMD && arguments[1] == 3);
+    assert(commands[1] == RGB_LEGACY_EFS_CMD && arguments[1] == 3);
     data.color.h = 300; data.duration_ms = 2000;
     kp_rgb_controller.selector.effect_index = 9;
     kp_rgb_global.user_on = false;
@@ -56,18 +58,24 @@ int main(void) {
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);
     fail = false;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(commands[2] == RGB_COLOR_HSB_CMD && commands[3] == commands[2]);
+    assert(commands[2] == RGB_LEGACY_COLOR_CMD && commands[3] == commands[2]);
     assert(arguments[2] == RGB_COLOR_HSB_VAL(123,45,67) && arguments[3] == arguments[2]);
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(commands[4] == RGB_SPI_CMD && arguments[4] == 890);
+    assert(commands[4] == RGB_LEGACY_PERIOD_CMD && arguments[4] == 890);
+    fail = true;
+    assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_RETRY);
+    assert(commands[5] == RGB_BRT_SET_CMD && arguments[5] == 61);
+    fail = false;
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(commands[5] == RGB_ON_CMD);
+    assert(commands[6] == RGB_BRT_SET_CMD && arguments[6] == 61);
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(commands[6] == RGB_OVL_STATE_CMD && arguments[6] == 0x1234);
-    assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_DONE && sends == 7);
+    assert(commands[7] == RGB_ON_CMD);
+    assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[8] == RGB_OVL_STATE_CMD && arguments[8] == 0x1234);
+    assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_DONE && sends == 9);
     state = (struct kp_rgb_sync_source){.phase = KP_RGB_SYNC_SELECT};
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
-    assert(arguments[7] == 9);
+    assert(arguments[9] == 9);
     puts("singleton split snapshot and same-command retries passed");
     return 0;
 }

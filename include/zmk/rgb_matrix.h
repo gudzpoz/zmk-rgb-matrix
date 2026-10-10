@@ -323,10 +323,14 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 #define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
   DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
 
+#define KP_RGB_EFFECT_HAS_OWNER(node_id)                                       \
+  UTIL_AND(DT_NODE_HAS_STATUS(DT_PARENT(node_id), okay),                       \
+           UTIL_OR(KP_RGB_EFFECT_IS_REGISTRY(node_id),                         \
+                   DT_NODE_HAS_COMPAT(DT_PARENT(node_id),                      \
+                                      keypaw_rgb_overlay_selector)))
+
 #define KP_RGB_EFFECT_OWNER(node_id)                                           \
-  COND_CODE_1(UTIL_OR(KP_RGB_EFFECT_IS_REGISTRY(node_id),                      \
-                      DT_NODE_HAS_COMPAT(DT_PARENT(node_id),                   \
-                                         keypaw_rgb_overlay_selector)),        \
+  COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
               (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
 
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
@@ -338,7 +342,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                    "composed onto a nested effect");))
 
 #define KP_RGB_EFFECT_CONVERT_HOOK(node_id)                                    \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
+  COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
               (kp_rgb_effect_convert_central_state_dependent_params), (NULL))
 
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
@@ -637,6 +641,8 @@ int zmk_rgb_matrix_get_user_state(bool *user_on);
 /* Set parameters of a ready RGB effect device. Thread context only.
  * Supply an RGB effect device; composition membership is not required.
  * Hue accepts 0..360 (360 becomes 0); saturation/brightness accept 0..100.
+ * Color updates hue/saturation and sets effect brightness to 100; supplied
+ * brightness is validated but does not change global master brightness.
  * Period accepts configured DURATION_MIN_MS..DURATION_MAX_MS without clamping.
  * NULL color/invalid values return -EINVAL; NULL/not-ready effect devices
  * return -ENODEV; ISR calls return -EWOULDBLOCK. Changed values request repaint
@@ -645,6 +651,12 @@ int zmk_rgb_matrix_get_user_state(bool *user_on);
 int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hsb *color);
 int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
+/* Local-only aliases to the selector explicitly referenced by the global RGB
+ * behavior's selector phandle. Indices are that selector's child slots, including
+ * disabled siblings; cycling skips unavailable slots and wraps. No association
+ * returns -ENODEV; invalid/disabled slots leave selection unchanged. Thread-only
+ * (-EWOULDBLOCK in ISR); do not call from effect/overlay callbacks. These calls
+ * request repaint when selection changes, without saving or sending split commands. */
 int zmk_rgb_matrix_select_effect(uint16_t effect);
 int zmk_rgb_matrix_cycle_effect(int16_t direction);
 

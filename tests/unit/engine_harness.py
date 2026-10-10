@@ -25,7 +25,7 @@ def function(name, source=SOURCE):
         end += 1
     return source[start:end]
 
-TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD: \{\n.*?^  \}\n", BEHAVIOR_SOURCE, re.M | re.S)
+TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD:\n.*?^    break;\n", BEHAVIOR_SOURCE, re.M | re.S)
 assert TOGGLE_CASE, "RGB toggle conversion"
 TOGGLE_FUNCTION = """
 static int convert_toggle(struct kp_rgb_controller *controller, struct binding *binding) {

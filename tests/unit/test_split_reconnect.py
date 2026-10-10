@@ -27,9 +27,10 @@ MOCKS = r'''
 #define KP_RGB_SYNC_STEP_DELAY_MS 50
 #define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
-#define RGB_EFS_CMD 1
-#define RGB_COLOR_HSB_CMD 2
-#define RGB_SPI_CMD 3
+#define RGB_LEGACY_EFS_CMD 0x104
+#define RGB_LEGACY_COLOR_CMD 0x105
+#define RGB_LEGACY_PERIOD_CMD 0x106
+#define RGB_BRT_SET_CMD 0x107
 #define RGB_ON_CMD 4
 #define RGB_OFF_CMD 5
 #define RGB_OVL_STATE_CMD 6
@@ -144,6 +145,9 @@ static void test_initial_connection_and_off_snapshot(void) {
     struct kp_rgb_effect_common_data data = {{123, 45, 67}, 890};
     const struct device device = {&data, "rgb", NULL};
     set_scene(&device, 3, false);
+    kp_rgb_matrix_lock();
+    kp_rgb_global.brightness = 73;
+    kp_rgb_matrix_unlock();
 
     kp_rgb_sync_refresh();
     assert(kp_rgb_sync_sources[0].pending && kp_rgb_sync_sources[1].pending);
@@ -159,16 +163,17 @@ static void test_initial_connection_and_off_snapshot(void) {
     now_ms = 100;
     kp_rgb_sync_step_handler(NULL);
     assert(lock_entries == locks_before_snapshot + 2);
-    assert(sends == 1 && commands[0] == RGB_EFS_CMD && arguments[0] == 3);
+    assert(sends == 1 && commands[0] == RGB_LEGACY_EFS_CMD && arguments[0] == 3);
     assert(destinations[0] == 0 && held == 0);
     finish_source(0);
     assert(kp_rgb_sync_sources[0].synced_effect == 3);
     assert(!kp_rgb_sync_sources[0].pending);
     assert(kp_rgb_sync_sources[1].pending);
-    assert(commands[1] == RGB_COLOR_HSB_CMD);
+    assert(commands[1] == RGB_LEGACY_COLOR_CMD);
     assert(arguments[1] == RGB_COLOR_HSB_VAL(123, 45, 67));
-    assert(commands[2] == RGB_SPI_CMD && arguments[2] == 890);
-    assert(commands[3] == RGB_OFF_CMD);
+    assert(commands[2] == RGB_LEGACY_PERIOD_CMD && arguments[2] == 890);
+    assert(commands[3] == RGB_BRT_SET_CMD && arguments[3] == 73);
+    assert(commands[4] == RGB_OFF_CMD);
     unsigned before = sends;
     kp_rgb_sync_refresh();
     assert(sends == before && !kp_rgb_sync_sources[0].pending);
@@ -197,6 +202,9 @@ static void test_disconnect_reconnect_and_transport_replacement(void) {
     data.duration_ms = 1200;
     kp_rgb_matrix_unlock();
     set_scene(&device, 0, false);
+    kp_rgb_matrix_lock();
+    kp_rgb_global.brightness = 55;
+    kp_rgb_matrix_unlock();
 
     available_count = 1;
     available_ids[0] = 0;
@@ -211,14 +219,15 @@ static void test_disconnect_reconnect_and_transport_replacement(void) {
     assert(sends == before);
     now_ms = 300;
     kp_rgb_sync_step_handler(NULL);
-    assert(sends == before + 1 && commands[before] == RGB_EFS_CMD);
+    assert(sends == before + 1 && commands[before] == RGB_LEGACY_EFS_CMD);
     assert(arguments[before] == 0);
     finish_source(0);
     assert(!kp_rgb_sync_sources[0].pending && kp_rgb_sync_sources[0].synced_effect == 0);
-    assert(commands[before + 1] == RGB_COLOR_HSB_CMD);
+    assert(commands[before + 1] == RGB_LEGACY_COLOR_CMD);
     assert(arguments[before + 1] == RGB_COLOR_HSB_VAL(75, 80, 90));
-    assert(commands[before + 2] == RGB_SPI_CMD && arguments[before + 2] == 1200);
-    assert(commands[before + 3] == RGB_OFF_CMD);
+    assert(commands[before + 2] == RGB_LEGACY_PERIOD_CMD && arguments[before + 2] == 1200);
+    assert(commands[before + 3] == RGB_BRT_SET_CMD && arguments[before + 3] == 55);
+    assert(commands[before + 4] == RGB_OFF_CMD);
 
     selected_transport = &transport_b;
     now_ms += 50;
@@ -243,7 +252,7 @@ static void test_failure_backoff_does_not_block_other_source(void) {
     now_ms = 100;
     kp_rgb_sync_step_handler(NULL);
     assert(sends == 2 && destinations[0] == 0 && destinations[1] == 1);
-    assert(commands[0] == RGB_EFS_CMD && commands[1] == RGB_EFS_CMD);
+    assert(commands[0] == RGB_LEGACY_EFS_CMD && commands[1] == RGB_LEGACY_EFS_CMD);
     assert(kp_rgb_sync_sources[0].phase == KP_RGB_SYNC_SELECT);
     assert(kp_rgb_sync_sources[0].retry_count == 1);
     assert(kp_rgb_sync_sources[0].ready_at == 150);
@@ -259,13 +268,32 @@ static void test_failure_backoff_does_not_block_other_source(void) {
     now_ms = 200;
     kp_rgb_sync_step_handler(NULL);
     assert(sends == 4 && destinations[3] == 0);
-    assert(commands[3] == RGB_COLOR_HSB_CMD);
+    assert(commands[3] == RGB_LEGACY_COLOR_CMD);
+}
+
+static void test_no_effect_snapshot_keeps_brightness_and_power(void) {
+    reset_test();
+    set_scene(NULL, 9, false);
+    kp_rgb_matrix_lock();
+    kp_rgb_global.brightness = 37;
+    kp_rgb_matrix_unlock();
+    struct kp_rgb_sync_source state = {.phase = KP_RGB_SYNC_SELECT};
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(sends == 0 && state.phase == KP_RGB_SYNC_BRIGHTNESS);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[0] == RGB_BRT_SET_CMD && arguments[0] == 37);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[1] == RGB_OFF_CMD && arguments[1] == 0);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[2] == RGB_OVL_STATE_CMD);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_DONE && sends == 3);
 }
 
 int main(void) {
     test_initial_connection_and_off_snapshot();
     test_disconnect_reconnect_and_transport_replacement();
     test_failure_backoff_does_not_block_other_source();
+    test_no_effect_snapshot_keeps_brightness_and_power();
     puts("split reconnect lifecycle, snapshots, transport replacement and retries passed");
     return 0;
 }

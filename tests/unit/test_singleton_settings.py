@@ -31,6 +31,7 @@ MOCKS = r'''
 #define ZMK_ACTIVITY_ACTIVE 0
 static unsigned resets;
 static void kp_rgb_request_runtime_reset_locked(void) { assert(held); resets++; zmk_rgb_matrix_flush(); }
+static void kp_rgb_selector_overlays_defaults_locked(void) { assert(held); }
 struct k_work { void (*handler)(struct k_work *); };
 struct k_work_delayable { struct k_work work; };
 struct k_work_sync { int unused; };
@@ -235,9 +236,9 @@ int main(void) {
     assert(!kp_rgb_global.user_on && kp_rgb_selected_effect() == 1);
     assert(kp_rgb_controller.selector.active_fx == &idev[0] && !reconciled_user_on);
     assert(!pending && saves == saves_before);
-    assert(zmk_rgb_matrix_select_effect(2) == 0);
+    assert(kp_rgb_select_effect(2) == 0);
     assert(!pending && saves == saves_before && !kp_rgb_global.user_on);
-    assert(zmk_rgb_matrix_select_effect(1) == 0);
+    assert(kp_rgb_select_effect(1) == 0);
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
     pending = NULL;

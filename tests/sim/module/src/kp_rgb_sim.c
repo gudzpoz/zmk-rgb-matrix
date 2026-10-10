@@ -45,6 +45,7 @@
 #include <zmk/hid_indicators.h>
 #include <zmk/rgb_matrix.h>
 
+#include "rgb_matrix_internal.h"
 #include "cmdline.h"
 #include "soc.h"
 
@@ -275,7 +276,7 @@ static int kp_sim_apply(void) {
   }
 
   if (requested_effect != UINT32_MAX) {
-    const int err = zmk_rgb_matrix_select_effect((uint16_t)requested_effect);
+    const int err = kp_rgb_select_effect((uint16_t)requested_effect);
     if (err < 0) {
       printk("keypaw-rgb-sim: effect %u unavailable (%d)\n",
              (unsigned int)requested_effect, err);
