@@ -46,12 +46,14 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
   if (kp_rgb_selector_count(selector) == 0) {
     return -ENOENT;
   }
+  const struct device *previous = selector->active_fx;
   if (selector->effect_index >= kp_rgb_selector_count(selector)) {
     selector->effect_index = 0;
   }
   selector->effect_index =
       kp_rgb_selector_calc_index(selector, selector->effect_index, 0);
   selector->active_fx = kp_rgb_selector_at(selector, selector->effect_index);
+  kp_rgb_selector_publish_locked(selector, previous);
   return selector->active_fx == NULL ? -ENOENT : 0;
 }
 
@@ -91,8 +93,10 @@ int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,
   if (selector->effect_index == slot && selector->active_fx == fx) {
     return 0;
   }
+  const struct device *previous = selector->active_fx;
   selector->effect_index = slot;
   selector->active_fx = fx;
+  kp_rgb_selector_publish_locked(selector, previous);
   return 1;
 }
 

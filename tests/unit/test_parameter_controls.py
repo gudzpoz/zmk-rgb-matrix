@@ -262,13 +262,15 @@ def main():
     text = SOURCE.read_text()
     # No persistence/split mocks: any direct side effect fails compilation/linking.
     selector_text = SELECTOR_SOURCE.read_text()
+    # Notification delivery is exercised by test_selector_public_api.py.
+    selector_services_stub = 'static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }\n'
     selector_services = "\n".join(function(selector_text, name) for name in (
         "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
         "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",
         "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot",
         "kp_rgb_selector_command", "kp_rgb_selector_convert_locked",
         "kp_rgb_selector_dispatch_locked"))
-    production = selector_services + "\n" + text[text.index("size_t kp_rgb_effect_count("):
+    production = selector_services_stub + selector_services + "\n" + text[text.index("size_t kp_rgb_effect_count("):
                       text.index("int kp_rgb_effect_convert_central_state_dependent_params(")]
     production += text[text.index("static int on_keymap_binding_convert_central_state_dependent_params("):
                        text.index("static int on_keymap_binding_pressed(")]

@@ -223,6 +223,7 @@ static void kp_rgb_reconcile_power_locked(void) {
     reconciled_user_on = kp_rgb_global.user_on;
 }
 '''
+    code += "\nstatic void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }\n"
     code += "\n".join(function(selector_source, name) for name in (
         "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
         "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",

@@ -11,6 +11,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_selector.h>
+#include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include "rgb_matrix_internal.h"
 
@@ -61,6 +63,7 @@ static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
   struct probe_data *data = dev->data;
   const struct probe_config *cfg = dev->config;
   CHECK(data->active && frame->scratch == NULL);
+  CHECK(zmk_rgb_selector_get_selected(cfg->common.owner) == dev);
   if (data->restart) { CHECK(frame->elapsed_ms == 0); data->restart = false; }
   data->renders++;
   for (size_t i = 0; i < frame->target_count; i++) {
@@ -87,6 +90,56 @@ DT_INST_FOREACH_STATUS_OKAY(PROBE_DEFINE)
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 #define DATA(label) ((struct probe_data *)DEV(label)->data)
+
+static atomic_t selection_events_a, selection_events_b;
+
+static int selection_listener(const zmk_event_t *eh) {
+  const struct zmk_rgb_selector_selection_changed *changed =
+      as_zmk_rgb_selector_selection_changed(eh);
+  CHECK(changed != NULL);
+  CHECK(zmk_rgb_selector_get_selected(changed->selector) != NULL);
+  if (changed->selector == DEV(selector_a))
+    atomic_inc(&selection_events_a);
+  else if (changed->selector == DEV(selector_b))
+    atomic_inc(&selection_events_b);
+  else
+    CHECK(false);
+  return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(selector_public_probe, selection_listener);
+ZMK_SUBSCRIPTION(selector_public_probe, zmk_rgb_selector_selection_changed);
+
+static unsigned callback_count(void);
+
+static void public_selection(void) {
+  CHECK(zmk_rgb_selector_get_selected(NULL) == NULL);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+  CHECK(atomic_get(&selection_events_a) == 1);
+  CHECK(atomic_get(&selection_events_b) == 1);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), NULL) == -EINVAL);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_b)) == -EINVAL);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(private_white)) == -EINVAL);
+  CHECK(zmk_rgb_selector_select(NULL, DEV(probe_a)) == -ENODEV);
+  CHECK(zmk_rgb_selector_reset(NULL) == -ENODEV);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  k_sleep(K_MSEC(50));
+  CHECK(atomic_get(&selection_events_a) == 1);
+  kp_rgb_matrix_lock();
+  unsigned before = callback_count();
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+  CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+  CHECK(before == callback_count());
+  kp_rgb_matrix_unlock();
+  k_sleep(K_MSEC(50));
+  CHECK(atomic_get(&selection_events_a) == 2);
+  CHECK(atomic_get(&selection_events_b) == 1);
+  printk("PASS selector public API/notifications/coalescing\n");
+}
 
 static void mark(const char *name) {
   printk("selector phase %s at %lld\n", name, (long long)k_uptime_get());
@@ -146,6 +199,9 @@ K_SEM_DEFINE(isr_checked, 0, 1);
 static void isr_boundaries(struct k_timer *unused) {
   ARG_UNUSED(unused);
   CHECK(k_is_in_isr());
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == -EWOULDBLOCK);
+  CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == -EWOULDBLOCK);
   CHECK(zmk_rgb_matrix_select_effect(1) == -EWOULDBLOCK);
   CHECK(zmk_rgb_matrix_cycle_effect(1) == -EWOULDBLOCK);
   CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 1) == -EWOULDBLOCK);
@@ -159,6 +215,8 @@ K_TIMER_DEFINE(boundary_timer, isr_boundaries, NULL);
 static void controls(void) {
   kp_rgb_matrix_lock();
   unsigned before = callback_count();
+  atomic_val_t a_notifications = atomic_get(&selection_events_a);
+  atomic_val_t b_notifications = atomic_get(&selection_events_b);
   struct behavior_parameter_metadata metadata;
   CHECK(behavior_get_parameter_metadata(DEV(rgbs_a), &metadata) == 0);
   CHECK(metadata.sets_len == 4);
@@ -224,6 +282,9 @@ static void controls(void) {
   kp_rgb_matrix_unlock();
   k_timer_start(&boundary_timer, K_MSEC(1), K_NO_WAIT);
   CHECK(k_sem_take(&isr_checked, K_MSEC(100)) == 0);
+  k_sleep(K_MSEC(20));
+  CHECK(atomic_get(&selection_events_a) > a_notifications);
+  CHECK(atomic_get(&selection_events_b) == b_notifications);
   printk("PASS selector binding conversion/metadata/alias/ISR\n");
 }
 
@@ -235,6 +296,8 @@ static void reset_controls(void) {
   invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 100));
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();
+  atomic_val_t a_notifications = atomic_get(&selection_events_a);
+  atomic_val_t b_notifications = atomic_get(&selection_events_b);
   unsigned b_resets = DATA(probe_d)->resets;
   unsigned a_resets = DATA(probe_c)->resets;
   invoke(DEV(rgbs_a), RGB_RESET_CMD, 0);
@@ -247,6 +310,8 @@ static void reset_controls(void) {
   kp_rgb_matrix_unlock();
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();
+  CHECK(atomic_get(&selection_events_a) == a_notifications + 1);
+  CHECK(atomic_get(&selection_events_b) == b_notifications);
   CHECK(DATA(probe_d)->resets == b_resets && DATA(probe_d)->active);
   invoke(DEV(kprgb), RGB_RESET_CMD, 0);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
@@ -256,6 +321,8 @@ static void reset_controls(void) {
   CHECK(DATA(probe_d)->resets == b_resets);
   kp_rgb_matrix_unlock();
   k_sleep(K_MSEC(100));
+  CHECK(atomic_get(&selection_events_a) == a_notifications + 1);
+  CHECK(atomic_get(&selection_events_b) == b_notifications + 1);
   printk("PASS selector reset isolation/global reset\n");
 }
 
@@ -306,6 +373,7 @@ static void scenario(void *a, void *b, void *c) {
   select_slot(DEV(selector_a), 99, -EINVAL);
   select_slot(DEV(selector_a), 1, 0);
 
+  public_selection();
   controls();
   kp_rgb_matrix_lock();
   invoke(DEV(kprgb), RGB_EFF_CMD, 0);

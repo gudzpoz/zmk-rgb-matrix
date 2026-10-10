@@ -57,8 +57,6 @@ struct kp_rgb_effect_api { const struct kp_rgb_effect_callbacks *callbacks; };
 struct kp_rgb_overlay_api { const void *condition; const struct kp_rgb_effect_callbacks *callbacks; bool replaces_target; };
 struct kp_rgb_overlay_common_config { const uint32_t *keys; size_t keys_len; const uint32_t *leds; size_t leds_len; uint8_t opacity; bool all_leds; };
 struct kp_rgb_overlay_common_data { size_t led_count; size_t *leds; uint16_t index; bool local, gate; };
-struct kp_rgb_effect_defaults { struct kp_rgb_hsb color; uint32_t duration_ms; };
-struct kp_rgb_selector { const struct device *owner; const struct device *const *effects; const struct kp_rgb_effect_defaults *effect_defaults; size_t effect_count, effect_index; const struct device *active_fx; int64_t initial_duration_ms; uint16_t initial_effect; };
 struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };
 struct kp_rgb_effect_common_data { struct kp_rgb_hsb color; uint16_t duration_ms; };
 static bool ready = true;
@@ -154,8 +152,12 @@ static void initialize_selector(unsigned n) {
 
 def production_fixture():
     parts = [PRELUDE, '#include <stdlib.h>\n',
+             structure(SELECTOR_HEADER, 'kp_rgb_effect_defaults'),
+             structure(SELECTOR_HEADER, 'kp_rgb_selector'),
              structure(OVERLAY, 'kp_selector_config'),
              structure(OVERLAY, 'kp_selector_data')]
+    # Notification delivery is exercised by test_selector_public_api.py.
+    parts.append('static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }')
     parts.extend(function(SELECTOR, n) for n in (
         'kp_rgb_selector_count','kp_rgb_selector_at','kp_rgb_selector_calc_index',
         'kp_rgb_selector_resolve_locked','kp_rgb_selector_apply_defaults_locked',

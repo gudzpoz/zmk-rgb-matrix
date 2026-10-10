@@ -27,6 +27,9 @@ struct kp_rgb_selector {
   const struct device *active_fx;
   int64_t initial_duration_ms;
   uint16_t initial_effect;
+  bool publish_changes;
+  bool notification_pending;
+  struct kp_rgb_selector *notification_next;
 };
 
 size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector);
@@ -37,8 +40,10 @@ uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
 int kp_rgb_selector_member_slot(const struct kp_rgb_selector *selector,
                                 const struct device *effect);
 
-/* Caller holds the matrix lock. These helpers do not schedule work or deliver
- * callbacks. */
+/* Caller holds the matrix lock. Selection changes queue notifications for
+ * publish_changes selectors; callbacks are delivered outside the lock. */
+void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,
+                                    const struct device *previous);
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector);
 int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector);
 /* Returns 1 when selection changed, 0 when unchanged, or a negative error. */

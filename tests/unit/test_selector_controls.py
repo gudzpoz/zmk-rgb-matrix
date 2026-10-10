@@ -441,6 +441,8 @@ def production_fixture():
     parts += [structure(public, n) for n in ("kp_rgb_effect_common_config", "kp_rgb_effect_common_data")]
     parts += [structure(internal, n) for n in ("kp_rgb_global", "kp_rgb_controller")]
     parts += [structure(overlay, "kp_selector_data"), structure(control, "kp_selector_control_config"), structure(control, "kp_selector_control_entry"), FIXTURE]
+    # Notification delivery is exercised by test_selector_public_api.py.
+    parts.append('static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }')
     parts += [function(instance, n) for n in ("kp_rgb_instance_callbacks", "kp_rgb_callbacks_reset", "kp_rgb_callbacks_set_active", "kp_rgb_effect_instance_set_active", "kp_rgb_effect_instance_reset", "kp_rgb_effect_instance_restart_clock")]
     parts += [function(selector, n) for n in ("kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index", "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked", "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot", "kp_rgb_selector_command", "kp_rgb_selector_convert_locked")]
     parts += [function(behavior, n) for n in ("kp_rgb_selector_alias", "kp_rgb_parameter_target_ready", "kp_rgb_set_color_locked", "kp_rgb_set_period_locked", "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period", "kp_active_hsb", "kp_rgb_calc_brt_locked", "kp_rgb_change_brt", "kp_rgb_apply_defaults", "zmk_rgb_matrix_select_effect", "zmk_rgb_matrix_cycle_effect")]

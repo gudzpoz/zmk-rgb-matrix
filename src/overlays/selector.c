@@ -190,6 +190,7 @@ static void kp_selector_prepare_locked(struct kp_selector_data *data) {
     return;
   kp_selector_refresh_members(data);
   struct kp_rgb_selector defaults = data->selector;
+  defaults.publish_changes = false;
   kp_rgb_selector_apply_defaults_locked(&defaults);
   data->selector.effect_index = data->selector.initial_effect;
   data->selector.active_fx = NULL;
@@ -230,6 +231,7 @@ static int kp_selector_start(const struct device *dev) {
     data->members[i] = newly_ready ? effect : NULL;
   }
   struct kp_rgb_selector defaults = data->selector;
+  defaults.publish_changes = false;
   kp_rgb_selector_apply_defaults_locked(&defaults);
   kp_selector_refresh_members(data);
   if (data->selector.active_fx == NULL) {
@@ -241,6 +243,10 @@ static int kp_selector_start(const struct device *dev) {
   }
   int err = kp_rgb_selector_resolve_locked(&data->selector);
   data->ready = err == 0;
+  if (data->ready) {
+    data->selector.publish_changes = true;
+    kp_rgb_selector_publish_locked(&data->selector, NULL);
+  }
   kp_rgb_matrix_unlock();
   if (err < 0)
     LOG_ERR("RGB selector %s has no ready effect", dev->name);
@@ -326,6 +332,7 @@ static void kp_selector_defaults_locked(const struct device *dev) {
   kp_selector_prepare_locked(data);
   kp_selector_refresh_members(data);
   struct kp_rgb_selector defaults = data->selector;
+  defaults.publish_changes = false;
   kp_rgb_selector_apply_defaults_locked(&defaults);
   data->selector.effect_index = data->selector.initial_effect;
   data->selector.active_fx = NULL;

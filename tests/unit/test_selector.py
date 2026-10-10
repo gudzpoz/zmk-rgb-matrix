@@ -177,6 +177,8 @@ def main():
                                ("kp_rgb_effect_defaults", "kp_rgb_selector"))
     accessors = "\n".join(function(name, EFFECT_HEADER) for name in
                           ("kp_rgb_effect_data", "kp_rgb_effect_cfg"))
+    # Notification delivery is exercised by test_selector_public_api.py.
+    accessors += "\nstatic void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }\n"
     services = "\n".join(function(name) for name in (
         "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
         "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",
