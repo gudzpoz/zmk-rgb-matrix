@@ -32,3 +32,13 @@ properties:
       Default period in milliseconds for children whose duration is zero or
       omitted. Clamped to KEYPAW_RGB_MATRIX_DURATION_MIN_MS and
       KEYPAW_RGB_MATRIX_DURATION_MAX_MS. A child's nonzero duration overrides it.
+
+  persist-id:
+    type: string
+    description: |
+      Stable settings identity; defaults to this selector's full node name.
+      Must be unique among enabled selectors and contain 1..30 ASCII letters,
+      digits, underscores, hyphens, dots or '@'. Opted-in child parameter keys
+      must fit Zephyr's 64-character settings key limit: this ID and the child's
+      ID together may contain at most 27 characters. Identity validation runs
+      before RGB control starts, including when settings are disabled.

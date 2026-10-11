@@ -15,6 +15,7 @@
 #include <zephyr/sys/util.h>
 
 #include "../rgb_matrix_internal.h"
+#include "../rgb_persist_internal.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -316,6 +317,9 @@ DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_DEFINE)
   } while (0);
 
 int kp_rgb_selector_overlays_start(void) {
+  int err = kp_rgb_persist_ids_validate();
+  if (err < 0)
+    return err;
   int result = 0;
   DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_START)
   return result;
