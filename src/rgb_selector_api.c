@@ -20,9 +20,12 @@ void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,
   if (!selector->publish_changes || selector->active_fx == previous)
     return;
   if (!selector->notification_pending) {
+    kp_rgb_control_refresh_hold_locked();
     selector->notification_pending = true;
     selector->notification_next = notification_head;
     notification_head = selector;
+  } else {
+    kp_rgb_control_refresh_locked();
   }
   k_work_submit_to_queue(kp_rgb_work_q(), &notification_work);
 }
@@ -43,6 +46,9 @@ static void kp_rgb_selector_notify_work(struct k_work *work) {
     kp_rgb_matrix_unlock();
     raise_zmk_rgb_selector_selection_changed(
         (struct zmk_rgb_selector_selection_changed){.selector = owner});
+    kp_rgb_matrix_lock();
+    kp_rgb_control_refresh_release_locked();
+    kp_rgb_matrix_unlock();
   }
 }
 

@@ -79,6 +79,7 @@ static bool kp_rgb_pass_active,kp_rgb_pass_requested,kp_rgb_scene_requested;
 static bool kp_rgb_scene_dirty=true,kp_rgb_scene_animating;
 static uint64_t kp_rgb_refresh_token;
 static bool kp_rgb_refresh_pending;
+static size_t kp_rgb_refresh_holds;
 static int kp_rgb_activity_state=0,host_activity_state=0;
 static int64_t kp_rgb_next_frame_ms=INT64_MAX;
 enum kp_rgb_output_kind { KP_RGB_OUTPUT_NONE, KP_RGB_OUTPUT_SCENE, KP_RGB_OUTPUT_BLACK };
@@ -330,7 +331,9 @@ FUNCTIONS = [
     "kp_rgb_effect_scene", "kp_rgb_overlay_scene", "kp_rgb_each_scene", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_deactivate_scene", "kp_rgb_reset_scene", "kp_rgb_activate_scene",
     "kp_rgb_schedule_locked", "kp_rgb_request_output_pass", "kp_rgb_effect_invalidate", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
-    "kp_rgb_finish_output_pass", "kp_rgb_conditions_refreshed",
+    "kp_rgb_finish_output_pass", "kp_rgb_control_refresh_locked",
+    "kp_rgb_control_refresh_hold_locked", "kp_rgb_control_refresh_release_locked",
+    "kp_rgb_conditions_refreshed",
     "kp_last_covering_overlay", "kp_rgb_try_cache_prefix", "kp_rgb_scene_pass_locked",
     "kp_rgb_request_black_locked", "kp_rgb_output_deadline_locked",
     "kp_rgb_attempt_output_locked", "kp_rgb_output_handler",

@@ -50,8 +50,15 @@ static void active(const struct device *dev, bool value, int64_t now) {
   printk("selector child %s active=%d\n", dev->name, value);
 }
 
+#if DT_NODE_EXISTS(DT_NODELABEL(selected_a))
+static void check_callback_gates(void);
+#else
+static void check_callback_gates(void) {}
+#endif
+
 static bool event(const struct device *dev, const struct kp_rgb_key_event *ev) {
   ARG_UNUSED(ev);
+  check_callback_gates();
   struct probe_data *data = dev->data;
   CHECK(data->active);
   data->events++;
@@ -60,6 +67,7 @@ static bool event(const struct device *dev, const struct kp_rgb_key_event *ev) {
 }
 
 static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
+  check_callback_gates();
   struct probe_data *data = dev->data;
   const struct probe_config *cfg = dev->config;
   CHECK(data->active && frame->scratch == NULL);
@@ -326,8 +334,150 @@ static void reset_controls(void) {
   printk("PASS selector reset isolation/global reset\n");
 }
 
+#if DT_NODE_EXISTS(DT_NODELABEL(selected_a))
+void selector_test_arm_sample(void);
+int selector_test_wait_sample(void);
+void selector_test_release_sample(void);
+unsigned selector_test_samples(void);
+unsigned selector_test_notifications(void);
+
+static bool selection_gate(const struct device *dev) {
+#if KP_LED_COUNT == 0
+  /* Effective composition gates are false without targets; inspect the live source gate. */
+  return ((struct kp_rgb_overlay_common_data *)dev->data)->gate;
+#else
+  return kp_rgb_overlay_gate(dev);
+#endif
+}
+
+static void check_selection_gates(bool selected) {
+  kp_rgb_matrix_lock();
+  CHECK(selection_gate(DEV(ordinary)) == selected);
+  CHECK(selection_gate(DEV(shared_gate)) == selected);
+  CHECK(selection_gate(DEV(event_gate)) == selected);
+  CHECK(selection_gate(DEV(central_gate)) == (selected && (!IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))));
+  CHECK(selection_gate(DEV(opposite_gate)) == !selected);
+  kp_rgb_matrix_unlock();
+}
+
+static void check_callback_gates(void) {
+  check_selection_gates(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+}
+
+static void condition_selection(const struct device *effect, bool selected) {
+  unsigned notifications = selector_test_notifications();
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), effect) == 0);
+  k_sleep(K_MSEC(100));
+  CHECK(selector_test_notifications() == notifications + 1);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == effect);
+  check_selection_gates(selected);
+}
+
+static unsigned delivery_count(void) {
+  return DATA(probe_a)->renders + DATA(probe_a)->events +
+         DATA(probe_b)->renders + DATA(probe_b)->events +
+         DATA(probe_c)->renders + DATA(probe_c)->events +
+         DATA(probe_d)->renders + DATA(probe_d)->events;
+}
+
+static void selected_conditions(void) {
+  k_sleep(K_MSEC(100));
+  CHECK(device_is_ready(DEV(selected_a)) && device_is_ready(DEV(selected_c)));
+  const struct kp_rgb_condition_api *api = DEV(selected_a)->api;
+  CHECK(api->scope == KP_RGB_CONDITION_ANY_SIDE);
+  CHECK(selector_test_samples() > 0);
+  unsigned notifications = selector_test_notifications();
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  k_sleep(K_MSEC(20));
+  CHECK(selector_test_notifications() == notifications);
+  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+  k_sleep(K_MSEC(50));
+  CHECK(selector_test_notifications() == notifications);
+  CHECK(zmk_rgb_selector_reset(DEV(selector_b)) == 0);
+  k_sleep(K_MSEC(50));
+  CHECK(selector_test_notifications() == notifications);
+  check_selection_gates(true);
+  mark("condition_initial");
+  k_sleep(K_MSEC(1));
+#if DT_NODE_EXISTS(DT_NODELABEL(selected_trigger))
+  unsigned old_samples = selector_test_samples();
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  k_sleep(K_MSEC(200));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+  CHECK(selector_test_samples() > old_samples);
+  check_selection_gates(true);
+#if KP_LED_COUNT > 0
+  kp_rgb_matrix_lock(); CHECK(DATA(probe_c)->renders == 0 && DATA(probe_c)->events == 0); kp_rgb_matrix_unlock();
+#endif
+  printk("PASS selector condition trigger selection during refresh\n");
+  return;
+#endif
+  condition_selection(DEV(probe_c), false);
+  mark("condition_changed");
+  k_sleep(K_MSEC(1));
+  condition_selection(DEV(probe_a), true);
+
+  /* Hold a real control-worker sample while output and input are requested. */
+  selector_test_arm_sample();
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(selector_test_wait_sample() == 0);
+  kp_rgb_matrix_lock();
+  unsigned before = delivery_count();
+  raise_zmk_position_state_changed((struct zmk_position_state_changed){
+    .source = 0, .position = 0, .state = true, .timestamp = k_uptime_get(),
+  });
+  zmk_rgb_matrix_flush();
+  kp_rgb_matrix_unlock();
+  k_sleep(K_MSEC(50));
+  kp_rgb_matrix_lock(); CHECK(delivery_count() == before); kp_rgb_matrix_unlock();
+  /* A second publication must not be released by the older refresh token. */
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  k_sleep(K_MSEC(50));
+  kp_rgb_matrix_lock(); CHECK(delivery_count() == before); kp_rgb_matrix_unlock();
+  selector_test_arm_sample();
+  selector_test_release_sample();
+  CHECK(selector_test_wait_sample() == 0);
+  k_sleep(K_MSEC(50));
+  kp_rgb_matrix_lock(); CHECK(delivery_count() == before); kp_rgb_matrix_unlock();
+  selector_test_release_sample();
+  k_sleep(K_MSEC(100));
+  check_selection_gates(true);
+#if KP_LED_COUNT > 0
+  kp_rgb_matrix_lock(); CHECK(DATA(probe_a)->active && !DATA(probe_c)->active); kp_rgb_matrix_unlock();
+#endif
+  printk("PASS selector condition third-party event/refresh barrier/newer publication\n");
+
+  CHECK(kp_rgb_select_effect(1) == 0);
+  k_sleep(K_MSEC(100));
+  condition_selection(DEV(probe_c), false);
+  condition_selection(DEV(probe_a), true);
+  CHECK(zmk_rgb_matrix_off() == 0);
+  k_sleep(K_MSEC(100));
+  condition_selection(DEV(probe_c), false);
+  condition_selection(DEV(probe_a), true);
+  CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+  condition_selection(DEV(probe_c), false);
+  condition_selection(DEV(probe_a), true);
+  printk("PASS selector selected condition hidden/OFF/inhibited notifications\n");
+#if KP_LED_COUNT == 0
+  printk("PASS selector selected condition zero LEDs\n");
+#endif
+  CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
+  CHECK(kp_rgb_select_effect(0) == 0);
+  CHECK(zmk_rgb_matrix_on() == 0);
+  k_sleep(K_MSEC(100));
+  check_selection_gates(true);
+  mark("condition_resumed");
+  printk("PASS selector selected condition initial/shared/local/central gates\n");
+}
+#endif
+
 static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+#if DT_NODE_EXISTS(DT_NODELABEL(selected_a))
+  selected_conditions();
+  return;
+#endif
 #if !DT_NODE_HAS_PROP(DT_NODELABEL(kprgb), selector)
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();

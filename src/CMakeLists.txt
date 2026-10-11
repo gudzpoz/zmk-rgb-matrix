@@ -26,6 +26,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   # Built-in stuff: zero cost when there's no DTS definitions
   conditions/layer.c
   conditions/always.c
+  conditions/effect_selected.c
   conditions/latch.c
   conditions/and.c
   conditions/or.c

@@ -47,6 +47,10 @@ static void kp_rgb_matrix_lock(void) { assert(!isr && !held); held=1; locks++; }
 static void kp_rgb_matrix_unlock(void) { assert(held==1); held=0; unlocks++; }
 static void zmk_rgb_matrix_flush(void) { assert(held); flushes++; }
 static const struct device *kp_rgb_selector_control(const struct device *dev) { return dev; }
+static unsigned refresh_holds,refresh_requests;
+static void kp_rgb_control_refresh_locked(void) { assert(held); refresh_requests++; }
+static void kp_rgb_control_refresh_hold_locked(void) { assert(held); refresh_holds++; kp_rgb_control_refresh_locked(); }
+static void kp_rgb_control_refresh_release_locked(void) { assert(held && refresh_holds); refresh_holds--; }
 struct k_work { void (*handler)(struct k_work *); bool pending; };
 struct k_work_q { int unused; };
 static struct k_work_q queue;
@@ -80,7 +84,7 @@ static void drain(void) {
    assert(++passes<16); notification_work.pending=false;
    notification_work.handler(&notification_work);
  }
- assert(notification_head==NULL && !held && locks==unlocks);
+ assert(notification_head==NULL && !held && locks==unlocks && !refresh_holds);
 }
 static int raise_zmk_rgb_selector_selection_changed(struct zmk_rgb_selector_selection_changed event) {
  assert(!held && !isr && events<32);
@@ -96,7 +100,7 @@ static int raise_zmk_rgb_selector_selection_changed(struct zmk_rgb_selector_sele
 }
 static void setup(bool start) {
  drain();
- held=locks=unlocks=flushes=submissions=events=0; isr=reenter=false;
+ held=locks=unlocks=flushes=submissions=events=refresh_holds=refresh_requests=0; isr=reenter=false;
  memset(data,0,sizeof(data)); memset(parameters,0,sizeof(parameters));
  memset(members,0,sizeof(members)); memset(instances,0,sizeof(instances));
  memset(reset_pending,0,sizeof(reset_pending));

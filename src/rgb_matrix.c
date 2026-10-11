@@ -135,6 +135,7 @@ static bool kp_rgb_scene_dirty = true;
 static bool kp_rgb_scene_animating;
 static uint64_t kp_rgb_refresh_token;
 static bool kp_rgb_refresh_pending;
+static size_t kp_rgb_refresh_holds;
 static int kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
 
 /* shared - local, in ms; 0 on the central/standalone. Written by the split
@@ -233,9 +234,28 @@ void kp_rgb_effect_invalidate(const struct device *effect) {
   zmk_rgb_matrix_flush();
 }
 
+void kp_rgb_control_refresh_locked(void) {
+  kp_rgb_refresh_pending = true;
+  kp_rgb_refresh_token++;
+  if (!kp_rgb_refresh_holds)
+    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
+}
+
+void kp_rgb_control_refresh_hold_locked(void) {
+  kp_rgb_refresh_holds++;
+  kp_rgb_control_refresh_locked();
+}
+
+void kp_rgb_control_refresh_release_locked(void) {
+  __ASSERT(kp_rgb_refresh_holds, "unbalanced RGB control refresh release");
+  if (--kp_rgb_refresh_holds == 0)
+    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
+}
+
 void kp_rgb_conditions_refreshed(uint64_t token) {
   kp_rgb_matrix_lock();
-  if (kp_rgb_refresh_pending && token == kp_rgb_refresh_token) {
+  if (kp_rgb_refresh_pending && !kp_rgb_refresh_holds &&
+      token == kp_rgb_refresh_token) {
     kp_rgb_refresh_pending = false;
     zmk_rgb_matrix_flush();
   }
@@ -554,7 +574,9 @@ static void kp_rgb_output_handler(struct k_work *work) {
   if (!allowed || ready) {
     painted = kp_rgb_scene_pass_locked(now_ms, ready, now_ms >= kp_rgb_next_frame_ms);
   }
-  kp_rgb_attempt_output_locked();
+  bool transfer_ready = !allowed || ready || kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK;
+  if (transfer_ready)
+    kp_rgb_attempt_output_locked();
 
   if (painted) {
     if (kp_rgb_scene_animating) {
@@ -571,7 +593,7 @@ static void kp_rgb_output_handler(struct k_work *work) {
   }
 
   int64_t next_ms = MIN(ready ? kp_rgb_next_frame_ms : INT64_MAX,
-                        kp_rgb_output_deadline_locked());
+                        transfer_ready ? kp_rgb_output_deadline_locked() : INT64_MAX);
   if (ready && kp_rgb_pending_available()) next_ms = k_uptime_get();
   kp_rgb_finish_output_pass(next_ms, false);
   kp_rgb_matrix_unlock();
@@ -641,9 +663,7 @@ void kp_rgb_reconcile_power_locked(void) {
     kp_rgb_each_scene(kp_rgb_mark_reset, 0);
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_dirty = true;
-    kp_rgb_refresh_pending = true;
-    kp_rgb_refresh_token++;
-    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
+    kp_rgb_control_refresh_locked();
   } else {
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_animating = false;

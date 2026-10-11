@@ -80,6 +80,12 @@ void kp_rgb_set_clock_offset(int32_t offset_ms);
 void kp_rgb_conditions_request_refresh(uint64_t token);
 void kp_rgb_conditions_refreshed(uint64_t token);
 
+/* Caller holds the matrix lock. A hold defers refresh completion until source
+ * notifications have run; release after all synchronous consumers invalidate. */
+void kp_rgb_control_refresh_locked(void);
+void kp_rgb_control_refresh_hold_locked(void);
+void kp_rgb_control_refresh_release_locked(void);
+
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);
 void kp_rgb_request_runtime_reset_locked(void);

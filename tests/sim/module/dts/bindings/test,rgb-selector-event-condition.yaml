@@ -1,0 +1,12 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+description: Test condition invalidated by selector selection events
+compatible: "test,rgb-selector-event-condition"
+include: base.yaml
+properties:
+  selector:
+    type: phandle
+    required: true
+  effect:
+    type: phandle
+    required: true

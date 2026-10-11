@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Build selector validation cases and check real engine callbacks and pixels."""
 import os
+import argparse
 from pathlib import Path
 import re
 import struct
@@ -105,6 +106,128 @@ CONTROL_CASES = {
     "oversized-global": ('&kprgb { label = "global_name_too_long"; };',
                          r"RGB controller name must fit the split behavior_dev field"),
 }
+
+
+# Conditions precede their selector/effect targets in the generated DTS.
+SELECTED_CONDITIONS = '''
+#include <dt-bindings/keypaw/rgb_matrix.h>
+&rgb_conditions {
+    selected_a: selected_a {
+        compatible = "keypaw,rgb-condition-effect-selected";
+        selector = <&selector_a>; effect = <&probe_a>;
+    };
+    selected_c: selected_c {
+        compatible = "keypaw,rgb-condition-effect-selected";
+        selector = <&selector_a>; effect = <&probe_c>;
+    };
+    event_selected: event_selected {
+        compatible = "test,rgb-selector-event-condition";
+        selector = <&selector_a>; effect = <&probe_a>;
+    };
+};
+'''
+SELECTED_GATES = '''
+&ordinary { condition = <&selected_a>; local; };
+&rgb_overlays {
+    shared_gate: shared_gate {
+        compatible = "keypaw,rgb-overlay"; local;
+        condition = <&selected_a>; leds = <4>;
+        white_s { compatible = "keypaw,rgb-matrix-solid";
+            #binding-cells = <0>; color = <0xffffff>; };
+    };
+    central_gate: central_gate {
+        compatible = "keypaw,rgb-overlay";
+        condition = <&selected_a>; leds = <5>;
+        white_c { compatible = "keypaw,rgb-matrix-solid";
+            #binding-cells = <0>; color = <0xffffff>; };
+    };
+    opposite_gate: opposite_gate {
+        compatible = "keypaw,rgb-overlay"; local;
+        condition = <&selected_c>; leds = <7>;
+        cyan { compatible = "keypaw,rgb-matrix-solid";
+            #binding-cells = <0>; color = <0x00ffff>; };
+    };
+    event_gate: event_gate {
+        compatible = "keypaw,rgb-overlay"; local;
+        condition = <&event_selected>; leds = <6>;
+        white_e { compatible = "keypaw,rgb-matrix-solid";
+            #binding-cells = <0>; color = <0xffffff>; };
+    };
+};
+'''
+SELECTED_CASES = {
+    "missing-selector": ('&selected_a { /delete-property/ selector; };',
+                         r"['\"]selector['\"].*required|requires.*['\"]selector['\"]"),
+    "missing-effect": ('&selected_a { /delete-property/ effect; };',
+                       r"['\"]effect['\"].*required|requires.*['\"]effect['\"]"),
+    "wrong-selector": ('&selected_a { selector = <&ordinary>; };',
+                       r'static assertion failed: "selected-effect condition requires an enabled selector overlay"'),
+    "disabled-selector": ('&selector_b { status = "disabled"; }; '
+                          '&rgbs_b { status = "disabled"; }; '
+                          '&selected_a { selector = <&selector_b>; };',
+                          r'static assertion failed: "selected-effect condition requires an enabled selector overlay"'),
+    "wrong-effect": ('&selected_a { effect = <&fixture_always>; };',
+                     r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
+    "disabled-effect": ('''&selector_a { disabled_probe: disabled_probe {
+        compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        status = "disabled"; }; };
+        &selected_a { effect = <&disabled_probe>; };''',
+                        r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
+    "foreign-member": ('&selected_a { effect = <&probe_b>; };',
+                       r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
+    "private-member": ('&selected_a { effect = <&private_white>; };',
+                       r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
+    "self-gate": ('&selector_a { condition = <&selected_a>; };',
+                  r"(?i)cycle in devicetree involving .*selector_a"),
+}
+
+
+def selected_runtime(root, name, fragment="", selectors=SELECTORS, extra_conf=""):
+    result = build(root, name, SELECTED_GATES + fragment, runtime=True,
+                   selectors=SELECTED_CONDITIONS + selectors, extra_conf=extra_conf)
+    assert result.returncode == 0, result.stdout[-16000:]
+    capture = root / f"{name}.bin"
+    command = [str(root / name / "build/zephyr/zmk.exe"),
+               f"--capture={capture}", "--stop_at=5", "-no-rt"]
+    print("COMMAND", " ".join(command), flush=True)
+    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=30)
+    (root / f"{name}.log").write_text(run.stdout)
+    assert run.returncode == 0, run.stdout[-16000:]
+    for marker in (
+        "PASS selector selected condition initial/shared/local/central gates",
+        "PASS selector condition third-party event/refresh barrier/newer publication",
+        "PASS selector selected condition hidden/OFF/inhibited notifications",
+    ):
+        assert marker in run.stdout, run.stdout
+    assert "<err>" not in run.stdout, run.stdout
+    if name == "selected-zero":
+        assert "PASS selector selected condition zero LEDs" in run.stdout, run.stdout
+    else:
+        check_selected_capture(capture, run.stdout, peripheral=name == "selected-peripheral")
+    print(f"PASS {name}", flush=True)
+
+
+def check_selected_capture(path, log, peripheral=False):
+    data = path.read_bytes()
+    magic, version, count = struct.unpack_from("<4sHH", data)
+    assert (magic, version, count) == (b"KPRC", 1, 48)
+    stride, offset = 4 + count * 3, 8 + count * 4
+    assert (len(data) - offset) % stride == 0
+    frames = [(struct.unpack_from("<I", data, pos)[0], data[pos + 4:pos + stride])
+              for pos in range(offset, len(data), stride)]
+    phases = dict((name, int(time)) for name, time in
+                  re.findall(r"selector phase (\w+) at (\d+)", log))
+    for phase, selected in (("condition_initial", True), ("condition_changed", False),
+                            ("condition_resumed", True)):
+        pixels = max((f for f in frames if f[0] <= phases[phase]), key=lambda f: f[0])[1]
+        assert pixels[:3] == bytes((0, 255, 0) if selected else (0, 0, 255)), phase
+        for led in (1, 4, 5, 6):
+            expected = (255, 255, 255) if selected else ((0, 0, 255) if led == 1 else (255, 0, 0))
+            if peripheral and led == 5:
+                expected = (255, 0, 0)
+            assert pixels[led * 3:led * 3 + 3] == bytes(expected), (phase, led, pixels)
+        assert pixels[21:24] == bytes((255, 0, 0) if selected else (0, 255, 255)), phase
 
 
 def build(root, name, fragment, runtime=False, selectors=SELECTORS, extra_conf=""):
@@ -236,6 +359,59 @@ def main():
     assert errors and all("canonical control is not ready" in line for line in errors), errors
     print("PASS canonical readiness deferred start", flush=True)
 
+    stage42(root)
+
+
+def stage42(root):
+    for name, (fragment, diagnostic) in SELECTED_CASES.items():
+        result = build(root, f"selected-{name}", fragment,
+                       selectors=SELECTED_CONDITIONS + SELECTORS)
+        assert result.returncode != 0, name
+        # Match actual compiler/DT diagnostics, not a source line echoed in a traceback.
+        errors = "\n".join(line for line in result.stdout.splitlines()
+                           if "error:" in line or "Error" in line or "Exception:" in line)
+        assert re.search(diagnostic, errors), result.stdout[-16000:]
+        print(f"PASS selected condition configuration {name}", flush=True)
+    selected_runtime(root, "selected-runtime")
+    selected_runtime(root, "selected-peripheral",
+                     '&selector_a { local; }; &selector_b { local; };', extra_conf=
+                     "CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n")
+    selected_runtime(root, "selected-zero", '''
+&rgb_matrix { /delete-property/ strip; mapping = <>; };
+&selector_a { /delete-property/ leds; };
+&selector_b { /delete-property/ leds; };
+&ordinary { /delete-property/ leds; };
+&shared_gate { /delete-property/ leds; };
+&central_gate { /delete-property/ leds; };
+&event_gate { /delete-property/ leds; };
+&opposite_gate { /delete-property/ leds; };
+''')
+    result = build(root, "selected-trigger", SELECTED_GATES + '''
+/ { selected_trigger: selected_trigger {
+    compatible = "keypaw,rgb-trigger-table";
+    reset_selection { condition = <&selected_c>;
+        on-enter = <&rgbs_a RGB_RESET_CMD 0>; };
+}; };
+''', runtime=True, selectors=SELECTED_CONDITIONS + SELECTORS,
+                   extra_conf="CONFIG_KEYPAW_RGB_TRIGGERS=y\n")
+    assert result.returncode == 0, result.stdout[-16000:]
+    run = subprocess.run([str(root / "selected-trigger/build/zephyr/zmk.exe"),
+                          "--stop_at=2", "-no-rt"], cwd=root, text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    (root / "selected-trigger.log").write_text(run.stdout)
+    assert run.returncode == 0, run.stdout
+    assert "PASS selector condition trigger selection during refresh" in run.stdout, run.stdout
+    assert "<err>" not in run.stdout, run.stdout
+    print("PASS selected condition trigger selection during refresh", flush=True)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stage42-only", action="store_true",
+                        help="Run only selected-effect condition DT and runtime cases")
+    args = parser.parse_args()
+    if args.stage42_only:
+        root = Path(tempfile.mkdtemp(prefix="rgb-selector-stage42-"))
+        print(f"ARTIFACTS {root}", flush=True)
+        stage42(root)
+    else:
+        main()

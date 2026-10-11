@@ -240,9 +240,9 @@ int main(int argc, char **argv) {
         inject_refresh_token = 13;
         kp_rgb_conditions_request_refresh(12);
         run_one();
-        assert(completed_token == 12 && control_work.queued);
+        assert(completed_token == 11 && refresh_completions == 1 && control_work.queued);
         ready();
-        assert(completed_token == 13 && refresh_completions == 3);
+        assert(completed_token == 13 && refresh_completions == 2);
         assert(sources[0].calls == 4 && sources[1].calls == 4);
     } else if (!strcmp(name, "refresh-interrupted")) {
         start();

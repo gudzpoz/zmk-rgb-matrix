@@ -15,9 +15,14 @@
  * Initial sampling must not depend on receiving an earlier event. A no-op
  * selection or a parameter-only change does not emit this event.
  *
- * Condition providers should invalidate their registered condition when their
- * selector changes. Listeners may use read-only queries and local selector APIs;
- * they must not invoke rendering or child callbacks directly.
+ * Condition providers must invalidate their registered condition synchronously
+ * in this listener when their selector changes. Input and painting wait for event
+ * delivery and the resulting condition refresh; asynchronously deferred
+ * invalidation is not covered by this guarantee. Listeners may use read-only
+ * queries and local selector APIs; they must not invoke rendering or child
+ * callbacks directly.
+ * Return ZMK_EV_EVENT_BUBBLE so other selection consumers receive the event;
+ * listeners must not handle or capture it.
  */
 struct zmk_rgb_selector_selection_changed {
   const struct device *selector;

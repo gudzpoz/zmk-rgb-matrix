@@ -21,8 +21,10 @@ const struct device *zmk_rgb_selector_get_selected(const struct device *selector
  * disabled effects, -ENODEV for unavailable selectors/members, and
  * -EWOULDBLOCK in ISR context. Failed calls leave selection unchanged.
  *
- * Thread-only and local-only: requests a repaint and selection notification but
- * does not save settings, broadcast, or change power/visibility. Do not call from
+ * Thread-only and local-only: requests a repaint, selection notification and
+ * condition refresh. Input and painting wait for synchronous notification
+ * consumers and the refresh. Does not save settings, broadcast, or change power;
+ * selection-dependent conditions may change visibility. Do not call from
  * effect/overlay callbacks. Supply a keypaw,rgb-overlay-selector device.
  */
 int zmk_rgb_selector_select(const struct device *selector,

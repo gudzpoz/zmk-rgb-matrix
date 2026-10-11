@@ -185,8 +185,14 @@ static uint32_t caps_off_at;
 
 /* Raising zmk_hid_indicators_changed is what the caps-lock condition listens to. */
 static void kp_sim_caps_set(bool on) {
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   zmk_hid_indicators_t flags = on ? HID_INDICATOR_CAPS_LOCK : 0;
   zmk_hid_indicators_set_profile(flags, zmk_endpoint_get_selected());
+#else
+  ARG_UNUSED(on);
+  printk("Caps Lock injection requires a central build\n");
+  exit(1);
+#endif
 }
 
 static void kp_sim_caps_on_handler(struct k_work *work) {

@@ -279,7 +279,7 @@ static void control_handler(struct k_work *work) {
 
   in_control = false;
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  bool refresh_complete = refresh_token && !pending();
+  bool refresh_complete = refresh_token && !pending() && !atomic_get(&external_pending);
   if (refresh_token && !refresh_complete && !refresh_requested) {
     refresh_requested = refresh_token;
   }

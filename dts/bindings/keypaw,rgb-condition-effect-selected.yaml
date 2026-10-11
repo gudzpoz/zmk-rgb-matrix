@@ -1,0 +1,28 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Active while a selector's retained selection is the specified effect. Returns
+  false until the selector's post-restoration startup succeeds. Power, inhibition,
+  visibility and local LED count do not affect the comparison.
+
+  This is a local source available on either split half. A default overlay uses
+  the central's gate; a local overlay evaluates the local selector's selection.
+
+  Keep this condition outside the selector it references. Do not use it, directly
+  or through a composite condition, as that selector's own gate: parent and
+  phandle dependencies would form a devicetree cycle. Forward references and
+  sharing the condition between sibling overlays are supported.
+
+compatible: "keypaw,rgb-condition-effect-selected"
+
+properties:
+  selector:
+    type: phandle
+    required: true
+    description: Enabled keypaw,rgb-overlay-selector to query.
+
+  effect:
+    type: phandle
+    required: true
+    description: Enabled effect child of this selector to compare with selection.
