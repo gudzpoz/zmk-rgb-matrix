@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/init.h>
@@ -56,6 +57,33 @@ static void kp_rgb_global_snapshot_locked(struct kp_rgb_global_snapshot *snapsho
       .user_on = kp_rgb_global.user_on, .brightness = kp_rgb_global.brightness};
 }
 
+struct kp_rgb_sync_selector {
+  const struct device *owner;
+  uint64_t revision;
+};
+
+#define KP_RGB_SYNC_SELECTOR(node_id) {.owner = DEVICE_DT_GET(node_id)},
+static struct kp_rgb_sync_selector kp_rgb_sync_selectors[] = {
+    DT_FOREACH_STATUS_OKAY(keypaw_rgb_overlay_selector, KP_RGB_SYNC_SELECTOR)
+    {0},
+};
+#define KP_RGB_SYNC_SELECTOR_CAPACITY MAX(ARRAY_SIZE(kp_rgb_sync_selectors) - 1, 1)
+
+static size_t kp_rgb_sync_selector_count(void) {
+  return ARRAY_SIZE(kp_rgb_sync_selectors) - 1;
+}
+
+struct kp_rgb_sync_selector_progress {
+  bool pending;
+  bool captured;
+  bool synced;
+  uint8_t step;
+  uint8_t retry_count;
+  int64_t ready_at;
+  uint64_t revision;
+  struct kp_rgb_selector_snapshot snapshot;
+};
+
 struct kp_rgb_sync_source {
   bool seen;           /* present at the last sample */
   bool pending;        /* a sync is in flight for this source */
@@ -71,13 +99,60 @@ struct kp_rgb_sync_source {
   uint16_t duration_ms;
   struct kp_rgb_hsb color;
   struct kp_rgb_global_snapshot global;
+  int64_t selectors_ready_at;
+  struct kp_rgb_sync_selector_progress selectors[KP_RGB_SYNC_SELECTOR_CAPACITY];
 };
 
 static struct k_work_delayable kp_rgb_sync_poll;
 static struct k_work_delayable kp_rgb_sync_step;
 static struct k_work_delayable kp_rgb_sync_clock;
+/* Source progress belongs to the RGB work queue; revisions use the matrix mutex. */
 static struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
+
+static struct k_work_delayable kp_rgb_sync_selector_step;
+static size_t kp_rgb_sync_selector_cursor;
+
+void kp_rgb_split_selector_dirty_locked(const struct device *selector) {
+  for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++) {
+    if (kp_rgb_sync_selectors[i].owner == selector) {
+      kp_rgb_sync_selectors[i].revision++;
+      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
+                                  K_NO_WAIT);
+      return;
+    }
+  }
+}
+
+void kp_rgb_split_selectors_dirty_locked(void) {
+  for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++)
+    kp_rgb_split_selector_dirty_locked(kp_rgb_sync_selectors[i].owner);
+}
+
+static void kp_rgb_sync_selectors_reset(struct kp_rgb_sync_source *source) {
+  memset(source->selectors, 0, sizeof(source->selectors));
+}
+
+static void kp_rgb_sync_selectors_refresh(int64_t now) {
+  kp_rgb_matrix_lock();
+  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
+    struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[s];
+    if (!source->seen)
+      continue;
+    for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++) {
+      struct kp_rgb_sync_selector_progress *st = &source->selectors[i];
+      if (!st->pending &&
+          (!st->synced || st->revision != kp_rgb_sync_selectors[i].revision)) {
+        st->pending = true;
+        st->captured = false;
+        st->step = 0;
+        st->retry_count = 0;
+        st->ready_at = MAX(now, source->selectors_ready_at);
+      }
+    }
+  }
+  kp_rgb_matrix_unlock();
+}
 
 /* Registration order is priority order, and a NULL get_status means "always
  * available". active_transport is private to the split central, so the transport
@@ -96,9 +171,6 @@ static const struct zmk_split_transport_central *kp_rgb_sync_pick_transport(void
   return NULL;
 }
 
-/* Samples the connected set, queues a sync for every source that newly appeared
- * or whose active effect changed to one it has not received, and abandons one
- * that disappeared. Called from both handlers. */
 static void kp_rgb_sync_refresh(void) {
   const struct zmk_split_transport_central *t = kp_rgb_sync_pick_transport();
 
@@ -111,6 +183,7 @@ static void kp_rgb_sync_refresh(void) {
       kp_rgb_sync_sources[i].pending = false;
       kp_rgb_sync_sources[i].retry_count = 0;
       kp_rgb_sync_sources[i].synced_effect = KP_RGB_SYNC_NO_EFFECT;
+      kp_rgb_sync_selectors_reset(&kp_rgb_sync_sources[i]);
     }
   }
 
@@ -147,6 +220,7 @@ static void kp_rgb_sync_refresh(void) {
        * discovered, and the split worker silently drops commands in that
        * window. */
       st->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
+      st->selectors_ready_at = st->ready_at;
       LOG_INF("Queued for source %u", (uint32_t)s);
       /* Align the shared clock once discovery has settled as well. */
       k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
@@ -155,6 +229,7 @@ static void kp_rgb_sync_refresh(void) {
       st->seen = false;
       st->pending = false; /* abort in flight; a reconnect re-syncs */
       st->synced_effect = KP_RGB_SYNC_NO_EFFECT;
+      kp_rgb_sync_selectors_reset(st);
     } else if (present[s] && st->seen && !st->pending &&
                st->synced_effect != active) {
       /* Active effect changed to one this source has not received. */
@@ -166,6 +241,7 @@ static void kp_rgb_sync_refresh(void) {
       LOG_INF("Effect change queued for source %u", (uint32_t)s);
     }
   }
+  kp_rgb_sync_selectors_refresh(now);
 }
 
 static int kp_rgb_sync_send_binding(uint8_t source,
@@ -341,6 +417,72 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
   }
 }
 
+static void kp_rgb_sync_selector_step_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  kp_rgb_sync_refresh();
+  size_t count = kp_rgb_sync_selector_count();
+  size_t lanes = ARRAY_SIZE(kp_rgb_sync_sources) * count;
+  int64_t now = k_uptime_get();
+
+  for (size_t n = 0; n < lanes; n++) {
+    size_t lane = (kp_rgb_sync_selector_cursor + n) % lanes;
+    size_t s = lane / count, i = lane % count;
+    struct kp_rgb_sync_selector_progress *st =
+        &kp_rgb_sync_sources[s].selectors[i];
+    if (!st->pending || now < st->ready_at)
+      continue;
+
+    int err = 0;
+    /* Finish the frozen member before sampling a newer command revision. */
+    if (!st->captured) {
+      kp_rgb_matrix_lock();
+      err = kp_rgb_selector_snapshot_locked(kp_rgb_sync_selectors[i].owner,
+                                            &st->snapshot);
+      if (err == 0) {
+        st->revision = kp_rgb_sync_selectors[i].revision;
+        st->captured = true;
+      }
+      kp_rgb_matrix_unlock();
+    }
+    if (err == 0)
+      err = kp_rgb_split_send_selector((uint8_t)s, &st->snapshot, st->step);
+
+    now = k_uptime_get();
+    if (err < 0) {
+      uint8_t shift = MIN(st->retry_count, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
+      st->ready_at = now + MIN((int64_t)(KP_RGB_SYNC_STEP_DELAY_MS << shift),
+                               (int64_t)KP_RGB_SYNC_MAX_BACKOFF_MS);
+      st->retry_count = MIN(st->retry_count + 1, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
+    } else {
+      st->retry_count = 0;
+      st->ready_at = now + KP_RGB_SYNC_STEP_DELAY_MS;
+      if (++st->step == 3) {
+        st->pending = false;
+        st->synced = true;
+      }
+    }
+    kp_rgb_sync_selector_cursor = (lane + 1) % lanes;
+    break;
+  }
+
+  kp_rgb_sync_selectors_refresh(now);
+  int64_t next_ms = -1;
+  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
+    for (size_t i = 0; i < count; i++) {
+      struct kp_rgb_sync_selector_progress *st =
+          &kp_rgb_sync_sources[s].selectors[i];
+      if (st->pending) {
+        int64_t wait = MAX(st->ready_at - now, KP_RGB_SYNC_STEP_DELAY_MS);
+        if (next_ms < 0 || wait < next_ms)
+          next_ms = wait;
+      }
+    }
+  }
+  if (next_ms >= 0)
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
+                                K_MSEC((uint32_t)next_ms));
+}
+
 static void kp_rgb_sync_poll_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_sync_refresh();
@@ -353,6 +495,13 @@ static void kp_rgb_sync_poll_handler(struct k_work *work) {
     }
   }
 
+  bool selector_pending = false;
+  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++)
+    for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++)
+      selector_pending |= kp_rgb_sync_sources[s].selectors[i].pending;
+  if (selector_pending)
+    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
+                                K_NO_WAIT);
   k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_poll,
                               K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
 }
@@ -361,6 +510,8 @@ static int kp_rgb_split_sync_init(void) {
   k_work_init_delayable(&kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
   k_work_init_delayable(&kp_rgb_sync_step, kp_rgb_sync_step_handler);
   k_work_init_delayable(&kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
+  k_work_init_delayable(&kp_rgb_sync_selector_step,
+                        kp_rgb_sync_selector_step_handler);
   /* The module work queue is started at POST_KERNEL, well before this. The
    * first poll is delayed rather than immediate to stay clear of the
    * settings_load() that runs at the top of main(). */

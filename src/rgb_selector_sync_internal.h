@@ -37,3 +37,15 @@ int kp_rgb_selector_snapshot_binding(
 int kp_rgb_split_send_selector(uint8_t source,
                                const struct kp_rgb_selector_snapshot *snapshot,
                                uint8_t step);
+
+#if IS_ENABLED(CONFIG_KEYPAW_RGB_SPLIT_SYNC)
+/* Caller holds the matrix mutex. Behavior adapters mark successful commands;
+ * local APIs and peripheral reception do not request synchronization. */
+void kp_rgb_split_selector_dirty_locked(const struct device *selector);
+void kp_rgb_split_selectors_dirty_locked(void);
+#else
+static inline void kp_rgb_split_selector_dirty_locked(const struct device *selector) {
+  (void)selector;
+}
+static inline void kp_rgb_split_selectors_dirty_locked(void) {}
+#endif

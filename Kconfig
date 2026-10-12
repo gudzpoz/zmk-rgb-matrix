@@ -161,21 +161,18 @@ config KEYPAW_RGB_SPLIT_SYNC
     depends on KEYPAW_BEHAVIOR_RGB_MATRIX
     depends on ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
     help
-      A &kprgb command is BEHAVIOR_LOCALITY_GLOBAL, so it is forwarded to the
-      peripheral and persisted there. A peripheral that was powered off while
-      the settings changed therefore keeps stale flash defaults and reloads them
-      on the next power-up. This pushes the selected effect, its colour and
-      period, and the user on/off intent to a peripheral whenever it newly
-      connects; the peripheral's own command handler applies and persists them.
+      Reconnect and transport changes push global user power, brightness,
+      overlay gates and every selector's selected member, color and period.
+      Successful selector control commands also request a fresh snapshot, even
+      when the selected member is unchanged. Local selector/parameter APIs do
+      not request synchronization. Selector snapshots use independent retries
+      per source/selector so one failed target cannot block the others.
 
-      The forward of a switch carries only the effect index, so the peripheral
-      would apply the new effect with its own colour and period. This also
-      re-pushes the full snapshot when the active effect changes to one the
-      peripheral has not received, keeping only the marker of the last effect
-      pushed, so effects never selected on the central are still not synced.
-
-      Built for the split central only. The trigger polls the transport's in-RAM
-      connected-source list, which transmits nothing until a peripheral appears.
+      Built for the split central only; control remains live while output is
+      off, inhibited, hidden or has no local LEDs. Both halves must use matching
+      canonical behavior names and member slots. Transport success means local
+      acceptance, not acknowledged delivery or an atomic scene transaction.
+      The flat-controller reconnect protocol remains supported until cutover.
 
 if KEYPAW_RGB_SPLIT_SYNC
 
@@ -184,10 +181,9 @@ config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
     default 1000
     range 1 60000
     help
-      How often the connected-source set is sampled. The sample is an in-RAM
-      array read with no radio traffic, and a peripheral reboot cannot finish
-      inside one period, so a disconnect is always observed before the
-      reconnect that follows it. Raise this to save one wakeup per period.
+      How often the connected-source set is sampled without radio traffic.
+      Disconnects shorter than this period may be missed. Observed reconnects
+      and transport changes request fresh snapshots after the settle delay.
 
 config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
     int "Delay before pushing to a newly connected peripheral (ms)"

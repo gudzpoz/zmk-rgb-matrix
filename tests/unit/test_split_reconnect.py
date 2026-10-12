@@ -179,7 +179,8 @@ static void test_initial_connection_and_off_snapshot(void) {
     unsigned locks_before_snapshot = lock_entries;
     now_ms = 100;
     kp_rgb_sync_step_handler(NULL);
-    assert(lock_entries == locks_before_snapshot + 2);
+    /* Connection refresh and selector refresh lock separately from the flat snapshot. */
+    assert(lock_entries == locks_before_snapshot + 3);
     assert(sends == 1 && commands[0] == RGB_LEGACY_EFS_CMD && arguments[0] == 3);
     assert(destinations[0] == 0 && held == 0);
     finish_source(0);
@@ -359,11 +360,18 @@ def main():
     sync_source = (ROOT / "src/rgb_selector_sync.c").read_text()
     sync_api = sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("/* Caller holds")]
     code = fixture_code() + MOCKS + "\n" + sync_api + enums
-    code += structure(source, "kp_rgb_global_snapshot") + structure(source, "kp_rgb_sync_source")
+    code += "\n#define KP_RGB_SYNC_SELECTOR_CAPACITY 1\n"
+    code += structure(source, "kp_rgb_global_snapshot")
+    code += structure(source, "kp_rgb_sync_selector_progress") + structure(source, "kp_rgb_sync_source")
     code += function(sync_source, "kp_rgb_selector_snapshot_binding") + "\n"
     code += "\n".join(function(source, name) for name in ("kp_rgb_global_snapshot_locked", "kp_rgb_sync_send_binding", "kp_rgb_split_send_selector", "kp_rgb_sync_emit_global")) + "\n"
     code += "\nstatic struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];\n"
     code += "static const struct zmk_split_transport_central *kp_rgb_sync_transport;\n"
+    # This fixture remains the no-selector legacy reconnect configuration.
+    code += structure(source, "kp_rgb_sync_selector")
+    code += "static struct kp_rgb_sync_selector kp_rgb_sync_selectors[] = {{0}};\n"
+    code += "\n".join(function(source, name) for name in (
+        "kp_rgb_sync_selector_count", "kp_rgb_sync_selectors_reset", "kp_rgb_sync_selectors_refresh"))
     code += "\n".join(
         function(source, name)
         for name in ("kp_rgb_sync_refresh", "kp_rgb_sync_emit_one", "kp_rgb_sync_step_handler")

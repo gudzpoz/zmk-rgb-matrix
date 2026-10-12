@@ -27,3 +27,10 @@ config KEYPAW_SIM_SETTINGS_TEST
     bool "native_sim scoped settings integration test"
     default n
     depends on ARCH_POSIX && SETTINGS_CUSTOM
+
+config KEYPAW_SIM_SPLIT_TEST
+    bool "native_sim scoped split transport integration test"
+    default n
+    depends on ARCH_POSIX && ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
+    depends on KEYPAW_RGB_SPLIT_SYNC
+    depends on !KEYPAW_SIM_SELECTOR_TEST

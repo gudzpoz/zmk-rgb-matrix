@@ -59,6 +59,10 @@ static const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *,si
 static int kp_rgb_selector_member_slot(const struct kp_rgb_selector *,const struct device *);
 static int kp_rgb_set_color_locked(const struct device *,const struct kp_rgb_hsb *);
 static int kp_rgb_set_period_locked(const struct device *,uint32_t);
+static unsigned dirty_calls;
+static void kp_rgb_split_selector_dirty_locked(const struct device *owner) {
+ assert(held && owner); dirty_calls++;
+}
 '''
 
 TESTS = r'''
@@ -191,7 +195,15 @@ static void test_addressed_apply_and_validation(void) {
  kp_rgb_matrix_lock(); assert(kp_rgb_selector_member_apply_locked(s,KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,2),1200)==0); kp_rgb_matrix_unlock();
  assert(values[1].duration_ms==1200 && values[0].duration_ms==500 && s->effect_index==0);
  assert(kp_rgb_selector_binding_apply(&owners[0],KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,2),1300)==0);
- assert(values[1].duration_ms==1300 && saves==1 && !held);
+ assert(values[1].duration_ms==1300 && saves==1 && dirty_calls==1 && !held);
+ unsigned dirty_before=dirty_calls;
+ assert(kp_rgb_selector_binding_apply(&owners[0],KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,2),1300)==0);
+ assert(dirty_calls==dirty_before+1);
+ dirty_before=dirty_calls;
+ assert(kp_rgb_selector_binding_apply(&owners[0],KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,2),99)==-EINVAL);
+ assert(kp_rgb_selector_binding_apply(NULL,RGB_EFS_CMD,0)==-ENODEV);
+ isr=true; assert(kp_rgb_selector_binding_apply(&owners[0],RGB_EFS_CMD,0)==-EWOULDBLOCK); isr=false;
+ assert(dirty_calls==dirty_before);
  unsigned saved=saves;
  kp_rgb_matrix_lock(); int ret=kp_rgb_selector_member_apply_locked(s,KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,2),1300); kp_rgb_matrix_unlock();
  assert(ret==0 && saves==saved);

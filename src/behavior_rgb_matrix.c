@@ -19,6 +19,7 @@
 #include <zmk/rgb_matrix.h>
 
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_sync_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -601,6 +602,9 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     if (argument != 0)
       return -EINVAL;
     kp_rgb_reset_state();
+    kp_rgb_matrix_lock();
+    kp_rgb_split_selectors_dirty_locked();
+    kp_rgb_matrix_unlock();
     return 0;
   case RGB_OVL_STATE_CMD:
     kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(argument),

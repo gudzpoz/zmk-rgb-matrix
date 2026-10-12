@@ -102,6 +102,10 @@ def main():
     enums = "\n".join(re.search(r"enum " + name + r" \{.*?\};", source, re.S).group()
                       for name in ("kp_rgb_sync_phase", "kp_rgb_sync_emit"))
     code = fixture_code() + MOCKS + enums + structure(source, "kp_rgb_global_snapshot")
+    sync_header = (ROOT / "src/rgb_selector_sync_internal.h").read_text()
+    code += "\n#define KP_RGB_SYNC_SELECTOR_CAPACITY 1\n"
+    code += structure(sync_header, "kp_rgb_selector_snapshot")
+    code += structure(source, "kp_rgb_sync_selector_progress")
     code += structure(source, "kp_rgb_sync_source")
     code += function(source, "kp_rgb_global_snapshot_locked") + "\n"
     code += function(source, "kp_rgb_sync_emit_global") + "\n"

@@ -4,7 +4,7 @@
 """Host-execute Stage 3 controls, not replicas of their conversion algorithms.
 
 DT generation is replaced only by two known devices/associations; native tests
-cover its assertions. Both explicit-alias and missing-alias builds run. Set
+cover its assertions. Explicit/missing aliases and central/peripheral dirty hooks run. Set
 SELECTOR_CONTROLS_SANITIZE=1 to additionally enable ASan/UBSan.
 """
 import os
@@ -147,6 +147,15 @@ struct kp_rgb_selector *kp_rgb_selector_overlay_state_locked(const struct device
 const struct device *kp_rgb_selector_control(const struct device *);
 int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *,uint32_t,uint32_t);
 void kp_rgb_reset_state(void);
+static unsigned dirty[2];
+#if CENTRAL_SYNC
+static void kp_rgb_split_selector_dirty_locked(const struct device *owner) {
+ assert(held); assert(owner==&owners[0] || owner==&owners[1]); dirty[owner==&owners[1]]++;
+}
+static void kp_rgb_split_selectors_dirty_locked(void) {
+ assert(held); kp_rgb_split_selector_dirty_locked(&owners[0]); kp_rgb_split_selector_dirty_locked(&owners[1]);
+}
+#endif
 '''
 
 TESTS = r'''
@@ -422,11 +431,53 @@ static void test_isr(void) {
  assert(kp_rgb_change_brt(1)==-EWOULDBLOCK);
  assert(locks==l && flushes==0 && callbacks==0 && saves==0 && !held); isr=false;
 }
+static void test_dirty_contract(void) {
+ setup(); memset(dirty,0,sizeof(dirty));
+ kp_rgb_global.user_on=false;
+ assert(!data_a.active && !data_b.active); /* Hidden owners still accept control updates. */
+ assert(apply(0,RGB_EFS_CMD,2)==0);
+ assert(apply(0,RGB_EFS_CMD,0)==0);
+ assert(apply(0,RGB_EFS_CMD,2)==0);
+ assert(dirty[0]==3*CENTRAL_SYNC && dirty[1]==0);
+ uint32_t color=KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD,2);
+ assert(apply(0,color,RGB_COLOR_HSB_VAL(123,45,100))==0);
+ assert(apply(0,color,RGB_COLOR_HSB_VAL(123,45,100))==0);
+ assert(dirty[0]==5*CENTRAL_SYNC && dirty[1]==0);
+ assert(apply(0,RGB_EFS_CMD,1)<0);
+ assert(apply(0,color,UINT32_MAX)==-EINVAL);
+ assert(apply(0,RGB_RESET_CMD,1)==-EINVAL);
+ assert(apply(0,0xffff,0)<0);
+ data_a.ready=false; assert(apply(0,RGB_EFS_CMD,0)==-ENODEV); data_a.ready=true;
+ isr=true; assert(apply(0,RGB_EFS_CMD,0)==-EWOULDBLOCK); isr=false;
+ assert(dirty[0]==5*CENTRAL_SYNC && dirty[1]==0);
+ assert(!kp_rgb_global.user_on && !data_a.active && !data_b.active && callbacks==0);
+ struct zmk_behavior_binding binding={controls[0].name,RGB_EFS_CMD,0};
+ assert(kp_selector_convert(&binding,event)==0);
+ assert(zmk_rgb_selector_select(&owners[0],&effects[0])==0);
+ assert(zmk_rgb_selector_reset(&owners[0])==0);
+#if HAS_ALIAS
+ assert(zmk_rgb_matrix_select_effect(0)==0);
+ assert(zmk_rgb_matrix_cycle_effect(1)==0);
+#else
+ assert(zmk_rgb_matrix_select_effect(0)==-ENODEV);
+ assert(zmk_rgb_matrix_cycle_effect(1)==-ENODEV);
+#endif
+ struct kp_rgb_hsb hsb={1,2,100};
+ assert(zmk_rgb_matrix_set_color(&effects[0],&hsb)==0);
+ assert(zmk_rgb_matrix_set_period(&effects[0],1000)==0);
+ kp_rgb_reset_state();
+ assert(dirty[0]==5*CENTRAL_SYNC && dirty[1]==0);
+ struct zmk_behavior_binding reset={flat.name,RGB_RESET_CMD,0};
+ assert(on_keymap_binding_pressed(&reset,event)==0);
+ assert(dirty[0]==6*CENTRAL_SYNC && dirty[1]==CENTRAL_SYNC);
+ reset.param2=1; assert(on_keymap_binding_pressed(&reset,event)==-EINVAL);
+ assert(dirty[0]==6*CENTRAL_SYNC && dirty[1]==CENTRAL_SYNC);
+}
 int main(void) {
- test_conversion_application(); test_arguments(); test_associations();
+ test_dirty_contract(); test_conversion_application(); test_arguments(); test_associations();
  test_alias_brightness(); test_reset(); test_reset_startup_edges(); test_isr();
  assert(locks==unlocks && !held);
- printf("selector controls (alias=%d): passed\n",HAS_ALIAS); return 0;
+ printf("selector controls (alias=%d central_sync=%d): passed\n",HAS_ALIAS,CENTRAL_SYNC); return 0;
 }
 '''
 
@@ -452,6 +503,7 @@ def production_fixture():
     parts = [PRELUDE, commands, defines, endpoints]
     parts += [structure(selector_header, n) for n in ("kp_rgb_effect_defaults", "kp_rgb_selector")]
     parts.append(sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("struct kp_rgb_selector_snapshot")])
+    parts.append("#if !CENTRAL_SYNC\n" + sync_header[sync_header.index("static inline void kp_rgb_split_selector_dirty_locked"):sync_header.rindex("#endif")] + "#endif\n")
     parts += [structure(public, n) for n in ("kp_rgb_effect_common_config", "kp_rgb_effect_common_data")]
     parts += [structure(internal, n) for n in ("kp_rgb_global", "kp_rgb_controller")]
     parts += [structure(overlay, "kp_selector_data"), structure(control, "kp_selector_control_config"), structure(control, "kp_selector_control_entry"), FIXTURE]
@@ -463,6 +515,9 @@ def production_fixture():
     parts.append(function(sync_source, "kp_rgb_selector_member_apply_locked"))
     parts.append(function(selector, "kp_rgb_selector_dispatch_locked"))
     parts += [function(overlay, n) for n in ("kp_selector_reconcile", "kp_selector_set_active", "kp_rgb_selector_overlay_state_locked", "kp_rgb_selector_overlay_reset_locked", "kp_selector_refresh_members", "kp_selector_prepare_locked", "kp_rgb_selector_overlay_prepare_locked", "kp_selector_defaults_locked", "kp_selector_start")]
+    parts.append(function(overlay, "kp_rgb_selector_overlay_select_locked"))
+    selector_api = (ROOT / "src/rgb_selector_api.c").read_text()
+    parts += [function(selector_api, n) for n in ("zmk_rgb_selector_select", "zmk_rgb_selector_reset")]
     # Execute the actual defaults iterator, with two host DT instances only.
     macro = re.search(r"^#define KP_SELECTOR_DEFAULTS\(inst\).*?\n\n", overlay, re.M | re.S)
     assert macro, "selector defaults iterator"
@@ -481,11 +536,11 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / "selector_controls.c"
         source.write_text(code)
-        for alias in (0, 1):
-            binary = Path(directory) / f"selector_controls_{alias}"
+        for alias, central in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            binary = Path(directory) / f"selector_controls_{alias}_{central}"
             subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
                 "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
-                f"-DHAS_ALIAS={alias}", *flags, str(source), "-o", str(binary),
+                f"-DHAS_ALIAS={alias}", f"-DCENTRAL_SYNC={central}", *flags, str(source), "-o", str(binary),
             ], check=True)
             subprocess.run([str(binary)], check=True, timeout=10)
 
