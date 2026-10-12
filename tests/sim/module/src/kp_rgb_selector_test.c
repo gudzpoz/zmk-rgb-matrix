@@ -15,6 +15,7 @@
 #include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_sync_internal.h"
 
 struct probe_config {
   struct kp_rgb_effect_common_config common;
@@ -220,6 +221,69 @@ static void isr_boundaries(struct k_timer *unused) {
 
 K_TIMER_DEFINE(boundary_timer, isr_boundaries, NULL);
 
+static void scoped_snapshot_roundtrip(void) {
+  const struct device *selector_a = DEV(selector_a);
+  const struct device *selector_b = DEV(selector_b);
+  struct kp_rgb_selector_snapshot captured_a, captured_b;
+  kp_rgb_matrix_lock();
+  struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(selector_a);
+  struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(selector_b);
+  CHECK(a != NULL && b != NULL);
+  CHECK(kp_rgb_selector_snapshot_locked(selector_a, &captured_a) == 0);
+  CHECK(kp_rgb_selector_snapshot_locked(selector_b, &captured_b) == 0);
+  uint16_t original_slot = captured_a.slot;
+  const struct device *original_member = a->active_fx;
+  uint16_t alternate_slot = UINT16_MAX;
+  for (size_t i = 0; i < kp_rgb_selector_count(a); i++) {
+    if (i != original_slot && kp_rgb_selector_at(a, i) != NULL &&
+        device_is_ready(kp_rgb_selector_at(a, i))) {
+      alternate_slot = (uint16_t)i;
+      break;
+    }
+  }
+  CHECK(alternate_slot != UINT16_MAX);
+  const struct device *other_member = b->active_fx;
+  struct kp_rgb_hsb other_color = kp_rgb_effect_data(other_member)->color;
+  uint32_t other_period = kp_rgb_effect_period(other_member);
+  CHECK(kp_rgb_selector_select_locked(a, alternate_slot) == 1);
+  struct kp_rgb_hsb changed_color = captured_a.color;
+  changed_color.h = (changed_color.h + 1) % 360;
+  CHECK(kp_rgb_set_color_locked(original_member, &changed_color) == 0);
+  uint32_t changed_period = captured_a.period_ms > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS
+                                ? captured_a.period_ms - 1
+                                : captured_a.period_ms + 1;
+  CHECK(kp_rgb_set_period_locked(original_member, changed_period) == 0);
+  kp_rgb_matrix_unlock();
+
+  struct zmk_behavior_binding color_binding, period_binding, selection_binding;
+  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 0, &color_binding) == 0);
+  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 1, &period_binding) == 0);
+  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 2, &selection_binding) == 0);
+  CHECK(color_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
+                                    RGB_SELECTOR_COLOR_CMD, original_slot));
+  CHECK(period_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
+                                     RGB_SELECTOR_PERIOD_CMD, original_slot));
+  kp_rgb_matrix_lock();
+  CHECK(a->active_fx != original_member);
+  CHECK(kp_rgb_selector_dispatch_locked(a, color_binding.param1, color_binding.param2) == 0);
+  CHECK(kp_rgb_selector_dispatch_locked(a, period_binding.param1, period_binding.param2) == 0);
+  CHECK(a->active_fx != original_member && a->effect_index == alternate_slot);
+  CHECK(kp_rgb_effect_data(original_member)->color.h == captured_a.color.h);
+  CHECK(kp_rgb_effect_data(original_member)->color.s == captured_a.color.s);
+  CHECK(kp_rgb_effect_data(original_member)->color.b == captured_a.color.b);
+  CHECK(kp_rgb_effect_period(original_member) == captured_a.period_ms);
+  CHECK(b->active_fx == other_member);
+  CHECK(kp_rgb_effect_data(other_member)->color.h == other_color.h);
+  CHECK(kp_rgb_effect_data(other_member)->color.s == other_color.s);
+  CHECK(kp_rgb_effect_data(other_member)->color.b == other_color.b);
+  CHECK(kp_rgb_effect_period(other_member) == other_period);
+  CHECK(kp_rgb_selector_dispatch_locked(a, selection_binding.param1,
+                                         selection_binding.param2) == 0);
+  CHECK(a->active_fx == original_member && a->effect_index == original_slot);
+  kp_rgb_matrix_unlock();
+  CHECK(captured_b.control == kp_rgb_selector_control(selector_b));
+}
+
 static void controls(void) {
   kp_rgb_matrix_lock();
   unsigned before = callback_count();
@@ -269,10 +333,12 @@ static void controls(void) {
   invoke(DEV(fx_solid), 0, 0);
   CHECK(kp_rgb_controller.selector.effect_index == 0);
   kp_rgb_matrix_unlock();
+  scoped_snapshot_roundtrip();
   converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 2);
   converted(DEV(kprgb), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 2);
   converted(DEV(probe_d), 0, 0, DEV(rgbs_b), RGB_EFS_CMD, 1);
-  converted(DEV(rgbs_a), RGB_HUI_CMD, 0, DEV(rgbs_a), RGB_COLOR_HSB_CMD,
+  converted(DEV(rgbs_a), RGB_HUI_CMD, 0, DEV(rgbs_a),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
             RGB_COLOR_HSB_VAL((120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360, 100, 100));
   invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2000);

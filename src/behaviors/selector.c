@@ -11,6 +11,7 @@
 #include <zmk/behavior.h>
 
 #include "../rgb_matrix_internal.h"
+#include "../rgb_selector_sync_internal.h"
 
 #define KP_CONTROL_VALIDATE(node_id)                                           \
   BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(node_id, selector),               \
@@ -69,8 +70,15 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
   int err = kp_rgb_selector_convert_locked(state, binding);
-  if (err == 0)
+  if (err == 0) {
+    if (binding->param1 == RGB_COLOR_HSB_CMD)
+      binding->param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(
+          RGB_SELECTOR_COLOR_CMD, state->effect_index);
+    else if (binding->param1 == RGB_SPI_CMD)
+      binding->param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(
+          RGB_SELECTOR_PERIOD_CMD, state->effect_index);
     binding->behavior_dev = control->name;
+  }
   kp_rgb_matrix_unlock();
   return err;
 }
@@ -89,6 +97,8 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
                            : -EINVAL)
           : kp_rgb_selector_dispatch_locked(state, command, argument);
   kp_rgb_matrix_unlock();
+  if (err >= 0)
+    err = kp_rgb_save_selector_state(selector, command == RGB_RESET_CMD);
   return err;
 }
 

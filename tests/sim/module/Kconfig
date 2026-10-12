@@ -22,3 +22,8 @@ config KEYPAW_SIM_SELECTOR_TEST
     bool "native_sim selector runtime test"
     default n
     depends on ARCH_POSIX && LED_STRIP
+
+config KEYPAW_SIM_SETTINGS_TEST
+    bool "native_sim scoped settings integration test"
+    default n
+    depends on ARCH_POSIX && SETTINGS_CUSTOM

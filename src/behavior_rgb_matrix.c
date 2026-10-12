@@ -244,8 +244,14 @@ int kp_rgb_select_effect(uint16_t index) {
 }
 
 int zmk_rgb_matrix_select_effect(uint16_t index) {
-  return kp_rgb_selector_binding_apply(kp_rgb_selector_alias(), RGB_EFS_CMD,
-                                       index);
+  if (k_is_in_isr())
+    return -EWOULDBLOCK;
+  kp_rgb_matrix_lock();
+  struct kp_rgb_selector *selector =
+      kp_rgb_selector_overlay_state_locked(kp_rgb_selector_alias());
+  int ret = kp_rgb_selector_dispatch_locked(selector, RGB_EFS_CMD, index);
+  kp_rgb_matrix_unlock();
+  return ret;
 }
 
 int kp_rgb_cycle_effect(int16_t direction) {

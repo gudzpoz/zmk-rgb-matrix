@@ -27,11 +27,15 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
       sizeof(KP_PERSIST_ID(node_id)) <= KP_RGB_PERSIST_MAX_ID_LENGTH,          \
       "RGB persist-id or node name exceeds KP_RGB_PERSIST_MAX_ID_LENGTH");
 
+
+#define KP_PERSIST_DEVICE(node_id) DEVICE_DT_GET(node_id),
 #define KP_PERSIST_DEFINE(inst)                                                \
   KP_PERSIST_ID_LENGTH(DT_DRV_INST(inst))                                      \
   DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_PERSIST_ID_LENGTH)        \
   static const struct kp_rgb_persist_effect_id kp_persist_##inst##_members[] = \
-      {DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_PERSIST_MEMBER)};
+      {DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_PERSIST_MEMBER)};    \
+  static const struct device *const kp_persist_##inst##_devices[] = {          \
+      DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_PERSIST_DEVICE)};
 
 DT_INST_FOREACH_STATUS_OKAY(KP_PERSIST_DEFINE)
 
@@ -48,6 +52,16 @@ static const struct kp_rgb_persist_selector_ids kp_persist_selectors[] = {
 static const struct device *const kp_persist_owners[] = {
     DT_INST_FOREACH_STATUS_OKAY(KP_PERSIST_OWNER)};
 
+#define KP_PERSIST_DEVICES(inst) kp_persist_##inst##_devices,
+static const struct device *const *const kp_persist_devices[] = {
+    DT_INST_FOREACH_STATUS_OKAY(KP_PERSIST_DEVICES)};
+
+const struct device *kp_rgb_persist_member_at(size_t selector, size_t member) {
+  const struct kp_rgb_persist_selector_ids *ids =
+      kp_rgb_persist_selector_at(selector, NULL);
+  return ids != NULL && member < ids->effect_count
+             ? kp_persist_devices[selector][member] : NULL;
+}
 size_t kp_rgb_persist_selector_count(void) {
   return ARRAY_SIZE(kp_persist_selectors);
 }
@@ -91,4 +105,10 @@ kp_rgb_persist_selector_at(size_t index, const struct device **owner) {
 
 int kp_rgb_persist_ids_validate(void) { return 0; }
 
+
+const struct device *kp_rgb_persist_member_at(size_t selector, size_t member) {
+  ARG_UNUSED(selector);
+  ARG_UNUSED(member);
+  return NULL;
+}
 #endif

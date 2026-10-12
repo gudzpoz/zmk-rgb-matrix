@@ -69,6 +69,8 @@ static void zmk_rgb_matrix_flush(void);
 static void kp_rgb_triggers_evaluate(int64_t now);
 static void kp_rgb_triggers_quarantine(void);
 static void kp_rgb_conditions_refreshed(uint64_t token);
+static int settings_commit_error;
+static int kp_rgb_settings_commit(void) { return settings_commit_error; }
 static int selector_start_error;
 static unsigned selector_starts;
 static int kp_rgb_selector_overlays_start(void) {
@@ -261,6 +263,14 @@ int main(int argc, char **argv) {
         start();
         assert(entries[0].fault && refresh_completions == 1 && completed_token == 2);
         assert(!control_work.queued && !control_work.scheduled);
+    } else if (!strcmp(name, "startup-unrestored-settings")) {
+        sources[0].value = true;
+        settings_commit_error = -ENODEV;
+        start();
+        assert(!selector_starts && !evaluations && !schedules && !sources[0].calls);
+        settings_commit_error = 0;
+        start();
+        assert(selector_starts == 1 && evaluations == 1 && sources[0].calls == 1 && gate);
     } else if (!strcmp(name, "startup-unready-selector")) {
         sources[0].value = true;
         selector_start_error = -ENODEV;

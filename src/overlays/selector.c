@@ -198,6 +198,26 @@ static void kp_selector_prepare_locked(struct kp_selector_data *data) {
   data->prepared = true;
 }
 
+struct kp_rgb_selector *
+kp_rgb_selector_overlay_prepare_locked(const struct device *dev) {
+  if (dev == NULL || !device_is_ready(dev))
+    return NULL;
+  const struct kp_rgb_overlay_api *api = dev->api;
+  if (api == NULL || api->callbacks != &kp_selector_callbacks)
+    return NULL;
+  struct kp_selector_data *data = dev->data;
+  kp_selector_prepare_locked(data);
+  struct kp_rgb_selector defaults = data->selector;
+  defaults.publish_changes = false;
+  for (size_t i = 0; i < data->selector.effect_count; i++) {
+    const struct device *effect = data->instances[i].effect;
+    bool newly_ready = data->members[i] == NULL && effect != NULL && device_is_ready(effect);
+    data->members[i] = newly_ready ? effect : NULL;
+  }
+  kp_rgb_selector_apply_defaults_locked(&defaults);
+  kp_selector_refresh_members(data);
+  return &data->selector;
+}
 static int kp_selector_prepare(const struct device *dev) {
   if (!device_is_ready(dev))
     return 0;
@@ -223,18 +243,7 @@ static int kp_selector_start(const struct device *dev) {
     kp_rgb_matrix_unlock();
     return 0;
   }
-  kp_selector_prepare_locked(data);
-  /* Settings may restore existing member parameters before startup. */
-  for (size_t i = 0; i < data->selector.effect_count; i++) {
-    const struct device *effect = data->instances[i].effect;
-    bool newly_ready =
-        data->members[i] == NULL && effect != NULL && device_is_ready(effect);
-    data->members[i] = newly_ready ? effect : NULL;
-  }
-  struct kp_rgb_selector defaults = data->selector;
-  defaults.publish_changes = false;
-  kp_rgb_selector_apply_defaults_locked(&defaults);
-  kp_selector_refresh_members(data);
+  kp_rgb_selector_overlay_prepare_locked(dev);
   if (data->selector.active_fx == NULL) {
     data->selector.effect_index = data->selector.initial_effect;
   }
@@ -354,6 +363,12 @@ void kp_rgb_selector_overlays_defaults_locked(void) {
 #else
 
 int kp_rgb_selector_overlays_start(void) { return 0; }
+
+struct kp_rgb_selector *
+kp_rgb_selector_overlay_prepare_locked(const struct device *dev) {
+  ARG_UNUSED(dev);
+  return NULL;
+}
 
 void kp_rgb_selector_overlays_defaults_locked(void) {}
 

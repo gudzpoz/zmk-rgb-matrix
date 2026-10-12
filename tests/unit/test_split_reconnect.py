@@ -34,12 +34,18 @@ MOCKS = r'''
 #define RGB_ON_CMD 4
 #define RGB_OFF_CMD 5
 #define RGB_OVL_STATE_CMD 6
+#define RGB_SELECTOR_COLOR_CMD 0x108u
+#define RGB_SELECTOR_PERIOD_CMD 0x109u
+#define KP_RGB_SELECTOR_COMMAND_MASK 0xffffu
+#define RGB_EFS_CMD 13u
 #define RGB_COLOR_HSB_VAL(h,s,b) (((uint32_t)(h)<<16)|((uint32_t)(s)<<8)|(b))
 #define RGB_OVL_STATE_VAL(w,v) (((uint32_t)(w)<<16)|(v))
 #define K_MSEC(x) (x)
 #define K_NO_WAIT 0
 struct k_work { int unused; };
 struct k_work_delayable { int unused; };
+struct zmk_behavior_binding { const char *behavior_dev; uint32_t param1,param2; };
+struct zmk_behavior_binding_event { uint8_t layer,position; int64_t timestamp; uint8_t source; };
 struct zmk_split_transport_central_api {
     int (*get_available_source_ids)(uint8_t *ids);
 };
@@ -57,6 +63,10 @@ static unsigned sends;
 static uint32_t commands[128], arguments[128];
 static uint8_t destinations[128];
 static bool fail_source[2];
+static int behavior_result;
+static const struct device *sent_behavior;
+static struct zmk_behavior_binding sent_binding;
+static struct zmk_behavior_binding_event sent_event;
 static int get_ids(uint8_t *ids) {
     assert(!held);
     transport_queries++;
@@ -73,6 +83,12 @@ static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
     commands[sends] = cmd;
     arguments[sends++] = arg;
     return !fail_source[source];
+}
+static int zmk_split_central_invoke_behavior(uint8_t source, struct zmk_behavior_binding *binding,
+                                             struct zmk_behavior_binding_event event, bool pressed) {
+    assert(!held && source < 2 && pressed);
+    sent_behavior = NULL; sent_binding = *binding; sent_event = event;
+    return behavior_result;
 }
 static uint16_t kp_rgb_overlay_word_count(void) { return 1; }
 static uint16_t kp_rgb_overlay_get_word(uint16_t word) {
@@ -123,6 +139,7 @@ static void reset_test(void) {
     scheduled_delay = -1;
     sends = 0;
     transport_queries = 0;
+    behavior_result = 0; sent_behavior = NULL;
     assert(!held);
 }
 
@@ -288,12 +305,44 @@ static void test_no_effect_snapshot_keeps_brightness_and_power(void) {
     assert(commands[2] == RGB_OVL_STATE_CMD);
     assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_DONE && sends == 3);
 }
+static void test_selector_sender_and_global_snapshot(void) {
+    reset_test();
+    struct kp_rgb_selector_snapshot snapshot = {
+        .control = &(const struct device){NULL, "selector-control", NULL},
+        .slot = 1, .color = {222, 77, 100}, .period_ms = 3456};
+    struct kp_rgb_selector_snapshot original = snapshot;
+    now_ms = 765;
+    behavior_result = -EIO;
+    assert(kp_rgb_split_send_selector(1, &snapshot, 0) == -EIO);
+    assert(!held && sent_binding.behavior_dev == snapshot.control->name);
+    assert(sent_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+    assert(sent_binding.param2 == RGB_COLOR_HSB_VAL(222, 77, 100));
+    assert(sent_event.layer == 0 && sent_event.position == 0 && sent_event.timestamp == 765 && sent_event.source == 1);
+    assert(!memcmp(&snapshot, &original, sizeof(snapshot)));
+    behavior_result = 0;
+    assert(kp_rgb_split_send_selector(0, &snapshot, 1) == 0);
+    assert(sent_binding.behavior_dev == snapshot.control->name);
+    assert(sent_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1));
+    assert(sent_binding.param2 == 3456 && sent_event.source == 0 && !held);
+
+    struct kp_rgb_sync_source global = {.phase = KP_RGB_SYNC_BRIGHTNESS};
+    kp_rgb_matrix_lock(); kp_rgb_global.brightness = 61; kp_rgb_global.user_on = false;
+    kp_rgb_global_snapshot_locked(&global.global); kp_rgb_matrix_unlock();
+    kp_rgb_global.brightness = 9; kp_rgb_global.user_on = true;
+    assert(global.global.brightness == 61 && !global.global.user_on);
+    assert(kp_rgb_sync_emit_global(0, &global) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[0] == RGB_BRT_SET_CMD && arguments[0] == 61 && global.phase == KP_RGB_SYNC_POWER);
+    assert(kp_rgb_sync_emit_global(0, &global) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[1] == RGB_OFF_CMD && arguments[1] == 0);
+}
+
 
 int main(void) {
     test_initial_connection_and_off_snapshot();
     test_disconnect_reconnect_and_transport_replacement();
     test_failure_backoff_does_not_block_other_source();
     test_no_effect_snapshot_keeps_brightness_and_power();
+    test_selector_sender_and_global_snapshot();
     puts("split reconnect lifecycle, snapshots, transport replacement and retries passed");
     return 0;
 }
@@ -306,7 +355,13 @@ def main():
         re.search(r"enum " + name + r" \{.*?\};", source, re.S).group()
         for name in ("kp_rgb_sync_phase", "kp_rgb_sync_emit")
     )
-    code = fixture_code() + MOCKS + enums + structure(source, "kp_rgb_sync_source")
+    sync_header = (ROOT / "src/rgb_selector_sync_internal.h").read_text()
+    sync_source = (ROOT / "src/rgb_selector_sync.c").read_text()
+    sync_api = sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("/* Caller holds")]
+    code = fixture_code() + MOCKS + "\n" + sync_api + enums
+    code += structure(source, "kp_rgb_global_snapshot") + structure(source, "kp_rgb_sync_source")
+    code += function(sync_source, "kp_rgb_selector_snapshot_binding") + "\n"
+    code += "\n".join(function(source, name) for name in ("kp_rgb_global_snapshot_locked", "kp_rgb_sync_send_binding", "kp_rgb_split_send_selector", "kp_rgb_sync_emit_global")) + "\n"
     code += "\nstatic struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];\n"
     code += "static const struct zmk_split_transport_central *kp_rgb_sync_transport;\n"
     code += "\n".join(

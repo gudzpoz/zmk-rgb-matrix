@@ -9,7 +9,7 @@
 
 void zmk_rgb_matrix_start(void) {
   __ASSERT(!k_is_in_isr(), "RGB startup requires thread context");
-  if (k_is_in_isr() || kp_rgb_selector_overlays_start() < 0) return;
+  if (k_is_in_isr() || kp_rgb_settings_commit() < 0 || kp_rgb_selector_overlays_start() < 0) return;
   kp_rgb_conditions_start();
 }
 

@@ -72,6 +72,10 @@ static void kp_rgb_matrix_lock(void) { assert(!isr); held++; locks++; }
 static void kp_rgb_matrix_unlock(void) { assert(held); held--; unlocks++; }
 static void zmk_rgb_matrix_flush(void) { assert(held); flushes++; }
 static int kp_rgb_save_state(void) { assert(!held); saves++; return 0; }
+static unsigned scoped_saves;
+static int kp_rgb_save_selector_state(const struct device *owner, bool reset) {
+    assert(!held && owner); (void)reset; scoped_saves++; return 0;
+}
 static void kp_rgb_reconcile_power_locked(void) { assert(held); power_reconciles++; }
 static void kp_rgb_request_runtime_reset_locked(void) { assert(held); runtime_resets++; }
 static int64_t k_uptime_get(void) { return uptime; }
@@ -137,6 +141,7 @@ static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct 
 }
 static uint32_t kp_rgb_effect_period(const struct device *dev) { return kp_rgb_effect_data(dev)->duration_ms; }
 int kp_rgb_selector_binding_apply(const struct device *,uint32_t,uint32_t);
+int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *,uint32_t,uint32_t);
 int kp_rgb_selector_binding_convert(const struct device *,struct zmk_behavior_binding *);
 struct kp_rgb_selector *kp_rgb_selector_overlay_state_locked(const struct device *);
 const struct device *kp_rgb_selector_control(const struct device *);
@@ -177,12 +182,13 @@ static int apply(unsigned owner,uint32_t cmd,uint32_t arg) {
  return kp_selector_pressed(&binding,event);
 }
 static void roundtrip(unsigned owner,uint32_t cmd,uint32_t absolute_cmd,uint32_t value) {
+ unsigned scoped_before=scoped_saves;
  struct zmk_behavior_binding binding={controls[owner].name,cmd,0};
  struct kp_rgb_effect_common_data before[5]; memcpy(before,parameters,sizeof(before));
  size_t index=data_a.selector.effect_index, index_b=data_b.selector.effect_index;
  unsigned f=flushes,c=callbacks,l=locks,s=saves;
  assert(kp_selector_convert(&binding,event)==0);
- assert(binding.behavior_dev==controls[owner].name && binding.param1==absolute_cmd && binding.param2==value);
+ assert(binding.behavior_dev==controls[owner].name && binding.param1==(absolute_cmd==RGB_COLOR_HSB_CMD?KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD,0):absolute_cmd==RGB_SPI_CMD?KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD,0):absolute_cmd) && binding.param2==value);
  assert(!memcmp(before,parameters,sizeof(before)) && data_a.selector.effect_index==index && data_b.selector.effect_index==index_b);
  assert(flushes==f && callbacks==c && saves==s && locks==l+1 && !held);
  /* Simulate diverged peripheral parameters; receive the converted binding without converting again. */
@@ -194,7 +200,7 @@ static void roundtrip(unsigned owner,uint32_t cmd,uint32_t absolute_cmd,uint32_t
    assert(target->color.h==(value>>16) && target->color.s==((value>>8)&255) && target->color.b==100);
  } else if(absolute_cmd==RGB_SPI_CMD) assert(target->duration_ms==value);
  else assert(state->effect_index==value && state->active_fx==state->effects[value]);
- assert(saves==s && callbacks==c && power_reconciles==0 && runtime_resets==0);
+ assert(saves==s && scoped_saves==scoped_before+1 && callbacks==c && power_reconciles==0 && runtime_resets==0);
  for(size_t i=0;i<ARRAY_SIZE(parameters);i++) {
    if(&parameters[i]!=target) assert(!memcmp(&parameters[i],&before[i],sizeof(parameters[i])));
  }
@@ -299,20 +305,25 @@ static void test_associations(void) {
 }
 static void test_alias_brightness(void) {
  setup();
+ unsigned scoped_before=scoped_saves;
 #if HAS_ALIAS
  assert(zmk_rgb_matrix_select_effect(1)==0 && data_b.selector.effect_index==1 && data_a.selector.effect_index==0);
+ assert(scoped_saves==scoped_before);
  assert(zmk_rgb_matrix_cycle_effect(1)==0 && data_b.selector.effect_index==0);
+ assert(scoped_saves==scoped_before);
  struct zmk_behavior_binding binding={flat.name,RGB_HUI_CMD,0};
  assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==0);
- assert(binding.behavior_dev==controls[1].name && binding.param1==RGB_COLOR_HSB_CMD);
+ assert(binding.behavior_dev==controls[1].name && binding.param1==KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD,0));
  assert(kp_selector_pressed(&binding,event)==0 && parameters[2].color.h==27 && parameters[0].color.h==350);
  binding=(struct zmk_behavior_binding){flat.name,RGB_EFS_CMD,1};
  assert(on_keymap_binding_pressed(&binding,event)==0 && data_b.selector.effect_index==1);
+ scoped_before=scoped_saves;
  owners[1].ready=false; assert(zmk_rgb_matrix_select_effect(0)==-ENODEV);
  assert(zmk_rgb_matrix_cycle_effect(1)==-ENODEV); owners[1].ready=true;
 #else
  assert(zmk_rgb_matrix_select_effect(0)==-ENODEV && zmk_rgb_matrix_cycle_effect(1)==-ENODEV);
 #endif
+ assert(scoped_saves==scoped_before);
  struct kp_rgb_effect_common_data before[5]; memcpy(before,parameters,sizeof(before));
  struct zmk_behavior_binding brt={flat.name,RGB_BRI_CMD,0};
  unsigned f=flushes,s=saves;
@@ -429,6 +440,8 @@ def production_fixture():
     settings = (ROOT / "src/rgb_settings.c").read_text()
     internal = (ROOT / "src/rgb_matrix_internal.h").read_text()
     selector_header = (ROOT / "src/rgb_selector_internal.h").read_text()
+    sync_header = (ROOT / "src/rgb_selector_sync_internal.h").read_text()
+    sync_source = (ROOT / "src/rgb_selector_sync.c").read_text()
     public = (ROOT / "include/zmk/rgb_matrix.h").read_text()
     instance = (ROOT / "src/rgb_instance.c").read_text()
     # Numeric commands/packing come from the real public and internal headers.
@@ -438,6 +451,7 @@ def production_fixture():
     endpoints = internal[internal.index("#define RGB_LEGACY_EFS_CMD"):internal.index("#if IS_ENABLED(CONFIG_SETTINGS)")]
     parts = [PRELUDE, commands, defines, endpoints]
     parts += [structure(selector_header, n) for n in ("kp_rgb_effect_defaults", "kp_rgb_selector")]
+    parts.append(sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("struct kp_rgb_selector_snapshot")])
     parts += [structure(public, n) for n in ("kp_rgb_effect_common_config", "kp_rgb_effect_common_data")]
     parts += [structure(internal, n) for n in ("kp_rgb_global", "kp_rgb_controller")]
     parts += [structure(overlay, "kp_selector_data"), structure(control, "kp_selector_control_config"), structure(control, "kp_selector_control_entry"), FIXTURE]
@@ -446,14 +460,15 @@ def production_fixture():
     parts += [function(instance, n) for n in ("kp_rgb_instance_callbacks", "kp_rgb_callbacks_reset", "kp_rgb_callbacks_set_active", "kp_rgb_effect_instance_set_active", "kp_rgb_effect_instance_reset", "kp_rgb_effect_instance_restart_clock")]
     parts += [function(selector, n) for n in ("kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index", "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked", "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot", "kp_rgb_selector_command", "kp_rgb_selector_convert_locked")]
     parts += [function(behavior, n) for n in ("kp_rgb_selector_alias", "kp_rgb_parameter_target_ready", "kp_rgb_set_color_locked", "kp_rgb_set_period_locked", "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period", "kp_active_hsb", "kp_rgb_calc_brt_locked", "kp_rgb_change_brt", "kp_rgb_apply_defaults", "zmk_rgb_matrix_select_effect", "zmk_rgb_matrix_cycle_effect")]
+    parts.append(function(sync_source, "kp_rgb_selector_member_apply_locked"))
     parts.append(function(selector, "kp_rgb_selector_dispatch_locked"))
-    parts += [function(overlay, n) for n in ("kp_selector_reconcile", "kp_selector_set_active", "kp_rgb_selector_overlay_state_locked", "kp_rgb_selector_overlay_reset_locked", "kp_selector_refresh_members", "kp_selector_prepare_locked", "kp_selector_defaults_locked", "kp_selector_start")]
+    parts += [function(overlay, n) for n in ("kp_selector_reconcile", "kp_selector_set_active", "kp_rgb_selector_overlay_state_locked", "kp_rgb_selector_overlay_reset_locked", "kp_selector_refresh_members", "kp_selector_prepare_locked", "kp_rgb_selector_overlay_prepare_locked", "kp_selector_defaults_locked", "kp_selector_start")]
     # Execute the actual defaults iterator, with two host DT instances only.
     macro = re.search(r"^#define KP_SELECTOR_DEFAULTS\(inst\).*?\n\n", overlay, re.M | re.S)
     assert macro, "selector defaults iterator"
     parts += [macro.group(), function(overlay, "kp_rgb_selector_overlays_defaults_locked")]
     parts += [function(control, n) for n in ("kp_rgb_selector_control", "kp_rgb_selector_binding_convert", "kp_rgb_selector_binding_apply", "kp_control_selector", "kp_selector_convert", "kp_selector_pressed")]
-    parts += [function(settings, n) for n in ("kp_rgb_restore_defaults", "kp_rgb_reset_state")]
+    parts.append(function(settings, "kp_rgb_reset_state"))
     parts += [function(behavior, n) for n in ("kp_rgb_effect_convert_central_state_dependent_params", "on_keymap_binding_convert_central_state_dependent_params", "on_keymap_binding_pressed")]
     return "\n".join(parts) + TESTS
 

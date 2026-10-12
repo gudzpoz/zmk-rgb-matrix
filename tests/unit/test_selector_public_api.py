@@ -294,7 +294,7 @@ def production_fixture():
     parts += [function(overlay, n) for n in (
         "kp_rgb_selector_overlay_state_locked", "kp_rgb_selector_overlay_select_locked",
         "kp_rgb_selector_overlay_reset_locked", "kp_selector_refresh_members",
-        "kp_selector_prepare_locked", "kp_selector_start")]
+        "kp_selector_prepare_locked", "kp_rgb_selector_overlay_prepare_locked", "kp_selector_start")]
     parts += [function(api, n) for n in (
         "zmk_rgb_selector_get_selected", "zmk_rgb_selector_select", "zmk_rgb_selector_reset")]
     return "\n".join(parts) + FIXTURE + TESTS

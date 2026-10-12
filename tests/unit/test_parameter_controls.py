@@ -104,9 +104,9 @@ static void kp_rgb_reconcile_power_locked(void) { assert(locked); }
 static const struct device *kp_rgb_selector_alias(void) { return NULL; }
 static struct kp_rgb_selector *kp_rgb_selector_overlay_state_locked(const struct device *dev) { (void)dev; return NULL; }
 static int kp_rgb_selector_binding_convert(const struct device *dev, struct zmk_behavior_binding *binding) { (void)dev; (void)binding; return -ENODEV; }
-static int kp_rgb_selector_binding_apply(const struct device *dev, uint32_t command, uint32_t argument) { (void)dev; (void)command; (void)argument; return -ENODEV; }
 static int kp_rgb_set_color_locked(const struct device *fx, const struct kp_rgb_hsb *color);
 static int kp_rgb_set_period_locked(const struct device *fx, uint32_t period);
+static int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *,uint32_t,uint32_t);
 '''
 
 TESTS = r'''
@@ -262,6 +262,8 @@ def main():
     text = SOURCE.read_text()
     # No persistence/split mocks: any direct side effect fails compilation/linking.
     selector_text = SELECTOR_SOURCE.read_text()
+    sync_text = (ROOT / "src/rgb_selector_sync.c").read_text()
+    sync_header = (ROOT / "src/rgb_selector_sync_internal.h").read_text()
     # Notification delivery is exercised by test_selector_public_api.py.
     selector_services_stub = 'static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }\n'
     selector_services = "\n".join(function(selector_text, name) for name in (
@@ -270,7 +272,9 @@ def main():
         "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot",
         "kp_rgb_selector_command", "kp_rgb_selector_convert_locked",
         "kp_rgb_selector_dispatch_locked"))
-    production = selector_services_stub + selector_services + "\n" + text[text.index("size_t kp_rgb_effect_count("):
+    sync_defs = sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("struct kp_rgb_selector_snapshot")]
+    member_apply = function(sync_text, "kp_rgb_selector_member_apply_locked")
+    production = sync_defs + selector_services_stub + selector_services + "\n" + member_apply + "\n" + text[text.index("size_t kp_rgb_effect_count("):
                       text.index("int kp_rgb_effect_convert_central_state_dependent_params(")]
     production += text[text.index("static int on_keymap_binding_convert_central_state_dependent_params("):
                        text.index("static int on_keymap_binding_pressed(")]

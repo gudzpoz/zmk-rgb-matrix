@@ -36,6 +36,20 @@ static bool kp_rgb_sync_send(uint8_t source,uint32_t cmd,uint32_t arg) {
 '''
 
 TESTS = r'''
+static void no_effect_globals(void) {
+    sends = 0; fail = false; kp_rgb_controller.selector.active_fx = NULL;
+    kp_rgb_global.brightness = 37; kp_rgb_global.user_on = false;
+    struct kp_rgb_sync_source state = {.phase = KP_RGB_SYNC_SELECT};
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(state.phase == KP_RGB_SYNC_BRIGHTNESS && state.global.brightness == 37 && !state.global.user_on);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[0] == RGB_BRT_SET_CMD && arguments[0] == 37);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[1] == RGB_OFF_CMD);
+    assert(kp_rgb_sync_emit_one(0, &state) == KP_RGB_SYNC_EMIT_SENT);
+    assert(commands[2] == RGB_OVL_STATE_CMD && arguments[2] == 0x1234);
+}
+
 int main(void) {
     struct kp_rgb_effect_common_data data = {{123,45,67},890};
     const struct device device = {&data,"rgb",NULL};
@@ -76,6 +90,7 @@ int main(void) {
     state = (struct kp_rgb_sync_source){.phase = KP_RGB_SYNC_SELECT};
     assert(kp_rgb_sync_emit_one(0,&state) == KP_RGB_SYNC_EMIT_SENT);
     assert(arguments[9] == 9);
+    no_effect_globals();
     puts("singleton split snapshot and same-command retries passed");
     return 0;
 }
@@ -86,7 +101,10 @@ def main():
     source = (ROOT / "src/rgb_split_sync.c").read_text()
     enums = "\n".join(re.search(r"enum " + name + r" \{.*?\};", source, re.S).group()
                       for name in ("kp_rgb_sync_phase", "kp_rgb_sync_emit"))
-    code = fixture_code() + MOCKS + enums + structure(source, "kp_rgb_sync_source")
+    code = fixture_code() + MOCKS + enums + structure(source, "kp_rgb_global_snapshot")
+    code += structure(source, "kp_rgb_sync_source")
+    code += function(source, "kp_rgb_global_snapshot_locked") + "\n"
+    code += function(source, "kp_rgb_sync_emit_global") + "\n"
     code += function(source, "kp_rgb_sync_emit_one") + TESTS
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "split.c"

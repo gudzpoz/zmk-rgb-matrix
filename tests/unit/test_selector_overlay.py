@@ -177,6 +177,7 @@ def production_fixture():
     callback_def = OVERLAY[OVERLAY.index('static const struct kp_rgb_effect_callbacks kp_selector_callbacks ='):]
     callback_def = callback_def[:callback_def.index('};') + 2]
     parts.append(callback_def)
+    parts.append(function(OVERLAY, 'kp_rgb_selector_overlay_prepare_locked'))
     parts.append(function(OVERLAY, 'kp_rgb_selector_overlay_state_locked'))
     parts.append(function(OVERLAY, 'kp_rgb_selector_overlay_select_locked'))
     parts.append('static const struct device *kp_rgb_selector_control(const struct device *dev) { return dev; }')

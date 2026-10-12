@@ -2,17 +2,6 @@
  * Copyright (c) 2026 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
- *
- * Split RGB state sync: pushes the selected effect (index, colour, period) and
- * the user on/off intent to a peripheral when it newly appears, and again when
- * the active effect changes to one it has not received. The second push covers
- * the effect colour and period: the GLOBAL invocation only carries the index, so
- * without it a peripheral renders a switched-to effect with its own stale
- * parameters. A send that fails is retried with bounded backoff while the
- * peripheral stays present.
- *
- * Central only; the trigger is a poll, as there is no central-side "peripheral
- * connected" event.
  */
 
 #include <stdbool.h>
@@ -32,6 +21,7 @@
 #include <zmk/split/transport/central.h>
 
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_sync_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -56,6 +46,16 @@ enum kp_rgb_sync_emit {
   KP_RGB_SYNC_EMIT_DONE,  /* nothing left to send for this source */
 };
 
+struct kp_rgb_global_snapshot {
+  bool user_on;
+  uint8_t brightness;
+};
+
+static void kp_rgb_global_snapshot_locked(struct kp_rgb_global_snapshot *snapshot) {
+  *snapshot = (struct kp_rgb_global_snapshot){
+      .user_on = kp_rgb_global.user_on, .brightness = kp_rgb_global.brightness};
+}
+
 struct kp_rgb_sync_source {
   bool seen;           /* present at the last sample */
   bool pending;        /* a sync is in flight for this source */
@@ -70,8 +70,7 @@ struct kp_rgb_sync_source {
   uint16_t effect_index;
   uint16_t duration_ms;
   struct kp_rgb_hsb color;
-  bool user_on;
-  uint8_t brightness;
+  struct kp_rgb_global_snapshot global;
 };
 
 static struct k_work_delayable kp_rgb_sync_poll;
@@ -169,30 +168,30 @@ static void kp_rgb_sync_refresh(void) {
   }
 }
 
-/* Absolute commands only: the peripheral does not run the central-state
- * conversion pass, so a relative command would be applied against whatever the
- * peripheral already had. */
-static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
-  struct zmk_behavior_binding binding = {
-      .behavior_dev = kp_rgb_controller.dev->name,
-      .param1 = cmd,
-      .param2 = arg,
-  };
-  /* The peripheral handler ignores the event, and its position is truncated to a
-   * byte on the wire, so keep it 0. state=true calls the pressed handler. */
+static int kp_rgb_sync_send_binding(uint8_t source,
+                                    struct zmk_behavior_binding *binding) {
   struct zmk_behavior_binding_event event = {
-      .layer = 0,
-      .position = 0,
-      .timestamp = k_uptime_get(),
-      .source = source,
-  };
+      .layer = 0, .position = 0, .timestamp = k_uptime_get(), .source = source};
+  int err = zmk_split_central_invoke_behavior(source, binding, event, true);
+  if (err < 0)
+    LOG_WRN("Source %u command %u failed (err %d)", source, binding->param1, err);
+  return err;
+}
 
-  int err = zmk_split_central_invoke_behavior(source, &binding, event, true);
-  if (err < 0) {
-    LOG_WRN("Source %u command %u failed (err %d)", source, cmd, err);
+int kp_rgb_split_send_selector(uint8_t source,
+                               const struct kp_rgb_selector_snapshot *snapshot,
+                               uint8_t step) {
+  struct zmk_behavior_binding binding;
+  int err = kp_rgb_selector_snapshot_binding(snapshot, step, &binding);
+  return err < 0 ? err : kp_rgb_sync_send_binding(source, &binding);
+}
+
+static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
+  if (kp_rgb_controller.dev == NULL || !device_is_ready(kp_rgb_controller.dev))
     return false;
-  }
-  return true;
+  struct zmk_behavior_binding binding = {
+      .behavior_dev = kp_rgb_controller.dev->name, .param1 = cmd, .param2 = arg};
+  return kp_rgb_sync_send_binding(source, &binding) >= 0;
 }
 
 /* Pushes the central's shared animation clock to every connected source. Kept
@@ -223,72 +222,77 @@ static void kp_rgb_sync_clock_handler(struct k_work *work) {
                               K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
 }
 
-/* Emits at most one wire command. */
+static enum kp_rgb_sync_emit
+kp_rgb_sync_emit_global(uint8_t source, struct kp_rgb_sync_source *st) {
+  uint32_t command, argument;
+  switch (st->phase) {
+  case KP_RGB_SYNC_BRIGHTNESS:
+    command = RGB_BRT_SET_CMD;
+    argument = st->global.brightness;
+    break;
+  case KP_RGB_SYNC_POWER:
+    command = st->global.user_on ? RGB_ON_CMD : RGB_OFF_CMD;
+    argument = 0;
+    break;
+  case KP_RGB_SYNC_OVERLAYS:
+    if (st->mask_word >= kp_rgb_overlay_word_count())
+      return KP_RGB_SYNC_EMIT_DONE;
+    command = RGB_OVL_STATE_CMD;
+    argument = RGB_OVL_STATE_VAL(st->mask_word,
+                                kp_rgb_overlay_get_word(st->mask_word));
+    break;
+  default:
+    return KP_RGB_SYNC_EMIT_DONE;
+  }
+  if (!kp_rgb_sync_send(source, command, argument))
+    return KP_RGB_SYNC_EMIT_RETRY;
+  if (st->phase == KP_RGB_SYNC_OVERLAYS)
+    st->mask_word++;
+  else
+    st->phase++;
+  return KP_RGB_SYNC_EMIT_SENT;
+}
+
+/* The flat-controller bridge keeps its original select-before-parameters wire
+ * protocol. Selector snapshots use member-qualified parameters before selection. */
 static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
                                                   struct kp_rgb_sync_source *st) {
-  if (st->phase != KP_RGB_SYNC_OVERLAYS) {
-    uint32_t cmd, arg;
-    switch (st->phase) {
-    case KP_RGB_SYNC_SELECT: {
-      kp_rgb_matrix_lock();
-      st->effect_index = (uint16_t)kp_rgb_controller.selector.effect_index;
-      st->user_on = kp_rgb_global.user_on;
-      st->brightness = kp_rgb_global.brightness;
-      const struct device *fx = kp_rgb_controller.selector.active_fx;
-      if (fx != NULL) {
-        const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-        st->color = data->color;
-        /* Zero means "increase" in RGB_SPI_CMD, not an absolute period. */
-        st->duration_ms = (uint16_t)MAX(data->duration_ms, 1u);
-      }
-      kp_rgb_matrix_unlock();
-      if (fx == NULL) {
-        st->phase = KP_RGB_SYNC_BRIGHTNESS;
-        return KP_RGB_SYNC_EMIT_SENT;
-      }
-      cmd = RGB_LEGACY_EFS_CMD;
-      arg = st->effect_index;
-      break;
+  uint32_t command, argument;
+  switch (st->phase) {
+  case KP_RGB_SYNC_SELECT: {
+    kp_rgb_matrix_lock();
+    kp_rgb_global_snapshot_locked(&st->global);
+    st->effect_index = (uint16_t)kp_rgb_controller.selector.effect_index;
+    const struct device *effect = kp_rgb_controller.selector.active_fx;
+    if (effect != NULL) {
+      const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
+      st->color = data->color;
+      st->duration_ms = (uint16_t)MAX(data->duration_ms, 1u);
     }
-    case KP_RGB_SYNC_COLOR:
-      cmd = RGB_LEGACY_COLOR_CMD;
-      arg = RGB_COLOR_HSB_VAL(st->color.h, st->color.s, st->color.b);
-      break;
-    case KP_RGB_SYNC_DURATION:
-      cmd = RGB_LEGACY_PERIOD_CMD;
-      arg = st->duration_ms;
-      break;
-    case KP_RGB_SYNC_BRIGHTNESS:
-      cmd = RGB_BRT_SET_CMD;
-      arg = st->brightness;
-      break;
-    case KP_RGB_SYNC_POWER:
-      cmd = st->user_on ? RGB_ON_CMD : RGB_OFF_CMD;
-      arg = 0;
-      break;
-    default:
-      return KP_RGB_SYNC_EMIT_DONE;
+    kp_rgb_matrix_unlock();
+    if (effect == NULL) {
+      st->phase = KP_RGB_SYNC_BRIGHTNESS;
+      return KP_RGB_SYNC_EMIT_SENT;
     }
-
-    if (!kp_rgb_sync_send(source, cmd, arg)) {
-      return KP_RGB_SYNC_EMIT_RETRY;
-    }
-    st->phase++;
-    return KP_RGB_SYNC_EMIT_SENT;
+    command = RGB_LEGACY_EFS_CMD;
+    argument = st->effect_index;
+    break;
   }
-
-  if (st->mask_word < kp_rgb_overlay_word_count()) {
-    uint16_t word = st->mask_word;
-    if (!kp_rgb_sync_send(source, RGB_OVL_STATE_CMD,
-                          RGB_OVL_STATE_VAL(word, kp_rgb_overlay_get_word(word)))) {
-      return KP_RGB_SYNC_EMIT_RETRY;
-    }
-    st->mask_word++;
-    return KP_RGB_SYNC_EMIT_SENT;
+  case KP_RGB_SYNC_COLOR:
+    command = RGB_LEGACY_COLOR_CMD;
+    argument = RGB_COLOR_HSB_VAL(st->color.h, st->color.s, st->color.b);
+    break;
+  case KP_RGB_SYNC_DURATION:
+    command = RGB_LEGACY_PERIOD_CMD;
+    argument = st->duration_ms;
+    break;
+  default:
+    return kp_rgb_sync_emit_global(source, st);
   }
-
-  LOG_INF("Complete for source %u", source);
-  return KP_RGB_SYNC_EMIT_DONE;
+  if (!kp_rgb_sync_send(source, command, argument))
+    return KP_RGB_SYNC_EMIT_RETRY;
+  st->phase++;
+  return KP_RGB_SYNC_EMIT_SENT;
 }
 
 static void kp_rgb_sync_step_handler(struct k_work *work) {

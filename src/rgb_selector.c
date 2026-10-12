@@ -9,6 +9,7 @@
 #include <zmk/rgb_matrix.h>
 
 #include "rgb_selector_internal.h"
+#include "rgb_selector_sync_internal.h"
 
 size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector) {
   return selector->effect_count;
@@ -219,6 +220,9 @@ int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,
                                     uint32_t command, uint32_t argument) {
   if (selector == NULL)
     return -ENODEV;
+  uint32_t opcode = command & KP_RGB_SELECTOR_COMMAND_MASK;
+  if (opcode == RGB_SELECTOR_COLOR_CMD || opcode == RGB_SELECTOR_PERIOD_CMD)
+    return kp_rgb_selector_member_apply_locked(selector, command, argument);
   switch (command) {
   case RGB_EFS_CMD: {
     if (argument > UINT16_MAX || argument >= selector->effect_count)
@@ -238,6 +242,10 @@ int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,
       return kp_rgb_set_period_locked(selector->active_fx, argument);
     break;
   case RGB_COLOR_HSB_CMD: {
+    if ((argument >> 16) > KP_RGB_HUE_MAX ||
+        ((argument >> 8) & 0xff) > KP_RGB_SAT_MAX ||
+        (argument & 0xff) > KP_RGB_BRT_MAX)
+      return -EINVAL;
     struct kp_rgb_hsb color = {
         .h = argument >> 16, .s = (argument >> 8) & 0xff, .b = argument & 0xff};
     return kp_rgb_set_color_locked(selector->active_fx, &color);

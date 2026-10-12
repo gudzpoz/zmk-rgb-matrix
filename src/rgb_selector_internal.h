@@ -68,6 +68,9 @@ kp_rgb_selector_overlay_state_locked(const struct device *selector);
 int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
 void kp_rgb_selector_overlays_defaults_locked(void);
 
+/* Settings restoration may access prepared state before public readiness. */
+struct kp_rgb_selector *
+kp_rgb_selector_overlay_prepare_locked(const struct device *selector);
 /* Generated from one-way behavior-to-selector references. */
 const struct device *kp_rgb_selector_control(const struct device *selector);
 const struct device *kp_rgb_selector_alias(void);

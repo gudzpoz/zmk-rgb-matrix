@@ -152,6 +152,8 @@ size_t kp_rgb_effect_count(void);
 const struct device *kp_rgb_effect_at(size_t index);
 size_t kp_rgb_selected_effect(void);
 int kp_rgb_save_state(void);
+int kp_rgb_save_selector_state(const struct device *selector, bool reset);
+int kp_rgb_settings_commit(void);
 int kp_rgb_select_effect_locked(uint16_t index);
 
 /* Restore presets and user intent, then reconcile local output permission. */
