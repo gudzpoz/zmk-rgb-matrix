@@ -1,0 +1,25 @@
+&probe_a { compatible = "test,rgb-control-probe"; };
+&probe_b { compatible = "test,rgb-control-probe"; axis = "vertical"; };
+&probe_c { compatible = "test,rgb-control-probe"; axis = "horizontal"; /delete-property/ animate; };
+&probe_d { compatible = "test,rgb-control-probe"; };
+&rgb_overlays {
+    control_private: control_private {
+        compatible = "keypaw,rgb-overlay"; leds = <4>;
+        control_late: control_late {
+            compatible = "test,rgb-control-probe"; #binding-cells = <0>;
+            zephyr,deferred-init;
+        };
+    };
+    control_disabled: control_disabled {
+        compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
+        initial-duration-ms = <2345>;
+        control_unowned: control_unowned {
+            compatible = "test,rgb-control-probe"; #binding-cells = <0>;
+            duration = <0>;
+        };
+    };
+};
+
+/ {
+    control_enum: control_enum { compatible = "test,rgb-control-enum"; mode = "sweep"; };
+};

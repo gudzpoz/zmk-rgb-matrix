@@ -1,0 +1,9 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Deferred real global RGB control for split endpoint readiness
+compatible: "test,rgb-split-late-global"
+include: "keypaw,behavior-rgb-matrix.yaml"
+properties:
+  zephyr,deferred-init:
+    type: boolean

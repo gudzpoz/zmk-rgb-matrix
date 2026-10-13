@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 
 from native_process import run_logged
-from test_selector import build
+from native_build import build
 
 SCENE = '''
 &rgb_overlays {

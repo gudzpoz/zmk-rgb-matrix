@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: MIT
 """Native effect initialization, public setters, deferred readiness and reset."""
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 
 from native_process import run_logged
-from test_selector import MODULE, SIM, WEST, WORKSPACE
+from native_build import MODULE, SIM, WEST, WORKSPACE
 
 OVERLAY = '''
 &kscan { events = <>; };
@@ -81,16 +82,15 @@ def main():
     (plugin / "CMakeLists.txt").write_text(
         "zephyr_library()\nzephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)\n"
         f'zephyr_library_sources("{SIM / "selector_defaults.c"}")\n')
-    command = [WEST, "build", "-s", "app", "-d", str(root / "build"),
+    command = shlex.split(WEST) + ["build", "-s", "app", "-d", str(root / "build"),
                "-b", "native_sim//zmk_test_mock", "--", f"-DZMK_CONFIG={config}",
                f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'};{plugin}"]
     result = run_logged(command, cwd=WORKSPACE, text=True, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, timeout=600, log_path=root / "build.log")
     assert result.returncode == 0, result.stdout[-16000:]
-    result = subprocess.run([str(root / "build/zephyr/zmk.exe"), "--stop_at=2", "-no-rt"],
+    result = run_logged([str(root / "build/zephyr/zmk.exe"), "--stop_at=2", "-no-rt"],
                             cwd=root, text=True, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, timeout=30)
-    (root / "runtime.log").write_text(result.stdout)
+                            stderr=subprocess.STDOUT, timeout=30, log_path=root / "runtime.log")
     assert result.returncode == 0, result.stdout
     assert "PASS selector defaults" in result.stdout, result.stdout
     print(result.stdout, end="")

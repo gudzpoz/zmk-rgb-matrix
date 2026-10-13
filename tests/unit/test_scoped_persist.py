@@ -6,10 +6,14 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 
+sys.path.insert(0, str(ROOT / "tests/sim"))
+from native_process import HOST_TIMEOUT, run_logged
+LOGS = ROOT / "tests/build/process/scoped-persist"
 TEST = r'''
 #include <assert.h>
 #include <errno.h>
@@ -166,11 +170,15 @@ def main():
         harness = tmp / "scoped_persist.c"
         harness.write_text('#include "' + str(ROOT / 'src/rgb_persist.c') + '"\n' + TEST)
         binary = tmp / "scoped_persist"
-        subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
+        run_logged(shlex.split(os.environ.get("CC", "cc")) + [
             "-std=gnu11", "-Wall", "-Wextra", "-Werror",
             "-I", str(tmp / "stub"), "-I", str(ROOT / "include"),
-            str(harness), "-o", str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+            str(harness), "-o", str(binary)], check=True,
+            log_path=LOGS / "compile.log", text=True, stderr=subprocess.STDOUT)
+        result = run_logged([str(binary)], check=True, timeout=HOST_TIMEOUT,
+                            log_path=LOGS / "runtime.log", text=True,
+                            stderr=subprocess.STDOUT)
+        print(result.stdout, end="")
 
 
 if __name__ == "__main__":

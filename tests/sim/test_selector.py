@@ -2,7 +2,6 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 """Build selector validation cases and check real engine callbacks and pixels."""
-import os
 import argparse
 from pathlib import Path
 import re
@@ -11,71 +10,7 @@ import subprocess
 import tempfile
 
 from native_process import run_logged
-SIM = Path(__file__).resolve().parent
-MODULE = SIM.parent.parent
-REPO = MODULE.parent.parent
-WORKSPACE = Path(os.environ.get("ZMK_WS", REPO / "zmk"))
-LOCAL_WEST = REPO / ".venv/bin/west"
-WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west")
-
-SELECTORS = '''
-&rgb_overlays {
-    /delete-node/ fixture_overlay;
-    /delete-node/ fixture_battery;
-    /delete-node/ fixture_batt_sub;
-    selector_a: selector_a {
-        compatible = "keypaw,rgb-overlay-selector";
-        leds = <0 1>;
-        condition = <&preview_visible>;
-        initial-effect = <0>;
-        disabled { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; status = "disabled"; };
-        probe_a: a_static { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x00ff00>; };
-        probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x0000ff>; animate; };
-    };
-    selector_b: selector_b {
-        compatible = "keypaw,rgb-overlay-selector";
-        condition = <&preview_visible>;
-        leds = <2 3>;
-        initial-effect = <99>;
-        initial-duration-ms = <0xffffffff>;
-        probe_b: b_static { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0xffff00>; };
-        probe_d: b_alt { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x00ffff>; duration = <0>; };
-    };
-    ordinary: ordinary {
-        compatible = "keypaw,rgb-overlay";
-        leds = <1>;
-        condition = <&preview_visible>;
-        private_white: white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
-    };
-};
-/ {
-    behaviors {
-        rgbs_a: rgbs_a {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&selector_a>;
-        };
-        rgbs_b: rgbs_b {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&selector_b>;
-        };
-    };
-};
-&kprgb { selector = <&selector_a>; };
-&rgb_conditions {
-    preview_visible: preview_visible {
-        compatible = "keypaw,rgb-condition-effect-selected";
-        selector = <&preview_selector>; effect = <&fx_solid>;
-    };
-};
-&kscan { events = <>; };
-'''
+from native_build import SELECTORS, build
 
 CASES = {
     "empty": ('/delete-node/ disabled; /delete-node/ a_static; /delete-node/ a_motion;',
@@ -237,25 +172,6 @@ def check_selected_capture(path, log, peripheral=False):
         assert pixels[21:24] == bytes((255, 0, 0) if selected else (0, 255, 255)), phase
 
 
-def build(root, name, fragment, runtime=False, selectors=SELECTORS, extra_conf=""):
-    config = root / name / "config"
-    config.mkdir(parents=True)
-    for filename in ("native_sim.conf", "native_sim.keymap"):
-        (config / filename).write_text((SIM / "config" / filename).read_text())
-    if runtime:
-        with (config / "native_sim.conf").open("a") as output:
-            output.write("\nCONFIG_KEYPAW_SIM_SELECTOR_TEST=y\nCONFIG_ASSERT=y\n"
-                         "CONFIG_ZMK_BEHAVIOR_METADATA=y\n" + extra_conf)
-    (config / "native_sim.overlay").write_text(
-        f'#include "{SIM / "config/native_sim.overlay"}"\n' + selectors + fragment)
-    command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
-               "-b", "native_sim//zmk_test_mock", "-p", "--",
-               f"-DZMK_CONFIG={config}", f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
-    print("COMMAND", " ".join(command), flush=True)
-    result = run_logged(command, cwd=WORKSPACE, text=True,
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        timeout=600, log_path=root / f"{name}-build.log")
-    return result
 
 
 def check_capture(path, log):

@@ -51,7 +51,7 @@ DT_FOREACH_PROP_ELEM(KP_RGB_NODE, mapping, KP_MAP_ENTRY_ASSERT);
 
 struct kp_rgb_global kp_rgb_global = {
     .user_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
-    .brightness = CLAMP(DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
+    .brightness = CLAMP((int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
                         0, KP_RGB_BRT_MAX),
     .initial_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
     .initial_brightness = DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),

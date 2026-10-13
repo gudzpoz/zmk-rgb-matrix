@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 from native_process import run_logged
-from test_selector import SELECTORS, build
+from native_build import SELECTORS, build
 
 SELECTOR_IDS = SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
                                  "keypaw,rgb-matrix-solid").replace(" animate;", "")

@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 from native_process import run_logged
-from test_selector import MODULE, SIM, WEST, WORKSPACE
+from native_build import MODULE, SIM, WEST, WORKSPACE
 
 
 def snippet(text, heading, index=0):

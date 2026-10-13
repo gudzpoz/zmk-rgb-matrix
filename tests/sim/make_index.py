@@ -271,6 +271,7 @@ def main():
         " Each node is meant to be copied into your own <code>&amp;kprgb</code> registry."
         " Follow <em>fixture node</em> on an effect for a complete registry."
     )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         PAGE.substitute(title=html.escape(args.title), lede=lede, sections="\n".join(sections)),
         encoding="utf-8",
