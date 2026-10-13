@@ -8,7 +8,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/sys/util.h>
@@ -54,7 +53,9 @@ static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *f
   struct kp_rgb_frame child_frame = *frame;
   child_frame.pixels = frame->scratch;
   child_frame.scratch = NULL;
-  memset(child_frame.pixels, 0, child_frame.count * sizeof(*child_frame.pixels));
+  for (size_t i = 0; i < frame->target_count; i++) {
+    child_frame.pixels[frame->targets[i]] = (struct led_rgb){0};
+  }
   bool animating = kp_rgb_effect_render(cfg->effect, &child_frame);
   kp_rgb_overlay_paint_pixels(frame, frame->targets, frame->target_count,
                               frame->scratch, cfg->common.opacity);
