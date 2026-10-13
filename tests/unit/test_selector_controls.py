@@ -133,6 +133,7 @@ static const struct kp_rgb_effect_callbacks child_callbacks={.reset=child_reset,
 static const struct kp_rgb_effect_api child_api={.callbacks=&child_callbacks};
 static struct kp_rgb_global kp_rgb_global;
 static struct kp_rgb_controller kp_rgb_controller;
+static size_t kp_rgb_effect_count(void) { return kp_rgb_controller.selector.effect_count; }
 static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) {
  assert(held); assert(dev && dev->data); return dev->data;
 }

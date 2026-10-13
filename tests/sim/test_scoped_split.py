@@ -10,7 +10,12 @@ from test_selector import SELECTORS, build
 
 SOLID_SELECTORS = (SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
                                     "keypaw,rgb-matrix-solid")
-                   .replace(" animate;", ""))
+                   .replace(" animate;", "")
+                   .replace("condition = <&preview_visible>;", "condition = <&fixture_always>;") + '''
+&rgb_overlays { /delete-node/ preview_selector; };
+&rgb_conditions { /delete-node/ preview_visible; };
+/ { behaviors { /delete-node/ rgbs; }; };
+''')
 CONF = """CONFIG_KEYPAW_SIM_SELECTOR_TEST=n
 CONFIG_KEYPAW_SIM_SPLIT_TEST=y
 CONFIG_ZMK_SPLIT=y

@@ -130,17 +130,17 @@ def read_effect_nodes(path):
     """Map display-name -> (compatible, node text, first line number).
 
     The overlay is our own file in a fixed style, so a brace-matching scan over
-    the &kprgb children is enough; it fails loudly on a node without a
+    the preview_selector children is enough; it fails loudly on a node without a
     display-name rather than publishing an entry with no definition.
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     start = None
     for i, line in enumerate(lines):
-        if re.match(r"\s*kprgb\s*:\s*kprgb\s*\{\s*$", line):
+        if re.match(r"\s*preview_selector\s*:\s*preview_selector\s*\{\s*$", line):
             start = i
             break
     if start is None:
-        raise ValueError(f"{path}: no 'kprgb: kprgb {{' node found")
+        raise ValueError(f"{path}: no 'preview_selector: preview_selector {{' node found")
 
     nodes = {}
     depth = 0
@@ -149,6 +149,8 @@ def read_effect_nodes(path):
     for i in range(start + 1, len(lines)):
         line = lines[i]
         if current is None:
+            if line.strip() == "};":
+                break
             if depth == 0 and NODE_RE.match(line):
                 current = i
                 block = [line]
@@ -172,7 +174,7 @@ def read_effect_nodes(path):
             current = None
             block = []
     if not nodes:
-        raise ValueError(f"{path}: found no effect nodes under &kprgb")
+        raise ValueError(f"{path}: found no effect nodes under preview_selector")
     return nodes
 
 

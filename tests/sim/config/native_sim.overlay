@@ -6,9 +6,8 @@
  *
  * Deliberately standalone: a stock upstream 4x12 grid layout plus a 48-LED
  * strip, so the previews do not depend on the keypaw48 shield or any of the
- * real hardware bring-up. The only module-facing nodes are the ones the module
- * itself requires: keypaw,rgb-matrix, its strip phandle, and the &kprgb effect
- * registry.
+ * real hardware bring-up. Effects belong to the preview_selector overlay;
+ * kprgb explicitly aliases its canonical rgbs control.
  *
  * The strip is a keypaw,led-strip-capture device rather than a real WS2812: the
  * capture driver records every frame the engine paints, which is what the GIF
@@ -59,6 +58,10 @@
         compatible = "keypaw,rgb-matrix";
         strip = <&led_strip_capture>;
         physical-layout = <&layout_ortho_4x12_all1u>;
+        initial-on;
+        initial-brightness = <100>;
+        max-brightness = <100>;
+        idle-brightness = <100>;
 
         /* Chain index N sits under key position N. Must have exactly
          * chain-length entries (BUILD_ASSERT in the module). */
@@ -124,63 +127,11 @@
     rgb_overlays: rgb_overlays {
         compatible = "keypaw,rgb-overlays";
 
-        fixture_overlay: fixture_overlay {
-            compatible = "keypaw,rgb-overlay";
-            condition = <&fixture_always>;
-            fx_fixture {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                color = <0x102030>;
-                duration = <500>;
-            };
-        };
-
-        /* The battery gauge, `all-leds` shape. `local;` is present only to
-         * exercise the per-half gate path at compile time -- the charge is read
-         * per half in the renderer regardless. The latch gate stays off in the
-         * fixture, so it never covers a preview. */
-        fixture_battery: fixture_battery {
-            compatible = "keypaw,rgb-overlay-battery";
-            condition = <&fixture_latch>;
+        preview_selector: preview_selector {
+            compatible = "keypaw,rgb-overlay-selector";
             all-leds;
-            local;
-            color = <0x00FF00>;
-        };
-
-        /* The battery gauge, subset shape: a few raw LEDs at non-100 opacity,
-         * exercising the keys/leds ordering and the blend path. Gated by the
-         * (off) latch too, so it changes no preview. */
-        fixture_batt_sub: fixture_batt_sub {
-            compatible = "keypaw,rgb-overlay-battery";
-            condition = <&fixture_latch>;
-            leds = <0 1 2 3>;
-            opacity = <50>;
-            reverse;
-            color = <0x102030>;
-        };
-    };
-
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-
             initial-effect = <0>;
-            initial-on;
-
-            /* The real shield caps brightness to limit current draw, which
-             * means nothing while recording. Previews read much better lit. */
-            max-brightness = <100>;
-            initial-brightness = <100>;
-
-            /* Shared animation period. 4 s matches the default capture length,
-             * so a GIF shows at least one full cycle. Effects that need a
-             * different speed override `duration` below. */
             initial-duration-ms = <4000>;
-
-            /* In declaration order: an effect's position here is its identity.
-             * `display-name` becomes the preview's filename. */
-
             /* --- static fields ------------------------------------------- */
 
             fx_solid: fx_solid {
@@ -574,6 +525,53 @@
                 display-name = "Digital Rain";
                 color = <0x00FF00>;
             };
+        };
+        fixture_overlay: fixture_overlay {
+            compatible = "keypaw,rgb-overlay";
+            condition = <&fixture_always>;
+            fx_fixture {
+                compatible = "keypaw,rgb-matrix-reactive";
+                #binding-cells = <0>;
+                color = <0x102030>;
+                duration = <500>;
+            };
+        };
+
+        /* The battery gauge, `all-leds` shape. `local;` is present only to
+         * exercise the per-half gate path at compile time -- the charge is read
+         * per half in the renderer regardless. The latch gate stays off in the
+         * fixture, so it never covers a preview. */
+        fixture_battery: fixture_battery {
+            compatible = "keypaw,rgb-overlay-battery";
+            condition = <&fixture_latch>;
+            all-leds;
+            local;
+            color = <0x00FF00>;
+        };
+
+        /* The battery gauge, subset shape: a few raw LEDs at non-100 opacity,
+         * exercising the keys/leds ordering and the blend path. Gated by the
+         * (off) latch too, so it changes no preview. */
+        fixture_batt_sub: fixture_batt_sub {
+            compatible = "keypaw,rgb-overlay-battery";
+            condition = <&fixture_latch>;
+            leds = <0 1 2 3>;
+            opacity = <50>;
+            reverse;
+            color = <0x102030>;
+        };
+    };
+
+    behaviors {
+        kprgb: kprgb {
+            compatible = "keypaw,behavior-rgb-matrix";
+            #binding-cells = <2>;
+            selector = <&preview_selector>;
+        };
+        rgbs: rgbs {
+            compatible = "keypaw,behavior-rgb-selector";
+            #binding-cells = <2>;
+            selector = <&preview_selector>;
         };
     };
 };

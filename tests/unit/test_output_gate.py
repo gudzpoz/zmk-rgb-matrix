@@ -34,6 +34,7 @@ int main(void) {
  assert(pthread_mutexattr_destroy(&attributes)==0);
  assert(!zmk_rgb_matrix_is_inhibited());
  isr=true;assert(zmk_rgb_matrix_set_inhibited(true)==-EWOULDBLOCK);isr=false;
+ host_install_bottom();
  kp_rgb_global.user_on=true;ctx.selector.active_fx=&fx;kp_rgb_global.tuning.idle_brightness=23;
  assert(zmk_rgb_matrix_on()==0 && !atomic_get(&kp_rgb_output_allowed));
  host_try_lock_error=-EBUSY;

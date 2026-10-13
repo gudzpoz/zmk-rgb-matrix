@@ -98,6 +98,15 @@ static const struct kp_rgb_effect_callbacks callbacks = {
 DT_INST_FOREACH_STATUS_OKAY(PROBE_DEFINE)
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
+
+static int preview_select(unsigned slot) {
+  return zmk_rgb_selector_select(DEV(preview_selector),
+                                slot ? DEV(fx_solid_v) : DEV(fx_solid));
+}
+
+static unsigned preview_slot(void) {
+  return zmk_rgb_selector_get_selected(DEV(preview_selector)) == DEV(fx_solid_v);
+}
 #define DATA(label) ((struct probe_data *)DEV(label)->data)
 
 static atomic_t selection_events_a, selection_events_b;
@@ -112,7 +121,7 @@ static int selection_listener(const zmk_event_t *eh) {
   else if (changed->selector == DEV(selector_b))
     atomic_inc(&selection_events_b);
   else
-    CHECK(false);
+    CHECK(changed->selector == DEV(preview_selector));
   return ZMK_EV_EVENT_BUBBLE;
 }
 
@@ -326,12 +335,12 @@ static void controls(void) {
   CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
           &invalid, (struct zmk_behavior_binding_event){0}) == -EINVAL);
   CHECK(before == callback_count());
-  converted(DEV(fx_solid_v), 0, 0, DEV(kprgb), RGB_LEGACY_EFS_CMD, 1);
+  converted(DEV(fx_solid_v), 0, 0, DEV(rgbs), RGB_EFS_CMD, 1);
   invoke(DEV(fx_solid_v), 0, 0);
-  CHECK(kp_rgb_controller.selector.effect_index == 1);
+  CHECK(preview_slot() == 1);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
   invoke(DEV(fx_solid), 0, 0);
-  CHECK(kp_rgb_controller.selector.effect_index == 0);
+  CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
   scoped_snapshot_roundtrip();
   converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 2);
@@ -513,7 +522,7 @@ static void selected_conditions(void) {
 #endif
   printk("PASS selector condition third-party event/refresh barrier/newer publication\n");
 
-  CHECK(kp_rgb_select_effect(1) == 0);
+  CHECK(preview_select(1) == 0);
   k_sleep(K_MSEC(100));
   condition_selection(DEV(probe_c), false);
   condition_selection(DEV(probe_a), true);
@@ -529,7 +538,7 @@ static void selected_conditions(void) {
   printk("PASS selector selected condition zero LEDs\n");
 #endif
   CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
-  CHECK(kp_rgb_select_effect(0) == 0);
+  CHECK(preview_select(0) == 0);
   CHECK(zmk_rgb_matrix_on() == 0);
   k_sleep(K_MSEC(100));
   check_selection_gates(true);
@@ -551,7 +560,7 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(kp_rgb_selector_alias() == NULL);
   CHECK(zmk_rgb_matrix_select_effect(1) == -ENODEV);
   CHECK(zmk_rgb_matrix_cycle_effect(1) == -ENODEV);
-  CHECK(kp_rgb_controller.selector.effect_index == 0);
+  CHECK(preview_slot() == 0);
   CHECK(before == callback_count());
   kp_rgb_matrix_unlock();
   printk("PASS absent public selector alias\n");
@@ -606,14 +615,14 @@ static void scenario(void *a, void *b, void *c) {
   mark("animated");
   k_sleep(K_MSEC(200));
 
-  CHECK(kp_rgb_select_effect(1) == 0);
+  CHECK(preview_select(1) == 0);
   k_sleep(K_MSEC(100));
   invoke(DEV(probe_a), 0, 0);
   invoke(DEV(probe_d), 0, 0);
   mark("hidden");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(!DATA(probe_a)->active && !DATA(probe_d)->active); kp_rgb_matrix_unlock();
-  CHECK(kp_rgb_select_effect(0) == 0);
+  CHECK(preview_select(0) == 0);
   k_sleep(K_MSEC(100));
   mark("shown");
   k_sleep(K_MSEC(200));

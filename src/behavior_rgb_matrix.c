@@ -84,16 +84,6 @@ static const struct kp_rgb_effect_defaults
     kp_rgb_effect_defaults[KP_RGB_MAX_EFFECTS] = {
         DT_FOREACH_CHILD(KP_CONTROLLER, KP_RGB_EFFECT_DEFAULT_ONE)};
 
-struct kp_rgb_global kp_rgb_global = {
-    .initial_on = DT_PROP_OR(KP_CONTROLLER, initial_on, 1),
-    .initial_brightness = DT_PROP_OR(KP_CONTROLLER, initial_brightness, 30),
-    .tuning =
-        {
-            .max_brightness = DT_PROP_OR(KP_CONTROLLER, max_brightness, 40),
-            .idle_brightness = DT_PROP_OR(KP_CONTROLLER, idle_brightness, 30),
-        },
-};
-
 struct kp_rgb_controller kp_rgb_controller = {
     .selector =
         {
@@ -219,7 +209,9 @@ int kp_rgb_apply_defaults(void) {
   kp_rgb_matrix_lock();
   kp_rgb_global.user_on = kp_rgb_global.initial_on;
   kp_rgb_global.brightness = brightness;
-  int ret = kp_rgb_selector_apply_defaults_locked(&kp_rgb_controller.selector);
+  int ret = kp_rgb_effect_count() == 0
+                ? 0
+                : kp_rgb_selector_apply_defaults_locked(&kp_rgb_controller.selector);
   kp_rgb_reconcile_power_locked();
   zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();

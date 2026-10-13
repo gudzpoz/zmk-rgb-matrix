@@ -44,6 +44,7 @@
 #include <zmk/endpoints.h>
 #include <zmk/hid_indicators.h>
 #include <zmk/rgb_matrix.h>
+#include <zmk/rgb_selector.h>
 
 #include "rgb_matrix_internal.h"
 #include "cmdline.h"
@@ -156,20 +157,24 @@ DEVICE_DT_INST_DEFINE(0, capture_init, NULL, NULL, NULL, POST_KERNEL,
 /* 2. native simulator command line options                                  */
 /* ------------------------------------------------------------------------- */
 
-/* Display names of every effect child of &kprgb, in declaration order. The
- * array position is the effect index the engine uses, so the preview runner can
- * name its output files from here instead of hard-coding a list. Falls back to
- * the node's full name when an effect has no `display-name`.
- *
- * DT_FOREACH_CHILD* inserts no separator, so the trailing comma is required --
- * without it the 45 string literals concatenate into one. */
+/* CLI indices are local slots in the preview selector. */
 #define KP_SIM_EFFECT_NAME(node_id)                                            \
   COND_CODE_1(DT_NODE_HAS_PROP(node_id, display_name),                         \
               (DT_PROP(node_id, display_name)),                                \
               (DT_NODE_FULL_NAME(node_id))),                                   \
 
 static const char *const kp_sim_effect_names[] = {
-    DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(kprgb), KP_SIM_EFFECT_NAME)};
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(preview_selector), okay)
+    DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(preview_selector), KP_SIM_EFFECT_NAME)
+#endif
+};
+
+#define KP_SIM_EFFECT_DEVICE(node_id) DEVICE_DT_GET(node_id),
+static const struct device *const kp_sim_effects[] = {
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(preview_selector), okay)
+    DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(preview_selector), KP_SIM_EFFECT_DEVICE)
+#endif
+};
 
 /* type 'u' defaults to UINT32_MAX and type 's' to NULL, so both are also the
  * "not given" sentinels. */
@@ -282,7 +287,13 @@ static int kp_sim_apply(void) {
   }
 
   if (requested_effect != UINT32_MAX) {
-    const int err = kp_rgb_select_effect((uint16_t)requested_effect);
+    int err = -EINVAL;
+#if DT_NODE_HAS_STATUS(DT_NODELABEL(preview_selector), okay)
+    if (requested_effect < ARRAY_SIZE(kp_sim_effects)) {
+      err = zmk_rgb_selector_select(DEVICE_DT_GET(DT_NODELABEL(preview_selector)),
+                                   kp_sim_effects[requested_effect]);
+    }
+#endif
     if (err < 0) {
       printk("keypaw-rgb-sim: effect %u unavailable (%d)\n",
              (unsigned int)requested_effect, err);

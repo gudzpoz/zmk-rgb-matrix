@@ -33,10 +33,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_LAYOUT DT_PHANDLE(KP_RGB_NODE, physical_layout)
 #define KP_NKEYS DT_PROP_LEN(KP_LAYOUT, keys)
 
-BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(keypaw_behavior_rgb_matrix) == 1,
-             "RGB matrix requires exactly one enabled controller");
-BUILD_ASSERT(IS_ENABLED(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX),
-             "RGB matrix requires its control behavior");
+BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
+             "RGB matrix requires exactly one enabled matrix node");
 BUILD_ASSERT(
     DT_PROP_LEN(KP_RGB_NODE, mapping) == KP_LED_COUNT,
     "keypaw,rgb-matrix: 'mapping' must hold exactly one entry per LED");
@@ -50,6 +48,18 @@ BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS <=
                    DT_PROP_BY_IDX(node_id, prop, idx) < KP_NKEYS,              \
                "keypaw,rgb-matrix: invalid mapping entry");
 DT_FOREACH_PROP_ELEM(KP_RGB_NODE, mapping, KP_MAP_ENTRY_ASSERT);
+
+struct kp_rgb_global kp_rgb_global = {
+    .user_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
+    .brightness = CLAMP(DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
+                        0, KP_RGB_BRT_MAX),
+    .initial_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
+    .initial_brightness = DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
+    .tuning = {
+        .max_brightness = DT_PROP_OR(KP_RGB_NODE, max_brightness, 40),
+        .idle_brightness = DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30),
+    },
+};
 
 static const uint32_t kp_map[KP_LED_COUNT] = DT_PROP(KP_RGB_NODE, mapping);
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
@@ -148,18 +158,7 @@ static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
 const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
-#define KP_RGB_SCENE_EFFECT_COUNT DT_CHILD_NUM(DT_INST(0, keypaw_behavior_rgb_matrix))
-
-static struct kp_rgb_scene_runtime kp_rgb_effect_scenes[MAX(1, KP_RGB_SCENE_EFFECT_COUNT)];
 static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[MAX(1, KP_RGB_OVERLAY_COUNT)];
-
-static struct kp_rgb_scene_runtime *kp_rgb_effect_scene(const struct device *dev) {
-  const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(dev);
-  __ASSERT_NO_MSG(cfg->owner == kp_rgb_controller.selector.owner &&
-                  cfg->slot < KP_RGB_SCENE_EFFECT_COUNT &&
-                  kp_rgb_effect_at(cfg->slot) == dev);
-  return &kp_rgb_effect_scenes[cfg->slot];
-}
 
 static struct kp_rgb_scene_runtime *kp_rgb_overlay_scene(const struct device *dev) {
   const struct kp_rgb_overlay_common_data *data = dev->data;
@@ -312,12 +311,6 @@ typedef void (*scene_visitor)(const struct device *dev,
                               int64_t now_ms);
 
 static void kp_rgb_each_scene(scene_visitor visit, int64_t now_ms) {
-  for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
-    const struct device *dev = kp_rgb_effect_at(i);
-    if (dev == NULL) continue;
-    const struct kp_rgb_effect_api *api = dev->api;
-    visit(dev, api->callbacks, &kp_rgb_effect_scenes[i], now_ms);
-  }
   const struct device *const *overlays = kp_rgb_overlay_list();
   for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
     const struct device *dev = overlays[i];
@@ -384,8 +377,6 @@ static void kp_rgb_activate_scene(const struct device *dev,
   }
 }
 
-/* Returns the index of the last overlay covering every LED, or SIZE_MAX when
- * none does; the caller then renders the effect and starts painting at 0. */
 static size_t kp_last_covering_overlay(const struct device *const *overlays,
                                        size_t count) {
   size_t last = SIZE_MAX;
@@ -411,18 +402,12 @@ static inline void kp_rgb_try_cache_prefix(const struct kp_rgb_frame *local,
 }
 
 static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
-  const struct device *fx = kp_rgb_controller.selector.active_fx;
-  const struct device *const *overlays = NULL;
-  size_t overlay_count = 0, first = SIZE_MAX;
+  const struct device *const *overlays = kp_rgb_overlay_list();
+  size_t overlay_count = kp_rgb_overlay_count();
+  size_t first = allowed ? kp_last_covering_overlay(overlays, overlay_count) : SIZE_MAX;
   kp_rgb_each_scene(kp_rgb_clear_wanted, now_ms);
 
-  if (fx != NULL && allowed) {
-    const struct kp_rgb_effect_api *api = fx->api;
-    overlays = api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
-    overlay_count = api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
-    first = kp_last_covering_overlay(overlays, overlay_count);
-    kp_rgb_effect_scene(fx)->wanted = first == SIZE_MAX;
-
+  if (allowed) {
     for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
       if (overlays[i] == NULL || !kp_rgb_overlay_gate(overlays[i])) continue;
       kp_rgb_overlay_scene(overlays[i])->wanted = true;
@@ -462,44 +447,22 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
         .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
     };
     kp_rgb_scene_animating = false;
-    if (fx != NULL) {
-      /* The base is a participant only when no covering overlay hides it. */
-      if (first == SIZE_MAX) {
-        if (skip > 0) {
-          skip--;
-        } else {
-          const struct kp_rgb_effect_api *api = fx->api;
-          kp_rgb_scene_animating |= kp_rgb_callbacks_render(
-              fx, api->callbacks, &kp_rgb_effect_scene(fx)->state, &frame);
-          if (!reuse) {
-            kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating,
-                                    &prefix_count);
-          }
-        }
+    frame.scratch = scratch;
+    for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
+      const struct device *dev = overlays[i];
+      if (dev == NULL || !kp_rgb_overlay_gate(dev)) continue;
+      if (skip > 0) {
+        skip--;
+        continue;
       }
+      frame.targets = kp_rgb_overlay_targets(dev);
+      frame.target_count = kp_rgb_overlay_target_count(dev);
 
-      frame.scratch = scratch;
-      for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
-        const struct device *dev = overlays[i];
-        if (dev == NULL) {
-          continue;
-        }
-        if (!kp_rgb_overlay_gate(dev)) {
-          continue;
-        }
-        if (skip > 0) {
-          skip--;
-          continue;
-        }
-        frame.targets = kp_rgb_overlay_targets(dev);
-        frame.target_count = kp_rgb_overlay_target_count(dev);
-
-        const struct kp_rgb_overlay_api *ovl = dev->api;
-        kp_rgb_scene_animating |= kp_rgb_callbacks_render(
-            dev, ovl->callbacks, &kp_rgb_overlay_scene(dev)->state, &frame);
-        if (!reuse) {
-          kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating, &prefix_count);
-        }
+      const struct kp_rgb_overlay_api *ovl = dev->api;
+      kp_rgb_scene_animating |= kp_rgb_callbacks_render(
+          dev, ovl->callbacks, &kp_rgb_overlay_scene(dev)->state, &frame);
+      if (!reuse) {
+        kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating, &prefix_count);
       }
     }
     if (!reuse) {
@@ -621,17 +584,10 @@ bool zmk_rgb_matrix_is_inhibited(void) {
 
 /* Caller holds kp_rgb_lock. */
 static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
-  const struct device *fx = kp_rgb_controller.selector.active_fx;
-  if (fx == NULL || kp_rgb_led_for_position(ev->position) == SIZE_MAX) {
-    return false;
-  }
-  const struct kp_rgb_effect_api *api = fx->api;
-  bool changed = kp_rgb_callbacks_on_event(fx, api->callbacks,
-                                           &kp_rgb_effect_scene(fx)->state, ev);
-
-  const struct device *const *overlays =
-      api->overlays != NULL ? api->overlays : kp_rgb_overlay_list();
-  size_t count = api->overlays != NULL ? api->overlays_len : kp_rgb_overlay_count();
+  if (kp_rgb_led_for_position(ev->position) == SIZE_MAX) return false;
+  bool changed = false;
+  const struct device *const *overlays = kp_rgb_overlay_list();
+  size_t count = kp_rgb_overlay_count();
   for (size_t i = 0; i < count; i++) {
     const struct device *dev = overlays[i];
     if (dev == NULL || !kp_rgb_overlay_gate(dev)) continue;

@@ -34,3 +34,8 @@ config KEYPAW_SIM_SPLIT_TEST
     depends on ARCH_POSIX && ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
     depends on KEYPAW_RGB_SPLIT_SYNC
     depends on !KEYPAW_SIM_SELECTOR_TEST
+
+config KEYPAW_SIM_FIXED_SCENE_TEST
+    bool "native_sim fixed overlay scene integration test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP

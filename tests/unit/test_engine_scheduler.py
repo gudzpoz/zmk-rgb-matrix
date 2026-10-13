@@ -23,7 +23,7 @@ static void fixture(bool on, bool inhibit) {
     kp_output_work.work.handler = kp_rgb_output_handler;
     ctx.dev = &dummy;
     kp_rgb_global.user_on = on;
-    ctx.selector.active_fx = &fx;
+    host_install_bottom();
     assert(zmk_rgb_matrix_set_inhibited(inhibit) == 0);
     assert(kp_rgb_matrix_init() == 0);
     bool effective;

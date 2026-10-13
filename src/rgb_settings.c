@@ -266,7 +266,7 @@ int kp_rgb_settings_commit(void) {
         kp_global_seen ? &kp_global_load : NULL, &resolved);
     kp_rgb_global.user_on = resolved.user_on;
     kp_rgb_global.brightness = resolved.brightness;
-    if (imported && kp_rgb_persist_selector_count() != 0) {
+    if (imported) {
       kp_dirty_global_locked();
       save = true;
     }
@@ -406,42 +406,18 @@ static int kp_save_global(void) {
   struct kp_rgb_persist_blob legacy;
   struct kp_rgb_persist_global_record bytes;
   kp_rgb_matrix_lock();
-  bool flat = kp_rgb_persist_selector_count() == 0;
-  bool retain = !flat && kp_legacy_valid && kp_rgb_selector_alias() == NULL &&
+  bool retain = kp_legacy_valid && kp_rgb_selector_alias() == NULL &&
                 kp_legacy.has_selected && !kp_global_reset;
-  const char *selected =
-      flat && kp_rgb_controller.selector.active_fx != NULL
-          ? kp_rgb_effect_cfg(kp_rgb_controller.selector.active_fx)->persist_id
-          : (retain ? kp_legacy.selected_id : NULL);
-  kp_rgb_persist_pack(kp_rgb_global.user_on, kp_rgb_global.brightness, selected,
-                      &legacy);
+  kp_rgb_persist_pack(kp_rgb_global.user_on, kp_rgb_global.brightness,
+                      retain ? kp_legacy.selected_id : NULL, &legacy);
   struct kp_rgb_persist_global_state state = {
       .user_on = kp_rgb_global.user_on, .brightness = kp_rgb_global.brightness};
   kp_rgb_persist_encode_global(&state, &bytes);
   kp_rgb_matrix_unlock();
-  int err = 0;
-  char path[SETTINGS_MAX_NAME_LEN + 1];
-  if (flat) {
-    for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
-      const struct device *fx = kp_rgb_effect_at(i);
-      if (fx == NULL || !kp_rgb_effect_cfg(fx)->persist_parameters)
-        continue;
-      kp_rgb_matrix_lock();
-      struct kp_rgb_persist_effect value = kp_parameters_locked(fx);
-      kp_rgb_matrix_unlock();
-      kp_path(path, NULL, kp_rgb_effect_cfg(fx)->persist_id);
-      int rc = settings_save_one(path, &value, sizeof(value));
-      if (err == 0)
-        err = rc;
-    }
-  }
-  /* Overwriting /state destroys the legacy selection: write dependencies first.
-   */
-  if (err == 0)
-    err = flat || retain
-              ? settings_save_one(KP_RGB_PERSIST_KEY, &legacy, sizeof(legacy))
-              : settings_save_one(KP_RGB_PERSIST_KEY, &bytes, sizeof(bytes));
-  return err;
+  /* With no explicit migration target, preserve the only legacy selection copy. */
+  return retain
+      ? settings_save_one(KP_RGB_PERSIST_KEY, &legacy, sizeof(legacy))
+      : settings_save_one(KP_RGB_PERSIST_KEY, &bytes, sizeof(bytes));
 }
 
 static int kp_clear_legacy_effects(size_t index) {

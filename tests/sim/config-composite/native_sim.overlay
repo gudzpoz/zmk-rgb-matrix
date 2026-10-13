@@ -54,22 +54,34 @@
         strip = <&rgb_output>;
         physical-layout = <&layout_ortho_4x12_all1u>;
         mapping = <11 4 27 9 36>;
+        initial-on;
+        initial-brightness = <100>;
+        max-brightness = <100>;
+        idle-brightness = <100>;
     };
 
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            initial-on;
-            initial-brightness = <100>;
-            max-brightness = <100>;
-            idle-brightness = <100>;
-
+    rgb_overlays {
+        compatible = "keypaw,rgb-overlays";
+        composite_selector: composite_selector {
+            compatible = "keypaw,rgb-overlay-selector";
+            all-leds;
             fx_static: fx-static {
                 compatible = "keypaw,rgb-matrix-static";
                 #binding-cells = <0>;
                 led-colors = <0x102030 0x405060 0x708090 0xa0b0c0 0xd0e0f0>;
             };
+        };
+    };
+    behaviors {
+        kprgb: kprgb {
+            compatible = "keypaw,behavior-rgb-matrix";
+            #binding-cells = <2>;
+            selector = <&composite_selector>;
+        };
+        rgbs: rgbs {
+            compatible = "keypaw,behavior-rgb-selector";
+            #binding-cells = <2>;
+            selector = <&composite_selector>;
         };
     };
 };

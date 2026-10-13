@@ -60,10 +60,11 @@ typedef int (*settings_read_cb)(void *, void *, size_t);
 static char saved_path[128], deleted_path[128];
 static unsigned char saved_blob[512], saved_global[512];
 static size_t saved_size, saved_global_size;
-static unsigned saves, deletes;
+static unsigned saves, deletes, fail_saves;
 static int settings_save_one(const char *path, const void *value, size_t size) {
     assert(!held && size <= sizeof(saved_blob));
     saves++;
+    if(fail_saves) { fail_saves--; return -EIO; }
     if (!strcmp(path, "keypaw/rgb_matrix/state")) {
         memcpy(saved_global, value, size); saved_global_size = size;
     }
@@ -106,6 +107,16 @@ int main(void) {
     assert(kp_rgb_global.brightness == 70 && kp_rgb_global.user_on);
     assert(kp_rgb_selected_effect() == 0);
     assert(!pending && !saves && !strcmp(registered_subtree, "keypaw/rgb_matrix"));
+
+    /* Selector-free saves use v3 even while the temporary flat reader exists. */
+    assert(kp_rgb_save_state() == 0 && pending);
+    pending->work.handler(&pending->work); pending = NULL;
+    struct kp_rgb_persist_global_record initial_bytes;
+    struct kp_rgb_persist_global_state initial_state = {.user_on=true,.brightness=70};
+    kp_rgb_persist_encode_global(&initial_state,&initial_bytes);
+    assert(saved_global_size==sizeof(initial_bytes));
+    assert(!memcmp(saved_global,&initial_bytes,sizeof(initial_bytes)) && saves==1);
+    saves=0; lock_entries=1;
 
     /* Unknown subtree keys are ignored without touching the backend. */
     struct kp_rgb_persist_blob blob;
@@ -168,14 +179,14 @@ int main(void) {
     blob.brightness = 88;
     assert(lock_entries == locks_before);
 
-    /* Saving writes the global blob, then one record per persisted effect. */
+    /* No migration target: retain the last imported selection, not flat state. */
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
     pending = NULL;
     struct kp_rgb_persist_blob expect;
-    kp_rgb_persist_pack(true, 55, "b", &expect);
+    kp_rgb_persist_pack(true, 55, "missing", &expect);
     assert(saved_global_size == sizeof(expect) && !memcmp(saved_global, &expect, sizeof(expect)));
-    assert(saves == 3 && !strcmp(saved_path, "keypaw/rgb_matrix/state"));
+    assert(saves == 1 && !strcmp(saved_path, "keypaw/rgb_matrix/state"));
 
     /* Runtime reset is immediate; persisted defaults follow on the worker. */
     unsigned resets_before = resets;
@@ -183,7 +194,10 @@ int main(void) {
     assert(pending && resets == resets_before + 1);
     assert(deletes == 0);
     pending->work.handler(&pending->work); pending = NULL;
-    assert(saves == 6);
+    assert(saves == 2);
+    struct kp_rgb_persist_global_state reset_state;
+    assert(kp_rgb_persist_decode_global(saved_global,saved_global_size,&reset_state)==0);
+    assert(reset_state.user_on && reset_state.brightness==70);
     assert(kp_rgb_selected_effect() == 0 && kp_rgb_global.brightness == 70);
     assert(kp_rgb_global.user_on && data[0].color.h == 10 && !held);
 
@@ -261,14 +275,14 @@ int main(void) {
     assert(registered_commit() == 0);
     assert(!kp_rgb_global.user_on && kp_rgb_selected_effect() == 1);
     assert(kp_rgb_controller.selector.active_fx == &idev[0] && !reconciled_user_on);
-    assert(!pending && saves == saves_before);
+    assert(pending && saves == saves_before);
     assert(kp_rgb_select_effect(2) == 0);
-    assert(!pending && saves == saves_before && !kp_rgb_global.user_on);
+    assert(pending && saves == saves_before && !kp_rgb_global.user_on);
     assert(kp_rgb_select_effect(1) == 0);
     assert(kp_rgb_save_state() == 0 && pending);
     pending->work.handler(&pending->work);
     pending = NULL;
-    assert(saves == saves_before + 4);
+    assert(saves == saves_before + 1);
     assert(saved_global_size == sizeof(stored));
     assert(!memcmp(saved_global, &stored, sizeof(stored)));
     assert(kp_rgb_apply_defaults() == 0);
@@ -277,9 +291,47 @@ int main(void) {
     assert(registered_commit() == 0);
     assert(!kp_rgb_global.user_on && !reconciled_user_on);
     assert(kp_rgb_selected_effect() == 1 && kp_rgb_controller.selector.active_fx == &idev[0]);
-    assert(kp_rgb_global.brightness == 61 && !pending && !held);
+    assert(kp_rgb_global.brightness == 61 && pending && !held);
+    /* Import repair remains scheduled with no scoped selectors. */
+    pending->work.handler(&pending->work); pending=NULL;
+    assert(!kp_global_dirty);
+    assert(saved_global_size==sizeof(stored) && !memcmp(saved_global,&stored,sizeof(stored)));
 
-    puts("singleton settings namespace/load/save/reset/identity passed");
+    /* No selector or flat members: failed repair preserves the legacy copy. */
+    kp_rgb_controller.selector.effect_count=0;
+    kp_rgb_controller.selector.active_fx=NULL;
+    kp_global_seen=false;
+    kp_rgb_persist_pack(false,36,"orphan",&stored);
+    assert(registered_set("state",sizeof(stored),read_blob,&stored)==0);
+    assert(registered_commit()==0 && pending && kp_global_dirty);
+    assert(!kp_rgb_global.user_on && kp_rgb_global.brightness==36);
+    fail_saves=1;
+    unsigned char previous_global[512];memcpy(previous_global,saved_global,saved_global_size);
+    size_t previous_size=saved_global_size;
+    pending->work.handler(&pending->work);
+    assert(pending && kp_global_dirty && kp_legacy_valid);
+    assert(saved_global_size==previous_size && !memcmp(saved_global,previous_global,previous_size));
+    kp_rgb_global.brightness=37;
+    pending->work.handler(&pending->work);pending=NULL;
+    kp_rgb_persist_pack(false,37,"orphan",&stored);
+    assert(!kp_global_dirty && saved_global_size==sizeof(stored));
+    assert(!memcmp(saved_global,&stored,sizeof(stored)));
+
+    /* Legacy records without selection have no selection copy to retain. */
+    kp_global_seen=false;
+    kp_rgb_persist_pack(true,39,NULL,&stored);
+    assert(registered_set("state",sizeof(stored),read_blob,&stored)==0);
+    assert(registered_commit()==0 && pending && kp_global_dirty);
+    pending->work.handler(&pending->work);pending=NULL;
+    struct kp_rgb_persist_global_state converted;
+    assert(kp_rgb_persist_decode_global(saved_global,saved_global_size,&converted)==0);
+    assert(converted.user_on && converted.brightness==39 && !kp_global_dirty);
+    kp_rgb_reset_state();assert(pending);
+    pending->work.handler(&pending->work);pending=NULL;
+    assert(kp_rgb_persist_decode_global(saved_global,saved_global_size,&converted)==0);
+    assert(converted.user_on && converted.brightness==70 && !kp_legacy_valid);
+
+    puts("singleton legacy reader, final global writer and selector-free migration safety passed");
     return 0;
 }
 '''

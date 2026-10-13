@@ -56,7 +56,6 @@ PRELUDE = r'''
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define KP_RGB_LOCK_RETRY_MS 1
 #define KP_RGB_BRT_MAX 100
-#define KP_RGB_SCENE_EFFECT_COUNT 8
 #define K_NO_WAIT 0
 #define K_MSEC(x) (x)
 #define CONFIG_KEYPAW_RGB_MATRIX_TICK_MS 16
@@ -106,10 +105,9 @@ struct kp_rgb_callback_state { int64_t last_render_ms; bool initialized,active,a
 struct kp_rgb_effect_instance { const struct device *effect; struct kp_rgb_callback_state state; };
 #define KP_RGB_EFFECT_INSTANCE_INIT(dev) {.effect=(dev)}
 struct kp_rgb_scene_runtime { struct kp_rgb_callback_state state; bool wanted,reset_pending; };
-static struct kp_rgb_scene_runtime kp_rgb_effect_scenes[8],kp_rgb_overlay_scenes[8];
+static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[8];
 struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };
 #define kp_rgb_effect_config kp_rgb_effect_common_config
-static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct device *d) { return d->config; }
 static const struct device controller_dev = {.name="rgb-controller"};
 struct kp_rgb_overlay_common_data { size_t index; };
 struct kp_rgb_effect_callbacks {
@@ -120,7 +118,6 @@ struct kp_rgb_effect_callbacks {
 };
 struct kp_rgb_effect_api {
  const struct kp_rgb_effect_callbacks *callbacks;
- const struct device *const *overlays; size_t overlays_len;
 };
 struct kp_rgb_overlay_api { const struct kp_rgb_effect_callbacks *callbacks; bool replaces_target; };
 typedef void (*scene_visitor)(const struct device *,const struct kp_rgb_effect_callbacks *,struct kp_rgb_scene_runtime *,int64_t);
@@ -197,7 +194,9 @@ static const size_t kp_rgb_all_targets[KP_LED_COUNT ? KP_LED_COUNT : 1]={0
 ,1
 #endif
 };
+static unsigned host_scale_calls;
 static struct led_rgb kp_rgb_rgb_scale(struct led_rgb c,uint8_t p) {
+ host_scale_calls++;
  c.r=c.r*p/100; c.g=c.g*p/100; c.b=c.b*p/100; return c;
 }
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
@@ -281,17 +280,27 @@ static const struct kp_rgb_effect_callbacks callbacks={.render=render,.on_event=
 static const struct kp_rgb_effect_api api={.callbacks=&callbacks};
 static const struct kp_rgb_effect_config fx_config={.owner=&controller_dev,.slot=0};
 static const struct device fx={.api=&api,.config=&fx_config};
-static const struct device *host_effects[8]={&fx};
-static size_t host_effect_count=1;
-static size_t kp_rgb_effect_count(void) { return host_effect_count; }
-static const struct device *kp_rgb_effect_at(size_t n) { return host_effects[n]; }
-void kp_rgb_request_runtime_reset_locked(void);
-void kp_rgb_reconcile_power_locked(void);
-static __attribute__((unused)) int kp_rgb_select_effect_locked(uint16_t index) {
- if (index >= host_effect_count) return -EINVAL;
- ctx.selector.effect_index=index; ctx.selector.active_fx=host_effects[index];
- kp_rgb_request_runtime_reset_locked(); kp_rgb_reconcile_power_locked();
- return 0;
+bool kp_rgb_effect_render(const struct device *,const struct kp_rgb_frame *);
+static bool host_child_render(const struct device *d,const struct kp_rgb_frame *f) {
+ const struct host_overlay *o=d->data;
+ struct kp_rgb_frame child=*f; child.pixels=f->scratch; child.scratch=NULL;
+ memset(child.pixels,0,child.count*sizeof(*child.pixels));
+ bool again=kp_rgb_effect_render(o->child,&child);
+ for(size_t n=0;n<f->target_count;n++) f->pixels[f->targets[n]]=child.pixels[f->targets[n]];
+ return again;
+}
+static bool host_child_event(const struct device *d,const struct kp_rgb_key_event *e) {
+ const struct host_overlay *o=d->data;
+ const struct kp_rgb_effect_api *a=o->child->api;
+ return a->callbacks->on_event ? a->callbacks->on_event(o->child,e) : false;
+}
+static const struct kp_rgb_effect_callbacks host_child_callbacks={.render=host_child_render,.on_event=host_child_event};
+static const struct kp_rgb_overlay_api host_child_api={.callbacks=&host_child_callbacks,.replaces_target=true};
+static struct host_overlay host_bottom_data={.child=&fx,.gate=true};
+static const struct device host_bottom={.api=&host_child_api,.data=&host_bottom_data};
+static void host_install_bottom(void) {
+ host_overlays[0]=&host_bottom;
+ if(!host_overlay_count) host_overlay_count=1;
 }
 static int led_strip_update_rgb(const struct device *d,struct led_rgb *p,size_t n) {
  (void)d; assert(held);assert(n>0);writes++;
@@ -328,7 +337,7 @@ static void host_activity(bool active) {
 
 FUNCTIONS = [
     "kp_rgb_has_leds", "kp_rgb_logical_on_locked",
-    "kp_rgb_effect_scene", "kp_rgb_overlay_scene", "kp_rgb_each_scene", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
+    "kp_rgb_overlay_scene", "kp_rgb_each_scene", "kp_rgb_restart_clock", "kp_rgb_clear_wanted", "kp_rgb_mark_reset",
     "kp_rgb_request_runtime_reset_locked", "kp_rgb_deactivate_scene", "kp_rgb_reset_scene", "kp_rgb_activate_scene",
     "kp_rgb_schedule_locked", "kp_rgb_request_output_pass", "kp_rgb_effect_invalidate", "kp_rgb_begin_output_pass", "kp_rgb_take_scene_request",
     "kp_rgb_finish_output_pass", "kp_rgb_control_refresh_locked",
@@ -362,7 +371,7 @@ def run_tests(tests, *, scheduler=False, cases=(None,), auto_off_idle=True, allo
                     'kp_rgb_effect_instance_reset', 'kp_rgb_effect_instance_on_event',
                     'kp_rgb_effect_instance_render', 'kp_rgb_effect_instance_restart_clock'))
                 + "\n".join(map(function, FUNCTIONS))
-                + TOGGLE_FUNCTION + ACTIVITY_FUNCTION + '\n#define runtime (kp_rgb_effect_scenes[0].state)\n' + tests
+                + TOGGLE_FUNCTION + ACTIVITY_FUNCTION + '\n#define runtime (kp_rgb_overlay_scenes[0].state)\n' + tests
             )
             binary = pathlib.Path(directory) / "engine"
             subprocess.run(

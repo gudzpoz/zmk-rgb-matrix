@@ -50,3 +50,25 @@ properties:
       must equal the chain-length of "strip", and is empty when "strip" is
       omitted.
 
+  max-brightness:
+    type: int
+    default: 40
+    description: Capped RGB brightness in percent (0..100).
+
+  idle-brightness:
+    type: int
+    default: 30
+    description: |
+      RGB brightness in percent (0..100) to use while the keyboard is idle
+      (ZMK activity not ACTIVE). Only observable with
+      CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n, which keeps the LEDs on instead
+      of turning them off when idle.
+
+  initial-brightness:
+    type: int
+    default: 30
+    description: Initial brightness in percent (0..100).
+
+  initial-on:
+    type: boolean
+    description: Start the matrix enabled; omit to start disabled.

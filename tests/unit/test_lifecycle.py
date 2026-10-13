@@ -43,9 +43,9 @@ static struct observation observations[3];
 static struct kp_rgb_effect_api apis[3];
 static struct device devices[3];
 static const struct kp_rgb_effect_config configs[3]={{.owner=&controller_dev,.slot=0},{.owner=&controller_dev,.slot=1},{.owner=NULL,.slot=7}};
-#define a_state (kp_rgb_effect_scenes[0].state)
-#define b_state (kp_rgb_effect_scenes[1].state)
-#define c_state (kp_rgb_overlay_scenes[0].state)
+#define a_state (kp_rgb_overlay_scenes[0].state)
+#define b_state (kp_rgb_overlay_scenes[1].state)
+#define c_state (kp_rgb_overlay_scenes[2].state)
 static const struct device *target(const struct device *d) { return ((struct host_overlay *)d->data)->child; }
 static bool overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
     assert(f->pixels==scene && f->scratch==scratch && f->targets);
@@ -54,13 +54,26 @@ static bool overlay_paint(const struct device *d,const struct kp_rgb_frame *f) {
     memset(child.pixels,0,child.count*sizeof(*child.pixels));
     return kp_rgb_effect_render(target(d),&child);
 }
-static void overlay_reset(const struct device *d,int64_t t) { reset(target(d),t); }
-static void overlay_active(const struct device *d,bool v,int64_t t) { active(target(d),v,t); }
-static bool overlay_event(const struct device *d,const struct kp_rgb_key_event *e) { return event(target(d),e); }
+static void overlay_reset(const struct device *d,int64_t t) {
+ const struct device *child=target(d); const struct kp_rgb_effect_api *api=child->api;
+ if(api->callbacks->reset) api->callbacks->reset(child,t);
+}
+static void overlay_active(const struct device *d,bool v,int64_t t) {
+ const struct device *child=target(d); const struct kp_rgb_effect_api *api=child->api;
+ if(api->callbacks->set_active) api->callbacks->set_active(child,v,t);
+}
+static bool overlay_event(const struct device *d,const struct kp_rgb_key_event *e) {
+ const struct device *child=target(d); const struct kp_rgb_effect_api *api=child->api;
+ return api->callbacks->on_event ? api->callbacks->on_event(child,e) : false;
+}
 static const struct kp_rgb_effect_callbacks overlay_callbacks={.render=overlay_paint,.reset=overlay_reset,.set_active=overlay_active,.on_event=overlay_event};
 static const struct kp_rgb_overlay_api overlay_api={.callbacks=&overlay_callbacks};
-static struct host_overlay overlay_state;
+static struct host_overlay bottom_states[2], overlay_state;
+static struct device bottom_devices[2];
 static struct device overlay={.api=&overlay_api,.data=&overlay_state};
+static void choose(size_t index) {
+ bottom_states[0].gate=index==0; bottom_states[1].gate=index==1;
+}
 static void setup(void) {
     fixture(true,false);
     for(size_t i=0;i<3;i++) {
@@ -68,10 +81,14 @@ static void setup(void) {
         devices[i]=(struct device){.api=&apis[i],.data=&observations[i],.config=&configs[i]};
         observations[i].parameter=123+(int)i;
     }
-    host_effects[0]=&devices[0]; host_effects[1]=&devices[1]; host_effect_count=2;
-    overlay_state=(struct host_overlay){.child=&devices[2],.gate=true};
-    host_overlays[0]=&overlay; host_overlay_count=1;
-    ctx.selector.active_fx=&devices[0];
+    for(size_t i=0;i<2;i++) {
+        bottom_states[i]=(struct host_overlay){.common={.index=i},.child=&devices[i]};
+        bottom_devices[i]=(struct device){.api=&overlay_api,.data=&bottom_states[i]};
+        host_overlays[i]=&bottom_devices[i];
+    }
+    overlay_state=(struct host_overlay){.common={.index=2},.child=&devices[2],.gate=true};
+    host_overlays[2]=&overlay; host_overlay_count=3;
+    choose(0);
 }
 static void key(int64_t timestamp) {
     const struct zmk_position_state_changed p={.position=0,.state=true,.timestamp=timestamp};
@@ -89,21 +106,21 @@ int main(void) {
     key(-123); host_run_ready();
     assert(!strcmp(order,"RRAAEEPP"));
     assert(a->timestamp==-123 && c->timestamp==-123 && a->elapsed==0 && c->elapsed==0);
-    assert(!b_state.initialized && !kp_rgb_effect_scenes[7].state.initialized);
+    assert(!b_state.initialized && !kp_rgb_overlay_scenes[7].state.initialized);
     host_run_until(32);
     assert(a->paints==1 && c->paints==1 && a->elapsed==0 && c->elapsed==0);
     a->animate=true; host_run_until(48); zmk_rgb_matrix_flush(); host_run_ready();
     assert(a->elapsed==0);
     host_run_until(64); assert(a->elapsed==16 && c->elapsed==0);
-    // Selection is sampled at delivery, not admission; unobserved transitions coalesce.
+    // Participation is sampled at delivery, not admission; unobserved transitions coalesce.
     clear_order();
-    key(77); ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    key(77); choose(1); zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DRAEEPP"));
     assert(a->deactivations==1 && b->resets==1 && b->activations==1 && b->events==1);
     assert(a->events==1 && c->events==2 && b->timestamp==77);
-    ctx.selector.active_fx=&devices[0]; ctx.selector.active_fx=&devices[1];
+    choose(0); choose(1);
     zmk_rgb_matrix_flush(); host_run_ready(); assert(b->activations==1 && b->deactivations==0);
-    // A full cover hides the base; disabling the overlay resumes it without reset.
+    // A full cover hides earlier overlays; disabling it resumes them without reset.
     overlay_state.cover=true; key(88); host_run_ready();
     assert(b->deactivations==1 && b->events==1 && c->events==3);
     overlay_state.gate=false; zmk_rgb_matrix_flush(); host_run_ready();
@@ -114,7 +131,7 @@ int main(void) {
     for(size_t i=0;i<3;i++) assert(observations[i].parameter==123+(int)i && observations[i].resets==2);
     assert(b->elapsed==0);
     // Optional callbacks and independent private instance storage.
-    apis[0].callbacks=&optional; ctx.selector.active_fx=&devices[0];
+    apis[0].callbacks=&optional; choose(0);
     overlay_state.gate=true; overlay_state.cover=false; zmk_rgb_matrix_flush(); host_run_ready();
     assert(a_state.active && c_state.active && !b_state.active);
     unsigned a_events=a->events, c_events=c->events;
@@ -145,19 +162,19 @@ int main(void) {
     // OFF has one lifecycle pass and no recurring blocked wakeups.
     assert(zmk_rgb_matrix_off()==0); host_run_ready();
     assert(!a_state.active && !c_state.active);
-    assert(ctx.selector.active_fx == &devices[0]);
+    assert(bottom_states[0].gate && !bottom_states[1].gate);
     unsigned runs=kp_output_work.work.runs;
     host_run_until(now+1000); assert(kp_output_work.work.runs==runs && kp_rgb_next_frame_ms==INT64_MAX);
     assert(zmk_rgb_matrix_on()==0); host_run_ready(); assert(a->elapsed==0);
     host_activity(false); host_run_ready(); assert(!a_state.active);
     host_activity(true); host_run_ready(); assert(a->elapsed==0);
-    clear_order(); ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); choose(1); zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DAP"));
     // Reverse registry order must still deactivate before activating.
-    clear_order(); ctx.selector.active_fx=&devices[0]; zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); choose(0); zmk_rgb_matrix_flush(); host_run_ready();
     assert(!strcmp(order,"DAP"));
-    ctx.selector.active_fx=&devices[1]; zmk_rgb_matrix_flush(); host_run_ready();
-    clear_order(); ctx.selector.active_fx=&devices[0];
+    choose(1); zmk_rgb_matrix_flush(); host_run_ready();
+    clear_order(); choose(0);
     overlay_state.gate=true; overlay_state.cover=false;
     kp_rgb_matrix_lock(); kp_rgb_request_runtime_reset_locked(); kp_rgb_matrix_unlock();
     host_run_ready();

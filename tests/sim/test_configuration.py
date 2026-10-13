@@ -23,19 +23,19 @@ EXAMPLE = Path(os.environ.get("RGB_EXAMPLE_MODULE", MODULE.parent / "zmk-rgb-eff
 CASES = {
     "baseline": (True, ""),
     "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
-    "period-zero": (True, '&kprgb { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
+    "period-zero": (True, '&preview_selector { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
     "period-wide": (True, '''
-&kprgb { initial-duration-ms = <70000>; };
+&preview_selector { initial-duration-ms = <70000>; };
 &fx_solid { duration = <70000>; };
 &fixture_overlay { fx_fixture { duration = <70000>; }; };
 '''),
     "period-u32-max": (True, '''
-&kprgb { initial-duration-ms = <0xffffffff>; };
+&preview_selector { initial-duration-ms = <0xffffffff>; };
 &fx_solid { duration = <0xffffffff>; };
 &fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
 '''),
     "external-effect": (True, '''
-&kprgb { external_example { compatible = "keypaw,rgb-matrix-example";
+&preview_selector { external_example { compatible = "keypaw,rgb-matrix-example";
     #binding-cells = <0>; }; };
 '''),
     "arbitrary-effect-parent": (True, '''
@@ -67,7 +67,6 @@ CASES = {
     "two-controllers": (False, '''
 / { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";
     #binding-cells = <2>;
-    fx { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
 }; }; };
 '''),
     "controller-leds": (False, "&kprgb { leds = <0 1>; };"),
@@ -78,22 +77,23 @@ CASES = {
 &fixture_overlay { second { compatible = "keypaw,rgb-matrix-solid";
     #binding-cells = <0>; }; };
 '''),
-    "duplicate-overlay": (False, '''
-&fx_solid { overlays = <&fixture_overlay &fixture_overlay>; };
-'''),
     "disabled-sibling": (True, '''
 &fixture_overlay { disabled { compatible = "keypaw,rgb-matrix-solid";
     #binding-cells = <0>; status = "disabled"; }; };
 '''),
-    "mutually-exclusive-lists": (True, '''
-&fx_solid { overlays = <&fixture_overlay>; };
-&fx_solid_v { overlays = <&fixture_overlay>; };
+    "shared-selection-gate": (True, '''
+&rgb_conditions { selected_preview: selected_preview {
+    compatible = "keypaw,rgb-condition-effect-selected";
+    selector = <&preview_selector>; effect = <&fx_solid>;
+}; };
+&fixture_overlay { condition = <&selected_preview>; };
+&fixture_battery { condition = <&selected_preview>; };
 '''),
     "persist-id": (True, '''
 &fx_solid { persist-id = "solid_main"; };
 &fx_solid_v { persist-id = "solid_vertical"; };
 '''),
-    "persist-id-duplicate": (False, '''
+    "persist-id-duplicate": (True, '''
 &fx_solid { persist-id = "duplicate"; };
 &fx_solid_v { persist-id = "duplicate"; };
 '''),
@@ -101,22 +101,20 @@ CASES = {
 &fx_solid { persist-id = "persist_id_that_is_far_beyond_the_storage_limit"; };
 '''),
     "node-name-too-long": (False, '''
-&kprgb { fx_this_node_name_is_far_beyond_the_storage_limit {
+&preview_selector { fx_this_node_name_is_far_beyond_the_storage_limit {
     compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
 '''),
 }
 
 
 DIAGNOSTICS = {
-    "no-controller": r"exactly one enabled controller",
+    "no-controller": r"undefined reference",
     "two-controllers": r"exactly one enabled controller",
     "controller-leds": r"whole strip|['\"]leds['\"].*not declared",
     "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
     "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
-    "duplicate-overlay": r"redeclaration of enumerator|redefinition of enumerator",
-    "persist-id-duplicate": r"redeclaration of enumerator|redefinition of enumerator",
     "persist-id-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
     "node-name-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
 }
@@ -125,7 +123,7 @@ for effect in ("rain", "starlight"):
     for interval in (0, -1, 65536, 1, 65535):
         name = f"{effect}-interval-{interval}"
         CASES[name] = (1 <= interval <= 65535, f'''
-&kprgb {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
+&preview_selector {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
     #binding-cells = <0>; step-interval-ms = <({interval})>; }}; }};
 ''')
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
@@ -157,6 +155,13 @@ def main():
             if (result.returncode == 0) != valid:
                 raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                      + result.stdout[-12000:])
+            if name == "persist-id-duplicate":
+                run = subprocess.run([str(root / name / "build/zephyr/zmk.exe"),
+                                      "--stop_at=1", "-no-rt"], cwd=root, text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     timeout=30)
+                assert run.returncode == 0, run.stdout
+                assert "persistence IDs invalid" in run.stdout, run.stdout
             if name.startswith("period-"):
                 assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
             if not valid:

@@ -25,6 +25,7 @@ SELECTORS = '''
     selector_a: selector_a {
         compatible = "keypaw,rgb-overlay-selector";
         leds = <0 1>;
+        condition = <&preview_visible>;
         initial-effect = <0>;
         disabled { compatible = "keypaw,rgb-matrix-solid";
             #binding-cells = <0>; status = "disabled"; };
@@ -35,7 +36,7 @@ SELECTORS = '''
     };
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector";
-        condition = <&fixture_always>;
+        condition = <&preview_visible>;
         leds = <2 3>;
         initial-effect = <99>;
         initial-duration-ms = <0xffffffff>;
@@ -47,6 +48,7 @@ SELECTORS = '''
     ordinary: ordinary {
         compatible = "keypaw,rgb-overlay";
         leds = <1>;
+        condition = <&preview_visible>;
         private_white: white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
     };
 };
@@ -65,7 +67,12 @@ SELECTORS = '''
     };
 };
 &kprgb { selector = <&selector_a>; };
-&fx_solid_v { no-overlays; };
+&rgb_conditions {
+    preview_visible: preview_visible {
+        compatible = "keypaw,rgb-condition-effect-selected";
+        selector = <&preview_selector>; effect = <&fx_solid>;
+    };
+};
 &kscan { events = <>; };
 '''
 
@@ -374,7 +381,7 @@ def stage42(root):
         print(f"PASS selected condition configuration {name}", flush=True)
     selected_runtime(root, "selected-runtime")
     selected_runtime(root, "selected-peripheral",
-                     '&selector_a { local; }; &selector_b { local; };', extra_conf=
+                     '&preview_selector { local; }; &selector_a { local; }; &selector_b { local; };', extra_conf=
                      "CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n")
     selected_runtime(root, "selected-zero", '''
 &rgb_matrix { /delete-property/ strip; mapping = <>; };

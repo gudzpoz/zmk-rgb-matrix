@@ -2,20 +2,18 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 """Production output debt, shared retry history and immutable scene tests."""
-from engine_harness import BEHAVIOR_SOURCE, run_tests
+from engine_harness import run_tests
 from test_engine_scheduler import TESTS as SCHEDULER_TESTS
-from test_singleton import function
 
 CASES = (
     "color-backoff", "latest-scene", "urgent-black", "coalesced-gates",
     "slow-failure", "boot-off", "boot-on", "boot-inhibited", "unready",
     "retry-lock", "requests", "healthy-mutation", "mutation-before-lock",
-    "urgent-black-success", "selection-backoff",
+    "urgent-black-success", "participation-backoff",
 )
 
-TESTS = (function(BEHAVIOR_SOURCE, "kp_rgb_select_effect")
-         + SCHEDULER_TESTS.split("static void flush_from_render(", 1)[0]) + r'''
-#define selected_runtime (kp_rgb_effect_scenes[1].state)
+TESTS = SCHEDULER_TESTS.split("static void flush_from_render(", 1)[0] + r'''
+#define selected_runtime (kp_rgb_overlay_scenes[1].state)
 static const struct kp_rgb_effect_config selected_config={.owner=&controller_dev,.slot=1};
 static unsigned selected_paints;
 static bool selected_render(const struct device *dev, const struct kp_rgb_frame *frame) {
@@ -149,13 +147,17 @@ int main(int argc, char **argv) {
         assert(writes==5 && rendered_elapsed==0);
         assert(host_transfers[4].at_ms==9);assert_pixels(4,93);assert_scene(93);
         assert_debt(KP_RGB_OUTPUT_NONE,0,100);
-    } else if (!strcmp(name,"selection-backoff")) {
-        host_effects[1]=&selected_fx;host_effect_count=2;
+    } else if (!strcmp(name,"participation-backoff")) {
+        struct host_overlay selected_data={.common={.index=1},.child=&selected_fx,.gate=false};
+        const struct device selected_overlay={.api=&host_child_api,.data=&selected_data};
+        host_overlays[1]=&selected_overlay;host_overlay_count=2;
         host_allow_color_failure=true;failures=1;
         host_run_until(7);zmk_rgb_matrix_flush();host_run_ready();
         assert_pixels(2,17);assert_debt(KP_RGB_OUTPUT_SCENE,107,200);
-        host_run_until(8);assert(kp_rgb_select_effect(1)==0);
-        assert(ctx.selector.active_fx==&selected_fx && ctx.selector.effect_index==1);
+        host_run_until(8);kp_rgb_matrix_lock();
+        host_bottom_data.gate=false;selected_data.gate=true;
+        zmk_rgb_matrix_flush();kp_rgb_matrix_unlock();
+        assert(selected_data.child==&selected_fx && selected_data.gate);
         assert_debt(KP_RGB_OUTPUT_SCENE,107,200);
         host_run_ready();assert(writes==3 && selected_paints==1);
         assert(!runtime.active && selected_runtime.active);assert_scene(127);
