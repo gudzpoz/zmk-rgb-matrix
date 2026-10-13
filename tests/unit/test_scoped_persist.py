@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Host tests for the production scoped RGB persistence codec and resolvers."""
+"""Host tests for the current scoped RGB persistence codecs and ID rules."""
 import os
 from pathlib import Path
 import shlex
@@ -30,18 +30,20 @@ static void test_wire_codecs(void) {
     struct kp_rgb_persist_selector_record sr = {0};
     assert(kp_rgb_persist_encode_selector("solid", &sr) == 0);
     assert(sr.version == 1 && !strcmp(sr.selected_id, "solid"));
-    assert(sizeof(sr) == 33);
-    assert(((const uint8_t *)&sr)[0] == 1);
+    assert(sizeof(sr) == 33 && ((const uint8_t *)&sr)[0] == 1);
     assert(!strcmp((const char *)&sr + 1, "solid"));
+    struct kp_rgb_persist_selector_record sd = {0};
+    assert(kp_rgb_persist_decode_selector(&sr, sizeof(sr), &sd) == 0);
+    assert(!strcmp(sd.selected_id, "solid"));
 
-    struct kp_rgb_persist_effect effect = {.duration_ms = 0x1234, .h = 0x0123, .s = 67, .reserved = 99};
+    struct kp_rgb_persist_effect effect = {.duration_ms = 0x1234, .h = 0x0123, .s = 67};
     struct kp_rgb_persist_parameters_record pr = {0};
     assert(kp_rgb_persist_encode_parameters(&effect, &pr) == 0);
     const uint8_t parameter_bytes[] = {1, 0x34, 0x12, 0x23, 0x01, 67};
     assert(sizeof(pr) == sizeof(parameter_bytes) && memcmp(&pr, parameter_bytes, sizeof(pr)) == 0);
     struct kp_rgb_persist_effect pd = {0};
     assert(kp_rgb_persist_decode_parameters(parameter_bytes, sizeof(parameter_bytes), &pd) == 0);
-    assert(pd.duration_ms == 0x1234 && pd.h == 0x0123 && pd.s == 67 && pd.reserved == 0);
+    assert(pd.duration_ms == 0x1234 && pd.h == 0x0123 && pd.s == 67);
 
     effect.h = 360;
     assert(kp_rgb_persist_encode_parameters(&effect, &pr) == 0);
@@ -74,7 +76,7 @@ static void test_invalid_records_and_legacy(void) {
     memset(bads + 1, 'a', 32); REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 33, s);
     REJECT_UNCHANGED(kp_rgb_persist_decode_selector, NULL, 33, s);
 
-    struct kp_rgb_persist_effect p = {.duration_ms = 123, .h = 45, .s = 67, .reserved = 88};
+    struct kp_rgb_persist_effect p = {.duration_ms = 123, .h = 45, .s = 67};
     uint8_t badp[] = {0, 1, 0, 2, 0, 3};
     REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 6, p);
     badp[0] = 1; badp[3] = 105; badp[4] = 1;
@@ -84,17 +86,15 @@ static void test_invalid_records_and_legacy(void) {
     REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 5, p);
     REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, NULL, 6, p);
 
-    struct kp_rgb_persist_blob old = {0};
-    old.version = KP_RGB_PERSIST_VERSION; old.user_on = 7; old.brightness = 50;
-    old.has_selected = 1; strcpy(old.selected_id, "legacy");
-    struct kp_rgb_persist_blob decoded = {0};
-    assert(kp_rgb_persist_decode_legacy(&old, sizeof(old), &decoded) == 0);
-    assert(decoded.user_on == 7 && decoded.has_selected == 1 && !strcmp(decoded.selected_id, "legacy"));
-    REJECT_UNCHANGED(kp_rgb_persist_decode_legacy, &old, sizeof(old) - 1, decoded);
-    struct kp_rgb_persist_effect old_effect = {.duration_ms = 400, .h = 360, .s = 80, .reserved = 0xa5};
-    struct kp_rgb_persist_effect old_out = {0};
-    assert(kp_rgb_persist_decode_legacy_effect(&old_effect, sizeof(old_effect), &old_out) == 0);
-    assert(old_out.h == 360 && old_out.reserved == 0xa5);
+    /* The former combined legacy blob is not a valid v3 global record. */
+    uint8_t raw_legacy_global[36] = {2, 1, 50, 1};
+    REJECT_UNCHANGED(kp_rgb_persist_decode_global, raw_legacy_global, sizeof(raw_legacy_global), g);
+    /* Unsupported selector versions and non-v1 parameter bytes are rejected. */
+    uint8_t raw_legacy_selector[33] = {2};
+    REJECT_UNCHANGED(kp_rgb_persist_decode_selector, raw_legacy_selector, sizeof(raw_legacy_selector), s);
+    uint8_t raw_legacy_parameters[] = {0x90, 0x01, 0x68, 0x01, 80, 0xa5};
+    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, raw_legacy_parameters,
+                     sizeof(raw_legacy_parameters), p);
 }
 
 static void test_ids(void) {
@@ -102,16 +102,15 @@ static void test_ids(void) {
     char id32[33]; memset(id32, 'x', 32); id32[32] = 0;
     assert(kp_rgb_persist_id_valid(id31) && !kp_rgb_persist_id_valid(id32));
     assert(!kp_rgb_persist_id_valid(NULL) && !kp_rgb_persist_id_valid(""));
-    assert(!kp_rgb_persist_id_valid("a/b") && !kp_rgb_persist_id_valid("a=b"));
+    assert(!kp_rgb_persist_id_valid("a/b") && !kp_rgb_persist_id_valid("a="));
     assert(!kp_rgb_persist_id_valid("a b") && !kp_rgb_persist_id_valid("a\t"));
     const char nonascii[] = {(char)0xc3, (char)0xa9, 0};
     assert(!kp_rgb_persist_id_valid(nonascii));
 
     const struct kp_rgb_persist_effect_id a[] = {{"same", true}, {NULL, true}, {"other", false}};
     const struct kp_rgb_persist_effect_id b[] = {{"same", false}};
-    const struct kp_rgb_persist_selector_ids selectors[] = {
-        {"selA", a, 3}, {"selB", b, 1}};
-    assert(kp_rgb_persist_validate_ids(selectors, 2) == 0); /* member IDs may cross selectors */
+    const struct kp_rgb_persist_selector_ids selectors[] = {{"selA", a, 3}, {"selB", b, 1}};
+    assert(kp_rgb_persist_validate_ids(selectors, 2) == 0);
     const struct kp_rgb_persist_selector_ids duplicate_selector[] = {{"x", NULL, 0}, {"x", NULL, 0}};
     assert(kp_rgb_persist_validate_ids(duplicate_selector, 2) == -EEXIST);
     const struct kp_rgb_persist_effect_id duplicate_members[] = {{"x", false}, {"x", false}};
@@ -138,91 +137,11 @@ static void test_ids(void) {
     assert(kp_rgb_persist_validate_ids(oversized_selector, 1) == -ENAMETOOLONG);
 }
 
-static void test_resolvers(void) {
-    const struct kp_rgb_persist_global_state defaults = {false, 11}, scoped_global = {true, 72};
-    struct kp_rgb_persist_global_state out_global = {0};
-    struct kp_rgb_persist_blob legacy = {0}; legacy.user_on = 1; legacy.brightness = 44;
-    assert(!kp_rgb_persist_resolve_global(&defaults, &legacy, &scoped_global, &out_global));
-    assert(out_global.user_on && out_global.brightness == 72);
-    assert(kp_rgb_persist_resolve_global(&defaults, &legacy, NULL, &out_global));
-    assert(out_global.user_on && out_global.brightness == 44);
-    assert(!kp_rgb_persist_resolve_global(&defaults, NULL, NULL, &out_global));
-    assert(!out_global.user_on && out_global.brightness == 11);
-
-    const struct kp_rgb_persist_effect_id members[] = {{"first", true}, {NULL, false}, {"second", true}};
-    struct kp_rgb_persist_selector_record selected = {0}, stored = {0};
-    legacy.has_selected = 1; strcpy(legacy.selected_id, "second");
-    assert(kp_rgb_persist_resolve_selector("first", &legacy, false, NULL, members, 3, &selected) == false);
-    assert(!strcmp(selected.selected_id, "first")); /* alias is explicit */
-    assert(kp_rgb_persist_resolve_selector("first", &legacy, true, NULL, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "second"));
-    assert(!kp_rgb_persist_encode_selector("first", &stored));
-    assert(!kp_rgb_persist_resolve_selector("second", &legacy, true, &stored, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "first")); /* scoped wins regardless of legacy */
-    strcpy(stored.selected_id, "gone");
-    assert(!kp_rgb_persist_resolve_selector("first", &legacy, true, &stored, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "first")); /* invalid scoped selection doesn't fall back */
-    strcpy(legacy.selected_id, "gone");
-    assert(!kp_rgb_persist_resolve_selector("first", &legacy, true, NULL, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "first"));
-    strcpy(legacy.selected_id, "disabled");
-    assert(!kp_rgb_persist_resolve_selector("first", &legacy, true, NULL, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "first"));
-
-    struct kp_rgb_persist_effect defaults_p = {.duration_ms = 100, .h = 360, .s = 30, .reserved = 9};
-    struct kp_rgb_persist_effect legacy_p = {.duration_ms = 200, .h = 50, .s = 60, .reserved = 8};
-    struct kp_rgb_persist_effect scoped_p = {.duration_ms = 300, .h = 70, .s = 80, .reserved = 7};
-    struct kp_rgb_persist_effect out_p;
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, NULL, false, true, &out_p));
-    assert(out_p.duration_ms == 100 && out_p.h == 0 && out_p.reserved == 0);
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, NULL, true, false, &out_p));
-    assert(out_p.duration_ms == 100); /* non-opted-in parameter ignores legacy */
-    assert(kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, NULL, true, true, &out_p));
-    assert(out_p.duration_ms == 200 && out_p.h == 50);
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, &scoped_p, true, true, &out_p));
-    assert(out_p.duration_ms == 300 && out_p.h == 70); /* scoped takes precedence */
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, NULL, NULL, true, true, &out_p));
-    assert(out_p.duration_ms == 100);
-
-    /* Stable IDs, not array position, preserve a selection across member reordering. */
-    const struct kp_rgb_persist_effect_id reordered[] = {{"second", true}, {"first", true}};
-    assert(!kp_rgb_persist_resolve_selector("second", NULL, false, &stored, reordered, 2, &selected));
-    strcpy(stored.selected_id, "first");
-    assert(!kp_rgb_persist_resolve_selector("second", NULL, false, &stored, reordered, 2, &selected));
-    assert(!strcmp(selected.selected_id, "first"));
-
-    /* Independent selectors and parameter records resolve independently. */
-    struct kp_rgb_persist_selector_record first_sel, second_sel;
-    assert(kp_rgb_persist_encode_selector("first", &stored) == 0);
-    assert(!kp_rgb_persist_resolve_selector("second", NULL, false, &stored, members, 3, &first_sel));
-    assert(kp_rgb_persist_encode_selector("second", &stored) == 0);
-    assert(!kp_rgb_persist_resolve_selector("first", NULL, false, &stored, members, 3, &second_sel));
-    assert(!strcmp(first_sel.selected_id, "first") && !strcmp(second_sel.selected_id, "second"));
-    struct kp_rgb_persist_effect p1 = {.duration_ms = 111, .h = 1, .s = 2};
-    struct kp_rgb_persist_effect p2 = {.duration_ms = 222, .h = 3, .s = 4};
-    struct kp_rgb_persist_effect o1, o2;
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, NULL, &p1, false, true, &o1));
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, NULL, &p2, false, true, &o2));
-    assert(o1.duration_ms == 111 && o2.duration_ms == 222);
-
-    /* Applying migration repeatedly to decoded legacy data is idempotent. */
-    assert(kp_rgb_persist_resolve_selector("first", &legacy, true, NULL, members, 3, &selected) == false);
-    legacy.has_selected = 1; strcpy(legacy.selected_id, "second");
-    assert(kp_rgb_persist_resolve_selector("first", &legacy, true, NULL, members, 3, &selected));
-    assert(kp_rgb_persist_encode_selector(selected.selected_id, &stored) == 0);
-    assert(!kp_rgb_persist_resolve_selector("first", &legacy, true, &stored, members, 3, &selected));
-    assert(!strcmp(selected.selected_id, "second"));
-    assert(kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, NULL, true, true, &out_p));
-    assert(kp_rgb_persist_encode_parameters(&out_p, &(struct kp_rgb_persist_parameters_record){0}) == 0);
-    assert(!kp_rgb_persist_resolve_parameters(&defaults_p, &legacy_p, &legacy_p, true, true, &out_p));
-}
-
 int main(void) {
     test_wire_codecs();
     test_invalid_records_and_legacy();
     test_ids();
-    test_resolvers();
-    puts("scoped persistence codec/resolvers passed");
+    puts("scoped persistence codecs and IDs passed");
     return 0;
 }
 '''

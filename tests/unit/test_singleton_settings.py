@@ -82,7 +82,6 @@ static void kp_rgb_selector_overlays_defaults_locked(void) { assert(held); }
 static bool device_is_ready(const struct device *dev) { return dev != NULL; }
 static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) { return dev->data; }
 static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct device *dev) { return dev->config; }
-static const struct device *kp_rgb_selector_alias(void) { return NULL; }
 static size_t kp_rgb_persist_selector_count(void) { return 0; }
 static int kp_rgb_persist_ids_validate(void) { return 0; }
 static const struct kp_rgb_persist_selector_ids *kp_rgb_persist_selector_at(size_t i,const struct device **owner) { (void)i; (void)owner; return NULL; }
@@ -112,7 +111,7 @@ struct op { char path[65]; bool deletion; int result; };
 static struct stored values[32];
 static struct op journal[256];
 static unsigned journal_len, reads, saves, deletes, fail_count;
-static bool fail_delete;
+static void (*save_hook)(void);
 static const char *fail_path;
 static struct stored *lookup(const char *path) {
     for(size_t i=0;i<32;i++) if(values[i].len && !strcmp(values[i].path,path)) return &values[i];
@@ -125,136 +124,112 @@ static void put(const char *path,const void *bytes,size_t len) {
 }
 static int record_io(const char *path,bool deletion) {
     assert(!held && journal_len<256); int rc=0;
-    if(fail_count && fail_delete==deletion && !strcmp(path,fail_path)) {fail_count--;rc=-EIO;}
+    if(fail_count && !strcmp(path,fail_path)) {fail_count--;rc=-EIO;}
     struct op *op=&journal[journal_len++];strcpy(op->path,path);op->deletion=deletion;op->result=rc;
+    if(save_hook) {void (*hook)(void)=save_hook;save_hook=NULL;hook();assert(!held);}
     return rc;
 }
 static int settings_save_one(const char *path,const void *data,size_t len) {
     saves++; int rc=record_io(path,false); if(!rc) put(path,data,len); return rc;
 }
-static int settings_delete(const char *path) {
-    deletes++; int rc=record_io(path,true); if(rc) return rc;
-    struct stored *v=lookup(path); if(!v) return -ENOENT; v->len=0; return 0;
-}
-static int settings_read_cb_impl(void *arg,void *out,size_t len) { reads++;memcpy(out,arg,len);return (int)len; }
+static int settings_read_cb_impl(void *arg,void *out,size_t len) { assert(!held);reads++;memcpy(out,arg,len);return (int)len; }
 static int short_read(void *arg,void *out,size_t len) { assert(!held);memcpy(out,arg,len-1);return (int)len-1; }
 static int failed_read(void *arg,void *out,size_t len) { (void)arg;(void)out;(void)len;assert(!held);return -EIO; }
-static int settings_load_subtree_direct(const char *prefix,
-        int (*cb)(const char *,size_t,settings_read_cb,void *,void *),void *arg) {
-    assert(!held); size_t n=strlen(prefix);
-    for(size_t i=0;i<32;i++) if(values[i].len && !strncmp(values[i].path,prefix,n) && values[i].path[n]=='/') {
-        int rc=cb(values[i].path+n+1,values[i].len,settings_read_cb_impl,values[i].bytes,arg);
-        if(rc) return rc;
-    }
-    return 0;
-}
 static void run_work(void) { assert(pending && !held); struct k_work_delayable *w=pending;pending=NULL;w->work.handler(&w->work); }
 '''
 
 ENABLED_TESTS = r'''
-int main(void) {
-    kp_rgb_global.initial_on=true; kp_rgb_global.initial_brightness=70;
-    assert(kp_rgb_apply_defaults()==0 && !held && kp_rgb_global.user_on && kp_rgb_global.brightness==70);
-    assert(!strcmp(registered_subtree,"keypaw/rgb_matrix"));
-
-    /* A new global record takes precedence over a legacy blob in either load order. */
-    struct kp_rgb_persist_blob legacy; kp_rgb_persist_pack(false,33,"retained-id",&legacy);
-    struct kp_rgb_persist_global_state wanted={true,88};
-    struct kp_rgb_persist_global_record current;
-    assert(kp_rgb_persist_encode_global(&wanted,&current)==0);
-    assert(load("state",&legacy,sizeof(legacy))==0);
-    assert(load("state",&current,sizeof(current))==0);
+#define GLOBAL "keypaw/rgb_matrix/state"
+static const unsigned char legacy[36]={2,0,33,1,'r','e','t','a','i','n','e','d'};
+static const unsigned char legacy_parameters[8]={100,0,90,0,32,3,0,0};
+static void boot(void) {
+    assert(!held);pending=NULL;kp_global_pending=kp_global_dirty=false;kp_global_revision=0;
+    memset(&kp_global_load,0,sizeof(kp_global_load));
+    kp_rgb_global.initial_on=true;kp_rgb_global.initial_brightness=70;
+    assert(kp_rgb_apply_defaults()==0);
+}
+static void clean_boot(void) {memset(values,0,sizeof(values));journal_len=reads=saves=deletes=fail_count=0;save_hook=NULL;boot();}
+static void assert_saved(bool on,unsigned brightness) {
+    struct stored *v=lookup(GLOBAL);struct kp_rgb_persist_global_state g;
+    assert(v && v->len==4 && kp_rgb_persist_decode_global(v->bytes,v->len,&g)==0);
+    assert(g.user_on==on && g.brightness==brightness);
+}
+static void change_during_save(void) {
+    assert(!held);kp_rgb_matrix_lock();kp_rgb_global.brightness=45;kp_rgb_matrix_unlock();
+    assert(kp_rgb_save_state()==0);
+}
+static void reset_during_save(void) {assert(!held);kp_rgb_reset_state();}
+static void rejection(bool current_first) {
+    clean_boot();struct kp_rgb_persist_global_state g={false,88};struct kp_rgb_persist_global_record gr;
+    assert(kp_rgb_persist_encode_global(&g,&gr)==0);
+    if(current_first) assert(load("state",&gr,sizeof(gr))==0);
+    unsigned before=reads,locks=lock_entries;
+    assert(load("state",legacy,sizeof(legacy))==-EINVAL);
+    assert(registered_set("state",sizeof(legacy),failed_read,(void *)legacy)==-EINVAL);
+    assert(load("state/effects/any-effect",legacy_parameters,sizeof(legacy_parameters))==0);
+    assert(registered_set("state/effects/any-effect",SIZE_MAX,failed_read,NULL)==0);
+    assert(registered_set("unknown",SIZE_MAX,failed_read,NULL)==0);
+    assert(reads==before && lock_entries==locks && !pending && !journal_len);
     assert(kp_rgb_global.user_on && kp_rgb_global.brightness==70);
-    assert(registered_commit()==0);
-    assert(kp_rgb_global.user_on && kp_rgb_global.brightness==88 && reconciled_user_on);
-    assert(pending==NULL && !kp_global_dirty);
-    struct kp_rgb_persist_blob reverse_legacy; kp_rgb_persist_pack(true,22,"reverse-id",&reverse_legacy);
-    struct kp_rgb_persist_global_state reverse_state={false,66};
-    struct kp_rgb_persist_global_record reverse_current;
-    assert(kp_rgb_persist_encode_global(&reverse_state,&reverse_current)==0);
-    assert(load("state",&reverse_current,sizeof(reverse_current))==0);
-    assert(load("state",&reverse_legacy,sizeof(reverse_legacy))==0);
-    assert(registered_commit()==0 && !kp_rgb_global.user_on && kp_rgb_global.brightness==66);
-
-    /* Legacy state migrates global intent/brightness, but never a live selection. */
-    memset(values,0,sizeof(values)); journal_len=reads=saves=deletes=0;
-    kp_rgb_global.user_on=true;kp_rgb_global.brightness=70;
-    kp_legacy_valid=kp_legacy_pending=kp_global_pending=kp_global_seen=false;
-    kp_global_dirty=kp_global_reset=false;
-    assert(load("state",&legacy,sizeof(legacy))==0);
-    assert(registered_commit()==0 && !kp_rgb_global.user_on && kp_rgb_global.brightness==33);
-    assert(pending && kp_global_dirty);
-    fail_path=NULL; run_work(); assert(!pending && !kp_global_dirty);
-    struct stored *global=lookup("keypaw/rgb_matrix/state");
-    struct kp_rgb_persist_blob retained;
-    assert(global && global->len==sizeof(retained));
-    assert(kp_rgb_persist_decode_legacy(global->bytes,global->len,&retained)==0);
-    assert(!retained.user_on && retained.brightness==33 && retained.has_selected && !strcmp(retained.selected_id,"retained-id"));
-
-    /* Legacy parameter paths are ignored without reading effect state. */
-    unsigned reads_before=reads;
-    struct kp_rgb_persist_effect old_params={.duration_ms=800,.h=100,.s=90};
-    assert(load("state/effects/any-effect",&old_params,sizeof(old_params))==0);
-    assert(reads==reads_before && registered_commit()==0 && !pending);
-    assert(load("state/effects/any-effect",&old_params,sizeof(old_params)-1)==0 && reads==reads_before);
-
-    /* A failed migrated write retains the old blob and retries safely. */
-    memset(values,0,sizeof(values));journal_len=0;kp_global_seen=false;
-    put("keypaw/rgb_matrix/state",&legacy,sizeof(legacy));
-    assert(load("state",&legacy,sizeof(legacy))==0 && registered_commit()==0 && pending);
-    fail_path="keypaw/rgb_matrix/state";fail_delete=false;fail_count=1;
-    run_work(); assert(pending && scheduled_delay==1000 && kp_global_dirty);
-    global=lookup("keypaw/rgb_matrix/state");assert(global && global->len==sizeof(legacy));
-    run_work(); assert(!pending && !kp_global_dirty);
-    global=lookup("keypaw/rgb_matrix/state");assert(global && global->len==sizeof(legacy));
-    assert(kp_rgb_persist_decode_legacy(global->bytes,global->len,&retained)==0 && !strcmp(retained.selected_id,"retained-id"));
-
-    /* Reset writes durable defaults before purging each legacy parameter key. */
-    memset(values,0,sizeof(values));journal_len=0;fail_count=0;fail_path=NULL;
-    kp_rgb_persist_pack(false,21,"old-selection",&legacy);
-    put("keypaw/rgb_matrix/state",&legacy,sizeof(legacy));
-    put("keypaw/rgb_matrix/state/effects/a",&old_params,sizeof(old_params));
-    old_params.h=200;
-    put("keypaw/rgb_matrix/state/effects/b",&old_params,sizeof(old_params));
-    unsigned reset_before=resets;
-    kp_rgb_reset_state(); assert(pending && scheduled_delay==0 && resets==reset_before+1);
-    fail_path="keypaw/rgb_matrix/state/effects/a";fail_delete=true;fail_count=1;
-    run_work(); assert(pending && scheduled_delay==1000 && kp_global_dirty);
-    assert(journal_len>=2 && !journal[0].deletion && !strcmp(journal[0].path,"keypaw/rgb_matrix/state"));
-    bool saw_delete=false;
-    for(unsigned i=1;i<journal_len;i++) if(journal[i].deletion) saw_delete=true;
-    assert(saw_delete);
-    global=lookup("keypaw/rgb_matrix/state");
-    struct kp_rgb_persist_global_state reset_state;
-    assert(global && global->len==sizeof(struct kp_rgb_persist_global_record));
-    assert(kp_rgb_persist_decode_global(global->bytes,global->len,&reset_state)==0);
-    assert(reset_state.user_on && reset_state.brightness==70);
-    run_work(); assert(!pending && !kp_global_dirty && !lookup("keypaw/rgb_matrix/state/effects/a") && !lookup("keypaw/rgb_matrix/state/effects/b"));
-    unsigned first_save=UINT32_MAX, first_delete=UINT32_MAX, deleted_count=0;
-    for(unsigned i=0;i<journal_len;i++) {
-        if(!journal[i].deletion && !strcmp(journal[i].path,"keypaw/rgb_matrix/state") && first_save==UINT32_MAX) first_save=i;
-        if(journal[i].deletion) { if(first_delete==UINT32_MAX) first_delete=i; deleted_count++; }
-    }
-    assert(deleted_count>=2 && first_save<first_delete);
-
-    /* Legacy state with no selected ID migrates to the v3 global format. */
-    memset(values,0,sizeof(values));journal_len=0;fail_count=0;kp_global_seen=false;
-    kp_rgb_persist_pack(true,39,NULL,&legacy);
-    assert(load("state",&legacy,sizeof(legacy))==0 && registered_commit()==0 && pending);
-    run_work(); assert(!pending);
-    global=lookup("keypaw/rgb_matrix/state");
-    struct kp_rgb_persist_global_state converted;
-    assert(global && global->len==sizeof(struct kp_rgb_persist_global_record));
-    assert(kp_rgb_persist_decode_global(global->bytes,global->len,&converted)==0);
-    assert(converted.user_on && converted.brightness==39);
-
-    /* Malformed legacy global reads are rejected; unknown subtree keys are untouched. */
-    unsigned read_count=reads;
-    assert(registered_set("state",sizeof(legacy),short_read,&legacy)==-EINVAL);
-    assert(registered_set("state",sizeof(legacy),failed_read,&legacy)==-EIO);
-    assert(registered_set("unknown",sizeof(legacy),settings_read_cb_impl,&legacy)==0 && reads==read_count);
-    puts("selector-free global settings migration, retention, reset, purge and retry passed");
-    return 0;
+    if(!current_first) assert(load("state",&gr,sizeof(gr))==0);
+    assert(registered_commit()==0 && !kp_rgb_global.user_on && kp_rgb_global.brightness==88 && !reconciled_user_on);
+    assert(registered_commit()==0 && !pending && !kp_global_dirty && !journal_len);
+}
+static void validation(void) {
+    clean_boot();struct kp_rgb_persist_global_state g={false,66};struct kp_rgb_persist_global_record gr;
+    assert(kp_rgb_persist_encode_global(&g,&gr)==0);
+    assert(load("state",&gr,sizeof(gr))==0);
+    struct kp_rgb_persist_global_record bad=gr;bad.version=2;
+    assert(load("state",&bad,sizeof(bad))==-EINVAL);
+    bad=gr;bad.user_on=2;assert(load("state",&bad,sizeof(bad))==-EINVAL);
+    bad=gr;bad.brightness=101;assert(load("state",&bad,sizeof(bad))==-EINVAL);
+    bad=gr;bad.reserved=1;assert(load("state",&bad,sizeof(bad))==-EINVAL);
+    assert(load("state",&gr,3)==-EINVAL);
+    assert(registered_set("state",4,short_read,&gr)==-EINVAL);
+    assert(registered_set("state",4,failed_read,&gr)==-EIO);
+    assert(registered_commit()==0 && !kp_rgb_global.user_on && kp_rgb_global.brightness==66 && !pending);
+}
+static void saves_and_reset(void) {
+    clean_boot();put(GLOBAL,legacy,sizeof(legacy));
+    put("keypaw/rgb_matrix/state/effects/a",legacy_parameters,sizeof(legacy_parameters));
+    assert(load("state",legacy,sizeof(legacy))==-EINVAL);
+    assert(registered_commit()==0 && !pending && !journal_len);
+    kp_rgb_global.user_on=false;kp_rgb_global.brightness=21;
+    assert(kp_rgb_save_state()==0 && pending && scheduled_delay==100);
+    kp_rgb_global.brightness=22;assert(kp_rgb_save_state()==0 && scheduled_delay==100);
+    fail_path=GLOBAL;fail_count=1;run_work();
+    assert(pending && scheduled_delay==1000 && kp_global_dirty && lookup(GLOBAL)->len==36);
+    run_work();assert(!pending && !kp_global_dirty);assert_saved(false,22);
+    struct kp_rgb_persist_global_state staged={false,39};struct kp_rgb_persist_global_record gr;
+    assert(kp_rgb_persist_encode_global(&staged,&gr)==0 && load("state",&gr,sizeof(gr))==0);
+    unsigned before=resets;kp_rgb_reset_state();
+    assert(resets==before+1 && pending && scheduled_delay==0 && !kp_global_pending);
+    assert(registered_commit()==0 && kp_rgb_global.user_on && kp_rgb_global.brightness==70);
+    fail_count=1;run_work();assert(pending && scheduled_delay==1000 && kp_global_dirty);
+    run_work();assert(!pending && !kp_global_dirty);assert_saved(true,70);
+    assert(lookup("keypaw/rgb_matrix/state/effects/a")->len==8 && !deletes);
+    for(unsigned i=0;i<journal_len;i++) assert(!journal[i].deletion && !strcmp(journal[i].path,GLOBAL));
+    boot();struct stored *v=lookup(GLOBAL);assert(load("state",v->bytes,v->len)==0);
+    assert(registered_commit()==0 && kp_rgb_global.user_on && kp_rgb_global.brightness==70 && !pending);
+}
+static void interleavings(void) {
+    clean_boot();kp_rgb_global.brightness=12;save_hook=change_during_save;
+    assert(kp_rgb_save_state()==0);run_work();assert_saved(true,12);
+    assert(pending && scheduled_delay==1000 && kp_global_dirty && kp_rgb_global.brightness==45);
+    run_work();assert(!pending && !kp_global_dirty);assert_saved(true,45);
+    kp_rgb_global.user_on=false;kp_rgb_global.brightness=18;save_hook=reset_during_save;
+    assert(kp_rgb_save_state()==0);run_work();assert_saved(false,18);
+    assert(pending && kp_global_dirty && kp_rgb_global.user_on && kp_rgb_global.brightness==70);
+    run_work();assert(!pending && !kp_global_dirty);assert_saved(true,70);
+    kp_rgb_global.brightness=11;save_hook=change_during_save;fail_path=GLOBAL;fail_count=1;
+    assert(kp_rgb_save_state()==0);run_work();assert_saved(true,70);
+    assert(pending && kp_global_dirty);run_work();assert_saved(true,45);assert(!pending && !kp_global_dirty);
+}
+int main(void) {
+    assert(!strcmp(registered_subtree,"keypaw/rgb_matrix"));
+    assert(sizeof(struct kp_rgb_persist_global_record)==4);
+    rejection(false);rejection(true);validation();saves_and_reset();interleavings();
+    puts("selector-free current global settings rejection/reset/revision retries passed");return 0;
 }
 '''
 

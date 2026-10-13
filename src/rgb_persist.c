@@ -15,16 +15,6 @@
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_persist.h>
 
-#define KP_RGB_PERSIST_EFFECT_PATH_LEN                                         \
-  (sizeof("keypaw/rgb_matrix/state/effects/") - 1)
-
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_blob) <= SETTINGS_MAX_VAL_LEN,
-             "the persisted global record exceeds SETTINGS_MAX_VAL_LEN");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_effect) <= SETTINGS_MAX_VAL_LEN,
-             "the persisted effect record exceeds SETTINGS_MAX_VAL_LEN");
-BUILD_ASSERT(KP_RGB_PERSIST_EFFECT_PATH_LEN + KP_RGB_PERSIST_MAX_ID_LENGTH <=
-                 SETTINGS_MAX_NAME_LEN,
-             "the persisted effect settings key exceeds SETTINGS_MAX_NAME_LEN");
 BUILD_ASSERT(sizeof(struct kp_rgb_persist_global_record) == 4,
              "global settings wire size changed");
 BUILD_ASSERT(sizeof(struct kp_rgb_persist_selector_record) == 33,
@@ -40,13 +30,6 @@ BUILD_ASSERT(sizeof(KP_RGB_PERSIST_SELECTOR_PREFIX) - 1 +
                  SETTINGS_MAX_NAME_LEN,
              "selector settings key exceeds SETTINGS_MAX_NAME_LEN");
 
-bool kp_rgb_persist_size_ok(size_t len) {
-  return len == sizeof(struct kp_rgb_persist_blob);
-}
-
-bool kp_rgb_persist_version_ok(uint8_t version) {
-  return version == KP_RGB_PERSIST_VERSION;
-}
 
 bool kp_rgb_persist_effect_valid(const struct kp_rgb_persist_effect *effect) {
   return effect != NULL && effect->h <= KP_RGB_HUE_MAX &&
@@ -59,18 +42,6 @@ uint16_t kp_rgb_persist_clamp_duration(uint16_t duration_ms, uint16_t min_ms,
                          (int32_t)max_ms);
 }
 
-void kp_rgb_persist_pack(bool user_on, uint8_t brightness,
-                         const char *selected_id,
-                         struct kp_rgb_persist_blob *out) {
-  memset(out, 0, sizeof(*out));
-  out->version = KP_RGB_PERSIST_VERSION;
-  out->user_on = user_on;
-  out->brightness = MIN(brightness, (uint8_t)KP_RGB_BRT_MAX);
-  if (selected_id != NULL && selected_id[0] != '\0') {
-    out->has_selected = 1;
-    strncpy(out->selected_id, selected_id, sizeof(out->selected_id) - 1);
-  }
-}
 
 bool kp_rgb_persist_id_valid(const char *id) {
   if (id == NULL || id[0] == '\0')
@@ -122,31 +93,6 @@ int kp_rgb_persist_validate_ids(
   return 0;
 }
 
-int kp_rgb_persist_decode_legacy(const void *bytes, size_t len,
-                                 struct kp_rgb_persist_blob *out) {
-  if (bytes == NULL || out == NULL || !kp_rgb_persist_size_ok(len))
-    return -EINVAL;
-  struct kp_rgb_persist_blob record;
-  memcpy(&record, bytes, sizeof(record));
-  if (!kp_rgb_persist_version_ok(record.version) || record.has_selected > 1 ||
-      record.selected_id[sizeof(record.selected_id) - 1] != '\0' ||
-      record.brightness > KP_RGB_BRT_MAX)
-    return -EINVAL;
-  *out = record;
-  return 0;
-}
-
-int kp_rgb_persist_decode_legacy_effect(const void *bytes, size_t len,
-                                        struct kp_rgb_persist_effect *out) {
-  if (bytes == NULL || out == NULL || len != sizeof(*out))
-    return -EINVAL;
-  struct kp_rgb_persist_effect record;
-  memcpy(&record, bytes, sizeof(record));
-  if (!kp_rgb_persist_effect_valid(&record))
-    return -EINVAL;
-  *out = record;
-  return 0;
-}
 
 int kp_rgb_persist_encode_global(
     const struct kp_rgb_persist_global_state *state,
@@ -235,71 +181,4 @@ int kp_rgb_persist_decode_parameters(const void *bytes, size_t len,
     state.h = 0;
   *out = state;
   return 0;
-}
-
-bool kp_rgb_persist_resolve_global(
-    const struct kp_rgb_persist_global_state *defaults,
-    const struct kp_rgb_persist_blob *legacy,
-    const struct kp_rgb_persist_global_state *scoped,
-    struct kp_rgb_persist_global_state *out) {
-  if (scoped != NULL) {
-    *out = *scoped;
-    return false;
-  }
-  if (legacy != NULL) {
-    *out = (struct kp_rgb_persist_global_state){
-        .user_on = legacy->user_on != 0, .brightness = legacy->brightness};
-    return true;
-  }
-  *out = *defaults;
-  return false;
-}
-
-static bool
-kp_rgb_persist_has_member(const char *id,
-                          const struct kp_rgb_persist_effect_id *members,
-                          size_t count) {
-  for (size_t i = 0; i < count; i++) {
-    if (members[i].id != NULL && strcmp(id, members[i].id) == 0)
-      return true;
-  }
-  return false;
-}
-
-bool kp_rgb_persist_resolve_selector(
-    const char *default_id, const struct kp_rgb_persist_blob *legacy,
-    bool alias, const struct kp_rgb_persist_selector_record *scoped,
-    const struct kp_rgb_persist_effect_id *members, size_t count,
-    struct kp_rgb_persist_selector_record *out) {
-  const char *selected = default_id;
-  bool imported = false;
-  if (scoped != NULL) {
-    if (kp_rgb_persist_has_member(scoped->selected_id, members, count))
-      selected = scoped->selected_id;
-  } else if (alias && legacy != NULL && legacy->has_selected &&
-             kp_rgb_persist_has_member(legacy->selected_id, members, count)) {
-    selected = legacy->selected_id;
-    imported = true;
-  }
-  (void)kp_rgb_persist_encode_selector(selected, out);
-  return imported;
-}
-
-bool kp_rgb_persist_resolve_parameters(
-    const struct kp_rgb_persist_effect *defaults,
-    const struct kp_rgb_persist_effect *legacy,
-    const struct kp_rgb_persist_effect *scoped, bool alias,
-    bool persist_parameters, struct kp_rgb_persist_effect *out) {
-  bool imported =
-      persist_parameters && scoped == NULL && alias && legacy != NULL;
-  struct kp_rgb_persist_effect state = *defaults;
-  if (persist_parameters && scoped != NULL)
-    state = *scoped;
-  else if (imported)
-    state = *legacy;
-  state.reserved = 0;
-  if (state.h == KP_RGB_HUE_MAX)
-    state.h = 0;
-  *out = state;
-  return imported;
 }

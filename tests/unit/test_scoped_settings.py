@@ -53,7 +53,8 @@ PRELUDE = r'''
 #define IS_ENABLED(x) (x)
 #define DT_DRV_INST(i) (i)
 #define DT_INST(i,c) (i)
-#define DT_CHILD_NUM_STATUS_OKAY(n) 3
+#define DT_FOREACH_CHILD_STATUS_OKAY(n,fn) fn(0) fn(1) fn(2)
+#define DT_NODE_HAS_PROP(n,p) ((n)<2)
 #define DT_NUM_INST_STATUS_OKAY(c) 2
 #define DT_INST_FOREACH_STATUS_OKAY(fn) fn(0) fn(1)
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -127,27 +128,18 @@ struct operation { char path[65]; bool deletion; int result; };
 static struct operation journal[256];
 static unsigned journal_count,reads;
 static const char *fail_path,*hook_path;
-static bool fail_delete,immutable_snapshot;
 static unsigned fail_count;
 static void (*save_hook)(void);
-static struct entry direct_snapshot[32];
 static struct entry *lookup(const char *path) { for(size_t i=0;i<32;i++) if(store[i].len && !strcmp(store[i].path,path)) return &store[i]; return NULL; }
 static void put(const char *path,const void *bytes,size_t len) { struct entry *e=lookup(path);if(!e)for(size_t i=0;i<32;i++)if(!store[i].len){e=&store[i];break;}assert(e&&len<=sizeof(e->bytes));strcpy(e->path,path);memcpy(e->bytes,bytes,len);e->len=len; }
 static int io(const char *path,bool deletion) {
     assert(!held&&journal_count<256);int rc=0;
-    if(fail_count&&deletion==fail_delete&&fail_path&&!strcmp(path,fail_path)){if(fail_count!=UINT_MAX)fail_count--;rc=-EIO;}
+    if(fail_count&&fail_path&&!strcmp(path,fail_path)){if(fail_count!=UINT_MAX)fail_count--;rc=-EIO;}
     struct operation *op=&journal[journal_count++];strcpy(op->path,path);op->deletion=deletion;op->result=rc;
     if(save_hook&&!deletion&&hook_path&&!strcmp(path,hook_path)){void(*hook)(void)=save_hook;save_hook=NULL;hook();assert(!held);}
     return rc;
 }
 static int settings_save_one(const char *path,const void *bytes,size_t len) { int rc=io(path,false);if(!rc)put(path,bytes,len);return rc; }
-static int settings_delete(const char *path) { int rc=io(path,true);if(rc)return rc;struct entry *e=lookup(path);if(!e)return -ENOENT;e->len=0;return 0; }
-static int read_blob(void *arg,void *out,size_t len);
-static int settings_load_subtree_direct(const char *prefix,int(*cb)(const char*,size_t,settings_read_cb,void*,void*),void *arg) {
-    assert(!held);size_t n=strlen(prefix);struct entry *source=immutable_snapshot?direct_snapshot:store;
-    for(size_t i=0;i<32;i++)if(source[i].len&&!strncmp(source[i].path,prefix,n)&&source[i].path[n]=='/'){int rc=cb(source[i].path+n+1,source[i].len,read_blob,source[i].bytes,arg);if(rc)return rc;}
-    return 0;
-}
 static int read_blob(void *arg,void *out,size_t len) { assert(!held);reads++;memcpy(out,arg,len);return (int)len; }
 static int short_read(void *arg,void *out,size_t len) { assert(!held);memcpy(out,arg,len-1);return (int)len-1; }
 static int failed_read(void *arg,void *out,size_t len) { (void)arg;(void)out;(void)len;assert(!held);return -EIO; }
@@ -172,14 +164,13 @@ static struct kp_rgb_selector selectors[2];
 static const struct kp_rgb_persist_effect_id ids_members[3]={{"shared",true},{"other",true},{"optout",false}};
 static struct kp_rgb_persist_selector_ids ids[2]={{"one",ids_members,3},{"two",ids_members,3}};
 static unsigned owner_order[2]={0,1}, member_order[3]={0,1,2};
-static bool has_alias=true, prepared=true;
+static bool prepared=true;
 static size_t kp_rgb_persist_selector_count(void) {return 2;}
 static const struct kp_rgb_persist_selector_ids *kp_rgb_persist_selector_at(size_t i,const struct device **owner) {
     assert(i<2);if(owner)*owner=&owners[owner_order[i]];return &ids[i];
 }
 static const struct device *kp_rgb_persist_member_at(size_t i,size_t j) {assert(i<2 && j<3);return &members[owner_order[i]][member_order[j]];}
 static int kp_rgb_persist_ids_validate(void) {return kp_rgb_persist_validate_ids(ids,2);}
-static const struct device *kp_rgb_selector_alias(void) {return has_alias?&owners[0]:NULL;}
 static struct kp_rgb_selector *kp_rgb_selector_overlay_prepare_locked(const struct device *owner) {
     assert(held); if(!prepared)return NULL; for(size_t i=0;i<2;i++)if(owner==&owners[i])return &selectors[i];return NULL;
 }
@@ -209,8 +200,8 @@ static void boot(void) {
     memset(kp_selectors,0,sizeof(kp_selectors));
     kp_selectors[0].parameters=kp_parameters_0; kp_selectors[1].parameters=kp_parameters_1;
     memset(kp_parameters_0,0,sizeof(kp_parameters_0));memset(kp_parameters_1,0,sizeof(kp_parameters_1));
-    kp_legacy_valid=kp_legacy_pending=kp_global_pending=kp_global_seen=false;
-    kp_global_dirty=kp_global_reset=false;kp_global_revision=0;
+    memset(&kp_global_load,0,sizeof(kp_global_load));
+    kp_global_pending=kp_global_dirty=false;kp_global_revision=0;
     for(size_t i=0;i<2;i++) {
         slots[i][0]=&members[i][0];slots[i][1]=NULL;slots[i][2]=&members[i][1];slots[i][3]=&members[i][2];
         selectors[i]=(struct kp_rgb_selector){.owner=&owners[i],.effects=slots[i],.effect_count=4,
@@ -220,36 +211,43 @@ static void boot(void) {
     assert(kp_rgb_apply_defaults()==0);
     kp_rgb_matrix_lock();kp_rgb_selector_overlays_defaults_locked();kp_rgb_matrix_unlock();
 }
-static void clean_boot(void) {memset(store,0,sizeof(store));journal_count=0;fail_count=0;save_hook=NULL;immutable_snapshot=false;has_alias=true;boot();}
+static void clean_boot(void) {memset(store,0,sizeof(store));journal_count=0;fail_count=0;save_hook=NULL;boot();}
 static int load(const char *key,const void *bytes,size_t len) {return registered_set(key,len,read_blob,(void *)bytes);}
 static void load_store(bool reverse) {
     for(size_t n=0;n<32;n++) {size_t i=reverse?31-n:n;if(store[i].len)
         assert(load(store[i].path+sizeof(KP_RGB_PERSIST_SUBTREE),store[i].bytes,store[i].len)==0);}
 }
-static void stage_legacy(void) {
-    struct kp_rgb_persist_blob old;kp_rgb_persist_pack(false,33,"other",&old);
+static const unsigned char legacy[36]={2,0,33,1,'o','t','h','e','r'};
+static const unsigned char legacy_parameters[8]={123,0,44,0,120,3,0,0};
+static void stage_current(void) {
+    struct kp_rgb_persist_global_state g={false,33};struct kp_rgb_persist_global_record gr;
+    struct kp_rgb_persist_selector_record sr;struct kp_rgb_persist_parameters_record pr;
     struct kp_rgb_persist_effect p={.h=123,.s=44,.duration_ms=888};
-    put(GLOBAL,&old,sizeof(old));put(LEGPAR,&p,sizeof(p));load_store(false);
+    assert(kp_rgb_persist_encode_global(&g,&gr)==0);
+    assert(kp_rgb_persist_encode_selector("other",&sr)==0);
+    assert(kp_rgb_persist_encode_parameters(&p,&pr)==0);
+    assert(load("state",&gr,sizeof(gr))==0);
+    assert(load("selectors/one/state",&sr,sizeof(sr))==0);
+    assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==0);
 }
 static void assert_default(void) {assert(selectors[0].active_fx==&members[0][0] && selectors[1].active_fx==&members[1][0]);
     assert(kp_rgb_global.user_on && kp_rgb_global.brightness==70 && data[0][0].color.h==10);}
-static void precedence(bool reverse) {
+static void rejection_order(bool reverse) {
     clean_boot();
-    struct kp_rgb_persist_blob old;kp_rgb_persist_pack(false,33,"other",&old);
-    struct kp_rgb_persist_global_state g={true,91};struct kp_rgb_persist_global_record gr;
-    struct kp_rgb_persist_selector_record sr;struct kp_rgb_persist_parameters_record pr;
-    struct kp_rgb_persist_effect p={.h=222,.s=66,.duration_ms=999},lp={.h=111,.s=22,.duration_ms=777};
-    assert(kp_rgb_persist_encode_global(&g,&gr)==0);assert(kp_rgb_persist_encode_selector("shared",&sr)==0);
-    assert(kp_rgb_persist_encode_parameters(&p,&pr)==0);
-    if(reverse) {assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==0);assert(load("selectors/one/state",&sr,sizeof(sr))==0);}
-    if(reverse) assert(load("state",&gr,sizeof(gr))==0);
-    assert(load("state",&old,sizeof(old))==0);assert(load("state/effects/shared",&lp,sizeof(lp))==0);
-    if(!reverse) assert(load("state",&gr,sizeof(gr))==0);
-    if(!reverse) {assert(load("selectors/one/state",&sr,sizeof(sr))==0);assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==0);}
-    assert_default();assert(!pending && journal_count==0);
-    assert(registered_commit()==0);assert(kp_rgb_global.brightness==91 && kp_rgb_global.user_on);
-    assert(selectors[0].active_fx==&members[0][0] && data[0][0].color.h==222 && data[1][0].color.h==10);
-    assert(!pending);assert(registered_commit()==0 && data[0][0].color.h==222);
+    if(reverse) stage_current();
+    unsigned before=reads,locks=lock_entries;
+    assert(load("state",legacy,sizeof(legacy))==-EINVAL);
+    assert(registered_set("state",sizeof(legacy),failed_read,(void *)legacy)==-EINVAL);
+    assert(load("state/effects/shared",legacy_parameters,sizeof(legacy_parameters))==0);
+    assert(registered_set("state/effects/other",SIZE_MAX,failed_read,NULL)==0);
+    assert(reads==before && lock_entries==locks && !journal_count && !pending);
+    assert_default();
+    if(!reverse) stage_current();
+    assert(registered_commit()==0 && !pending && !journal_count);
+    assert(!kp_rgb_global.user_on && kp_rgb_global.brightness==33);
+    assert(selectors[0].active_fx==&members[0][1] && data[0][0].color.h==123);
+    assert(data[1][0].color.h==10);
+    assert(registered_commit()==0 && data[0][0].color.h==123 && !pending);
 }
 static void validation(void) {
     clean_boot();struct kp_rgb_persist_selector_record sr;assert(kp_rgb_persist_encode_selector("removed",&sr)==0);
@@ -276,31 +274,52 @@ static void validation(void) {
     assert(load("selectors/one/effects/disabled",&p,sizeof(p))==0 && reads==before);
     assert_default();
 }
+static void configured_fallback(void) {
+    clean_boot();struct kp_rgb_persist_selector_record sr;
+    assert(kp_rgb_persist_encode_selector("removed",&sr)==0);
+    selectors[0].initial_effect=3;
+    kp_rgb_matrix_lock();assert(kp_rgb_selector_select_locked(&selectors[0],2)==1);kp_rgb_matrix_unlock();
+    assert(load("selectors/one/state",&sr,sizeof(sr))==0 && registered_commit()==0);
+    assert(selectors[0].active_fx==&members[0][2] && selectors[0].effect_index==3);
+    selectors[0].initial_effect=1;
+    assert(load("selectors/one/state",&sr,sizeof(sr))==0 && registered_commit()==0);
+    assert(selectors[0].active_fx==&members[0][0] && selectors[0].effect_index==0 && !pending);
+}
+static void staged_validation(void) {
+    clean_boot();stage_current();
+    ids[1].id="one";assert(registered_commit()==-EEXIST);assert_default();
+    assert(kp_global_pending && kp_selectors[0].scoped_pending && kp_parameters_0[0].scoped_pending);
+    ids[1].id="bad/id";assert(registered_commit()==-EINVAL);assert_default();
+    ids[1].id="two";
+    struct kp_rgb_persist_selector_record sr;
+    assert(kp_rgb_persist_encode_selector("shared",&sr)==0);sr.version=99;
+    assert(load("selectors/one/state",&sr,sizeof(sr))==-EINVAL);
+    struct kp_rgb_persist_parameters_record pr={.version=1,.hue_le={105,1},.saturation=44};
+    assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==-EINVAL);
+    pr.hue_le[0]=123;pr.hue_le[1]=0;pr.saturation=101;
+    assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==-EINVAL);
+    assert(registered_set("selectors/one/effects/shared",sizeof(pr),failed_read,&pr)==-EIO);
+    assert(registered_commit()==0 && data[0][0].color.h==123 && data[0][0].duration_ms==888);
+    assert(selectors[0].active_fx==&members[0][1] && !kp_rgb_global.user_on && !pending);
+    struct kp_rgb_persist_effect p={.h=360,.s=0,.duration_ms=0};
+    assert(kp_rgb_persist_encode_parameters(&p,&pr)==0);
+    assert(load("selectors/one/effects/shared",&pr,sizeof(pr))==0);
+    p=(struct kp_rgb_persist_effect){.h=359,.s=100,.duration_ms=65535};
+    assert(kp_rgb_persist_encode_parameters(&p,&pr)==0);
+    assert(load("selectors/two/effects/other",&pr,sizeof(pr))==0);
+    assert(registered_commit()==0);
+    assert(data[0][0].color.h==0 && data[0][0].color.s==0 && data[0][0].color.b==100 && data[0][0].duration_ms==100);
+    assert(data[1][1].color.h==359 && data[1][1].color.s==100 && data[1][1].duration_ms==10000 && !pending && !journal_count);
+}
 static void readiness(void) {
-    clean_boot();stage_legacy();assert_default();unready_member=&members[1][2];
+    clean_boot();stage_current();assert_default();unready_member=&members[1][2];
     assert(registered_commit()==-ENODEV);assert_default();assert(!pending && !journal_count);
     unready_member=NULL;host_device_ready=false;
     assert(registered_commit()==-ENODEV);assert_default();assert(!pending && !journal_count);
     host_device_ready=true;prepared=false;assert(registered_commit()==-ENODEV);assert_default();
     prepared=true;assert(registered_commit()==0);
     assert(!kp_rgb_global.user_on && selectors[0].active_fx==&members[0][1] && data[0][0].color.h==123);
-    run_work();assert(!pending);
-}
-static void migration(const char *failure) {
-    clean_boot();stage_legacy();assert(registered_commit()==0 && pending);
-    fail_path=failure;fail_delete=false;fail_count=1;run_work();
-    assert(pending && scheduled_delay==1000 && lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_blob));
-    bool failed=false;
-    for(unsigned i=0;i<journal_count;i++) if(journal[i].result==-EIO) {
-        assert(!strcmp(journal[i].path,failure));failed=true;
-    }
-    assert(failed);
-    boot();load_store(true);assert(registered_commit()==0);
-    assert(selectors[0].active_fx==&members[0][1] && data[0][0].color.h==123);
-    assert(pending);run_work();assert(!pending && lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-    assert(!lookup(LEGPAR) && lookup(PAR1) && lookup(SEL1));
-    boot();load_store(false);assert(registered_commit()==0 && !pending);
-    assert(data[0][0].color.h==123 && selectors[0].active_fx==&members[0][1]);
+    assert(!pending && !journal_count);
 }
 static void isolation(void) {
     clean_boot();
@@ -310,7 +329,10 @@ static void isolation(void) {
     assert(zmk_rgb_matrix_set_period(&members[0][2],1234)==0 && data[0][2].duration_ms==1234);
     assert(!pending && !journal_count);
     assert(data[0][2].color.h==234);assert(kp_rgb_save_selector_state(&owners[0],false)==0 && pending);
-    run_work();assert(!pending && journal_count==5); /* three writes, two legacy deletions */
+    assert(scheduled_delay==100 && kp_selectors[0].revision==1);
+    assert(kp_rgb_save_selector_state(&owners[0],false)==0 && scheduled_delay==100 && kp_selectors[0].revision==2);
+    assert(!journal_count && !kp_selectors[1].dirty && !kp_global_dirty);
+    run_work();assert(!pending && journal_count==3);
     assert(lookup(SEL1) && lookup(PAR1) && !lookup(SEL2) && !lookup(GLOBAL));
     assert(!lookup("keypaw/rgb_matrix/selectors/one/effects/optout"));
     kp_rgb_matrix_lock();assert(kp_rgb_selector_select_locked(&selectors[1],2)==1);data[1][0].color.h=321;kp_rgb_matrix_unlock();
@@ -333,48 +355,6 @@ static void isolation(void) {
     assert_default();assert(data[1][0].color.h==10);run_work();assert(!pending);
     boot();load_store(true);assert(registered_commit()==0);assert_default();
 }
-static void cleanup(void) {
-    clean_boot();stage_legacy();assert(registered_commit()==0);
-    fail_path=LEGPAR;fail_delete=true;fail_count=1;run_work();
-    assert(pending && lookup(LEGPAR) && lookup(PAR1));
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-    run_work();assert(!pending && !lookup(LEGPAR));
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-    stage_legacy();kp_rgb_matrix_lock();assert(kp_rgb_selector_apply_defaults_locked(&selectors[0])==0);kp_rgb_matrix_unlock();
-    fail_count=1;assert(kp_rgb_save_selector_state(&owners[0],true)==0);run_work();assert(pending);
-    run_work();assert(!pending && !lookup(LEGPAR));
-}
-static void reset_legacy_scope(void) {
-    clean_boot();has_alias=false;stage_legacy();assert(registered_commit()==0);run_work();
-    has_alias=true; /* Select the alias after retaining the legacy snapshot without one. */
-    struct kp_rgb_persist_effect stale={.h=99,.s=11,.duration_ms=444};
-    put("keypaw/rgb_matrix/state/effects/removed",&stale,sizeof(stale));
-    kp_rgb_global.user_on=true;kp_rgb_global.brightness=99;
-    kp_rgb_matrix_lock();assert(kp_rgb_selector_apply_defaults_locked(&selectors[0])==0);kp_rgb_matrix_unlock();
-    unsigned start=journal_count;
-    assert(kp_rgb_save_selector_state(&owners[0],true)==0);run_work();assert(!pending);
-    struct kp_rgb_persist_blob old;
-    assert(kp_rgb_persist_decode_legacy(lookup(GLOBAL)->bytes,lookup(GLOBAL)->len,&old)==0);
-    assert(!old.has_selected && !old.user_on && old.brightness==33);
-    assert(kp_rgb_global.user_on && kp_rgb_global.brightness==99);
-    assert(!lookup(LEGPAR) && !lookup("keypaw/rgb_matrix/state/effects/removed"));
-    for(unsigned i=start;i<journal_count;i++) assert(strncmp(journal[i].path,
-        "keypaw/rgb_matrix/selectors/two/",32)!=0);
-    put("keypaw/rgb_matrix/state/effects/removed",&stale,sizeof(stale));
-    fail_path="keypaw/rgb_matrix/state/effects/removed";fail_delete=true;fail_count=1;
-    kp_rgb_reset_state();assert_default();run_work();assert(pending && scheduled_delay==1000);
-    run_work();assert(!pending && !lookup(fail_path));
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-}
-static void no_alias(void) {
-    clean_boot();has_alias=false;stage_legacy();assert(registered_commit()==0);
-    assert(selectors[0].active_fx==&members[0][0] && data[0][0].color.h==10);
-    run_work();struct kp_rgb_persist_blob b;assert(lookup(GLOBAL)->len==sizeof(b));
-    assert(kp_rgb_persist_decode_legacy(lookup(GLOBAL)->bytes,sizeof(b),&b)==0);
-    assert(b.has_selected && !strcmp(b.selected_id,"other") && lookup(LEGPAR));
-    boot();load_store(true);assert(registered_commit()==0);run_work();
-    assert(selectors[0].active_fx==&members[0][0]);
-}
 static void assert_persisted_selection(const char *path,const char *id) {
     struct kp_rgb_persist_selector_record value;
     assert(lookup(path) && kp_rgb_persist_decode_selector(lookup(path)->bytes,lookup(path)->len,&value)==0);
@@ -388,7 +368,7 @@ static void assert_persisted_parameters(const char *path,uint16_t hue,uint16_t d
 static void independent_failures(void) {
     clean_boot();
     kp_rgb_global.brightness=29;assert(kp_rgb_save_state()==0);run_work();
-    fail_path=PAR1;fail_delete=false;fail_count=UINT_MAX;
+    fail_path=PAR1;fail_count=UINT_MAX;
     for(unsigned pass=0;pass<3;pass++) {
         data[1][0].color.h=200+pass;
         kp_rgb_global.brightness=40+pass;
@@ -404,19 +384,15 @@ static void independent_failures(void) {
     }
     assert(!lookup(PAR1));
 
-    clean_boot();stage_legacy();assert(registered_commit()==0);
-    fail_path=PAR2;fail_delete=false;fail_count=UINT_MAX;
+    clean_boot();
+    fail_path=GLOBAL;fail_count=UINT_MAX;
+    kp_rgb_global.brightness=72;
+    assert(kp_rgb_save_state()==0);
+    assert(kp_rgb_save_selector_state(&owners[0],false)==0);
     assert(kp_rgb_save_selector_state(&owners[1],false)==0);run_work();
-    assert(pending && !kp_selectors[0].migration_pending && kp_selectors[1].dirty);
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-
-    clean_boot();stage_legacy();assert(registered_commit()==0);
-    fail_path=LEGPAR;fail_delete=true;fail_count=UINT_MAX;run_work();
-    assert(pending && lookup(LEGPAR) && !kp_selectors[0].migration_pending);
-    kp_rgb_global.brightness=72;assert(kp_rgb_save_state()==0);run_work();
-    struct kp_rgb_persist_global_state global;
-    assert(kp_rgb_persist_decode_global(lookup(GLOBAL)->bytes,lookup(GLOBAL)->len,&global)==0);
-    assert(global.brightness==72 && !kp_global_dirty && pending);
+    assert(pending && kp_global_dirty && !kp_selectors[0].dirty && !kp_selectors[1].dirty);
+    assert_persisted_selection(SEL1,"shared");assert_persisted_selection(SEL2,"shared");
+    fail_count=0;run_work();assert(!pending && !kp_global_dirty);
 }
 static void reordering(void) {
     clean_boot();
@@ -460,18 +436,6 @@ static void reordering(void) {
     assert(data[0][1].color.h==110 && data[1][0].color.h==200);
     assert(configs[0][0].slot==0 && configs[1][1].slot==2 && owner_order[0]==0);
 }
-static void import_other(void) {
-    clean_boot();stage_legacy();
-    struct kp_rgb_persist_effect other={.h=267,.s=61,.duration_ms=2345};
-    put(LEGOTHER,&other,sizeof(other));assert(load("state/effects/other",&other,sizeof(other))==0);
-    assert(data[0][1].color.h==40 && data[1][1].color.h==40);
-    assert(registered_commit()==0 && data[0][1].color.h==267 && data[1][1].color.h==40);
-    fail_path=OTHER1;fail_delete=false;fail_count=1;run_work();
-    assert(pending && lookup(LEGOTHER) && lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_blob));
-    run_work();assert(!pending && !lookup(LEGOTHER));assert_persisted_parameters(OTHER1,267,2345);
-    boot();load_store(true);assert(registered_commit()==0 && !pending);
-    assert(data[0][1].color.h==267 && data[0][1].duration_ms==2345 && data[1][1].color.h==40);
-}
 static void change_during_save(void) {
     assert(!held);
     kp_rgb_matrix_lock();
@@ -486,13 +450,6 @@ static void reset_during_save(void) {
 }
 static void global_reset_during_save(void) {assert(!held);kp_rgb_reset_state();}
 static void interleaving(void) {
-    clean_boot();stage_legacy();assert(registered_commit()==0);
-    hook_path=PAR1;save_hook=reset_during_save;run_work();
-    assert(pending && kp_selectors[0].migration_pending && kp_global_dirty);
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_blob));
-    run_work();assert(!pending && !kp_selectors[0].migration_pending);
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
-    assert_persisted_parameters(PAR1,10,500);
     clean_boot();
     assert(kp_rgb_save_selector_state(&owners[0],false)==0);
     hook_path=PAR1;save_hook=change_during_save;run_work();
@@ -505,18 +462,18 @@ static void interleaving(void) {
     struct kp_rgb_persist_effect stale={.h=99,.s=11,.duration_ms=444};
     put("keypaw/rgb_matrix/state/effects/removed",&stale,sizeof(stale));
     hook_path=PAR1;save_hook=reset_during_save;
-    fail_path=OTHER1;fail_delete=false;fail_count=1;
+    fail_path=OTHER1;fail_count=1;
     assert(kp_rgb_save_selector_state(&owners[0],false)==0);run_work();
-    assert(!save_hook && pending && kp_selectors[0].dirty && kp_selectors[0].reset);
+    assert(!save_hook && pending && kp_selectors[0].dirty);
     assert(selectors[0].active_fx==&members[0][0] && data[0][0].color.h==10);
-    run_work();assert(!pending && !kp_selectors[0].dirty && !kp_selectors[0].reset);
+    run_work();assert(!pending && !kp_selectors[0].dirty);
     assert_persisted_selection(SEL1,"shared");assert_persisted_parameters(PAR1,10,500);
-    assert(!lookup("keypaw/rgb_matrix/state/effects/removed"));
+    assert(lookup("keypaw/rgb_matrix/state/effects/removed"));
     boot();load_store(true);assert(registered_commit()==0);assert_default();
     kp_rgb_global.user_on=false;kp_rgb_global.brightness=12;
     hook_path=GLOBAL;save_hook=global_reset_during_save;fail_path=GLOBAL;fail_count=1;
     assert(kp_rgb_save_state()==0);run_work();
-    assert(!save_hook && pending && kp_global_dirty && kp_global_reset && kp_selectors[0].dirty && kp_selectors[1].dirty);
+    assert(!save_hook && pending && kp_global_dirty && kp_selectors[0].dirty && kp_selectors[1].dirty);
     assert_default();run_work();assert(!pending && !kp_global_dirty);
     boot();load_store(false);assert(registered_commit()==0);assert_default();
 }
@@ -528,18 +485,14 @@ static void reset_revision_interleaving(void) {
     clean_boot();
     kp_rgb_matrix_lock();assert(kp_rgb_selector_select_locked(&selectors[0],2)==1);
     data[0][0].color.h=299;kp_rgb_matrix_unlock();
-    struct kp_rgb_persist_effect stale={.h=99,.s=11,.duration_ms=444};
-    const char *removed="keypaw/rgb_matrix/state/effects/removed";
-    put(removed,&stale,sizeof(stale));
     hook_path=PAR1;save_hook=reset_during_save;
     assert(kp_rgb_save_selector_state(&owners[0],false)==0);run_work();
-    assert(pending && scheduled_delay==1000 && kp_selectors[0].dirty && kp_selectors[0].reset);
+    assert(pending && scheduled_delay==1000 && kp_selectors[0].dirty);
     assert_persisted_selection(SEL1,"other");assert_persisted_parameters(PAR1,299,500);
-    assert(lookup(removed));
-    fail_path=removed;fail_delete=true;fail_count=1;run_work();
-    assert(pending && kp_selectors[0].dirty && kp_selectors[0].reset && lookup(removed));
+    fail_path=PAR1;fail_count=1;run_work();
+    assert(pending && kp_selectors[0].dirty);
+    run_work();assert(!pending && !kp_selectors[0].dirty);
     assert_persisted_selection(SEL1,"shared");assert_persisted_parameters(PAR1,10,500);
-    run_work();assert(!pending && !lookup(removed) && !kp_selectors[0].reset);
     kp_rgb_global.brightness=12;hook_path=GLOBAL;save_hook=change_global_during_save;
     assert(kp_rgb_save_state()==0);run_work();
     assert(pending && kp_global_dirty && kp_rgb_global.brightness==45);
@@ -549,39 +502,81 @@ static void reset_revision_interleaving(void) {
     assert(kp_rgb_persist_decode_global(lookup(GLOBAL)->bytes,lookup(GLOBAL)->len,&global)==0 && global.brightness==45);
     hook_path=GLOBAL;save_hook=global_reset_during_save;
     assert(kp_rgb_save_state()==0);run_work();
-    assert(pending && kp_global_dirty && kp_global_reset && kp_selectors[0].dirty && kp_selectors[1].dirty);
-    assert_default();run_work();assert(!pending && !kp_global_reset);
+    assert(pending && kp_global_dirty && kp_selectors[0].dirty && kp_selectors[1].dirty);
+    assert_default();run_work();assert(!pending && !kp_global_dirty);
     boot();load_store(true);assert(registered_commit()==0);assert_default();
 }
-static void reset_staged_legacy(void) {
-    clean_boot();stage_legacy();assert(registered_commit()==0);run_work();
+static void reset_staged_current(void) {
+    clean_boot();stage_current();
+    struct kp_rgb_persist_selector_record sr;struct kp_rgb_persist_parameters_record pr;
+    struct kp_rgb_persist_effect p={.h=267,.s=61,.duration_ms=2345};
+    assert(kp_rgb_persist_encode_selector("other",&sr)==0 && kp_rgb_persist_encode_parameters(&p,&pr)==0);
+    assert(load("selectors/two/state",&sr,sizeof(sr))==0 && load("selectors/two/effects/shared",&pr,sizeof(pr))==0);
     kp_rgb_matrix_lock();assert(kp_rgb_selector_apply_defaults_locked(&selectors[0])==0);kp_rgb_matrix_unlock();
     assert(kp_rgb_save_selector_state(&owners[0],true)==0);
-    struct kp_rgb_persist_effect stale={.h=299,.s=11,.duration_ms=444};
-    assert(load("state/effects/shared",&stale,sizeof(stale))==0);
+    assert(!kp_selectors[0].scoped_pending && !kp_parameters_0[0].scoped_pending);
+    assert(kp_global_pending);
+    assert(kp_selectors[1].scoped_pending && kp_parameters_1[0].scoped_pending);
     assert(registered_commit()==0 && data[0][0].color.h==10 && data[0][0].duration_ms==500);
+    assert(selectors[0].active_fx==&members[0][0] && !kp_rgb_global.user_on);
+    assert(selectors[1].active_fx==&members[1][1] && data[1][0].color.h==267 && data[1][0].duration_ms==2345);
     run_work();assert(!pending);
-    kp_rgb_reset_state();
-    assert(load("state/effects/shared",&stale,sizeof(stale))==0);
+    stage_current();kp_rgb_reset_state();
+    assert(!kp_global_pending && !kp_selectors[0].scoped_pending && !kp_parameters_0[0].scoped_pending);
     assert(registered_commit()==0);assert_default();run_work();assert(!pending);
-}
-static void immutable_purge(void) {
-    clean_boot();struct kp_rgb_persist_effect stale={.h=99,.s=11,.duration_ms=444};
-    put("keypaw/rgb_matrix/state/effects/removed",&stale,sizeof(stale));
-    memcpy(direct_snapshot,store,sizeof(store));immutable_snapshot=true;
-    kp_rgb_reset_state();run_work();
-    assert(pending && scheduled_delay==1000 && kp_selectors[0].reset);
-    assert(!lookup("keypaw/rgb_matrix/state/effects/removed"));
-    unsigned before=journal_count;immutable_snapshot=false;run_work();
-    assert(!pending && journal_count>before && !kp_selectors[0].reset);
     boot();load_store(true);assert(registered_commit()==0);assert_default();
 }
+static void no_legacy_io(void) {
+    clean_boot();put(GLOBAL,legacy,sizeof(legacy));put(LEGPAR,legacy_parameters,sizeof(legacy_parameters));
+    unsigned before=reads;
+    assert(load("state",legacy,sizeof(legacy))==-EINVAL);
+    assert(load("state/effects/shared",legacy_parameters,sizeof(legacy_parameters))==0);
+    assert(registered_commit()==0 && reads==before && !pending && !journal_count);assert_default();
+    assert(kp_rgb_save_selector_state(&owners[0],false)==0);run_work();
+    assert(lookup(GLOBAL)->len==36 && lookup(LEGPAR)->len==8);
+    kp_rgb_reset_state();run_work();assert(!pending && lookup(LEGPAR)->len==8);
+    assert(lookup(GLOBAL)->len==4);
+    for(unsigned i=0;i<journal_count;i++) assert(!journal[i].deletion && strcmp(journal[i].path,LEGPAR));
+}
+static void compact_parameters(void) {
+    clean_boot();
+    assert(sizeof(kp_parameters_0)/sizeof(kp_parameters_0[0])==2);
+    const struct kp_rgb_persist_effect_id mixed[3]={{"optout",false},{"shared",true},{"other",true}};
+    ids[0].effects=ids[1].effects=mixed;
+    member_order[0]=2;member_order[1]=0;member_order[2]=1;
+    struct kp_rgb_persist_parameters_record bytes;
+    struct kp_rgb_persist_effect first={.h=111,.s=22,.duration_ms=1000};
+    struct kp_rgb_persist_effect second={.h=222,.s=33,.duration_ms=2000};
+    assert(kp_rgb_persist_encode_parameters(&first,&bytes)==0);
+    unsigned before=reads;
+    assert(load("selectors/one/effects/optout",&bytes,sizeof(bytes))==0 && reads==before);
+    assert(load("selectors/one/effects/shared",&bytes,sizeof(bytes))==0);
+    assert(kp_rgb_persist_encode_parameters(&second,&bytes)==0);
+    assert(load("selectors/one/effects/other",&bytes,sizeof(bytes))==0);
+    assert(registered_commit()==0 && !pending);
+    assert(data[0][0].color.h==111 && data[0][0].duration_ms==1000);
+    assert(data[0][1].color.h==222 && data[0][1].duration_ms==2000);
+    assert(data[0][2].color.h==70 && data[0][2].duration_ms==700);
+    assert(load("selectors/one/effects/shared",&bytes,sizeof(bytes))==0);
+    assert(load("selectors/one/effects/other",&bytes,sizeof(bytes))==0);
+    kp_rgb_matrix_lock();
+    assert(kp_rgb_selector_apply_defaults_locked(&selectors[0])==0);
+    kp_rgb_matrix_unlock();
+    assert(kp_rgb_save_selector_state(&owners[0],true)==0);
+    assert(registered_commit()==0);
+    assert(data[0][0].color.h==10 && data[0][1].color.h==40);
+    run_work();assert(!pending);
+}
 int main(void) {
+    compact_parameters();
     assert(!strcmp(registered_subtree,KP_RGB_PERSIST_SUBTREE));
-    precedence(false);precedence(true);validation();readiness();migration(PAR1);migration(SEL1);migration(GLOBAL);isolation();cleanup();no_alias();reset_legacy_scope();
-    reordering();import_other();interleaving();reset_revision_interleaving();immutable_purge();reset_staged_legacy();
+    assert(sizeof(struct kp_rgb_persist_global_record)==4);
+    assert(sizeof(struct kp_rgb_persist_selector_record)==33);
+    assert(sizeof(struct kp_rgb_persist_parameters_record)==6);
+    rejection_order(false);rejection_order(true);validation();staged_validation();configured_fallback();readiness();isolation();
+    reordering();interleaving();reset_revision_interleaving();reset_staged_current();no_legacy_io();
     independent_failures();
-    puts("scoped settings staging/precedence/migration/isolation/reset/retries passed");return 0;
+    puts("scoped current settings restoration/isolation/reset/revision retries passed");return 0;
 }
 '''
 

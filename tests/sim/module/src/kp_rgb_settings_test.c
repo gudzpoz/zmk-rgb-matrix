@@ -23,13 +23,14 @@
 
 struct record {
   char name[SETTINGS_MAX_NAME_LEN + 1];
-  uint8_t bytes[sizeof(struct kp_rgb_persist_blob)];
+  uint8_t bytes[36];
   size_t len;
 };
 static struct record records[24];
 static const char *fail_path;
 static bool failed;
 static bool initial_load_done;
+static unsigned reads;
 static unsigned saves;
 
 static struct record *find(const char *name) {
@@ -47,6 +48,7 @@ static struct record *find(const char *name) {
 
 static ssize_t read_record(void *arg, void *out, size_t len) {
   struct record *record = arg;
+  reads++;
   len = MIN(len, record->len);
   memcpy(out, record->bytes, len);
   return len;
@@ -90,15 +92,15 @@ static void seed(const char *name, const void *bytes, size_t len) {
 }
 
 int settings_backend_init(void) {
-  struct kp_rgb_persist_blob legacy;
-  kp_rgb_persist_pack(true, 61, "shared", &legacy);
-  seed(ROOT "state", &legacy, sizeof(legacy));
+  struct kp_rgb_persist_global_state global = {.user_on = true, .brightness = 61};
+  struct kp_rgb_persist_global_record global_record;
+  kp_rgb_persist_encode_global(&global, &global_record);
+  seed(ROOT "state", &global_record, sizeof(global_record));
   struct kp_rgb_persist_selector_record selection;
   CHECK(kp_rgb_persist_encode_selector("alt", &selection) == 0);
   seed(ROOT "selectors/a/state", &selection, sizeof(selection));
   seed(ROOT "selectors/b/state", &selection, sizeof(selection));
   struct kp_rgb_persist_effect value = {.duration_ms = 2100, .h = 42, .s = 70};
-  seed(ROOT "state/effects/shared", &value, sizeof(value));
   struct kp_rgb_persist_parameters_record parameters;
   value.h = 123;
   CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
@@ -107,9 +109,10 @@ int settings_backend_init(void) {
   value.duration_ms = 3100;
   CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
   seed(ROOT "selectors/b/effects/shared", &parameters, sizeof(parameters));
-  value.h = 88;
-  seed(ROOT "state/effects/alt", &value, sizeof(value));
-  fail_path = ROOT "selectors/a/effects/alt";
+  uint8_t obsolete[36] = {0};
+  obsolete[0] = 2;
+  seed(ROOT "state/effects/alt", obsolete, sizeof(obsolete));
+  fail_path = NULL;
   failed = false;
   saves = 0;
   settings_src_register(&store);
@@ -124,7 +127,7 @@ static void check_restored(void) {
   CHECK(kp_rgb_global.brightness == 61 && kp_rgb_global.user_on);
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 123);
   CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 240);
-  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 88);
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3100);
 }
 
@@ -209,18 +212,29 @@ static void scenario(void *a, void *b, void *c) {
   printk("PASS scoped settings subtree/manual startup\n");
 #endif
   check_restored();
+  struct record *obsolete_record = find(ROOT "state/effects/alt");
+  unsigned before_reads = reads;
+  CHECK(settings_call_set_handler(ROOT "state/effects/alt", obsolete_record->len,
+                                  read_record, obsolete_record, NULL) == 0);
+  CHECK(reads == before_reads);
+  uint8_t legacy_state[36] = {2};
+  struct record legacy_record = {.len = sizeof(legacy_state)};
+  memcpy(legacy_record.bytes, legacy_state, sizeof(legacy_state));
+  /* Zephyr logs and discards h_set errors; rejection must not read or stage. */
+  CHECK(settings_call_set_handler(ROOT "state", legacy_record.len, read_record,
+                                  &legacy_record, NULL) == 0);
+  CHECK(reads == before_reads);
+  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+  check_restored();
+  printk("PASS legacy state rejected and obsolete effect ignored\n");
   k_sleep(K_MSEC(150));
-  CHECK(failed &&
-        find(ROOT "state")->len == sizeof(struct kp_rgb_persist_blob));
-  CHECK(find(ROOT "state/effects/alt")->len != 0);
-  printk("PASS scoped settings failed migration retains legacy\n");
-  fail_path = NULL;
+  CHECK(!failed && saves == 0);
+  CHECK(find(ROOT "state")->len == sizeof(struct kp_rgb_persist_global_record));
+  CHECK(find(ROOT "state/effects/alt")->len == sizeof(uint8_t[36]));
+  printk("PASS scoped settings legacy records ignored\n");
   k_sleep(K_MSEC(1200));
   CHECK(find(ROOT "state")->len == sizeof(struct kp_rgb_persist_global_record));
-  CHECK(find(ROOT "selectors/a/effects/alt")->len ==
-        sizeof(struct kp_rgb_persist_parameters_record));
-  CHECK(find(ROOT "state/effects/alt")->len == 0);
-  printk("PASS scoped settings migration retry\n");
+  CHECK(find(ROOT "state/effects/alt")->len == sizeof(uint8_t[36]));
 
   struct record before_b = *find(ROOT "selectors/b/state");
   struct record before_global = *find(ROOT "state");
@@ -264,12 +278,11 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(durable_parameters.duration_ms == 4300);
   printk("PASS scoped settings independent save despite persistent failure\n");
   fail_path = NULL;
-  struct kp_rgb_persist_effect removed = {
-      .duration_ms = 2000, .h = 70, .s = 50};
-  seed(ROOT "state/effects/removed", &removed, sizeof(removed));
+  uint8_t removed[36] = {2};
+  seed(ROOT "state/effects/removed", removed, sizeof(removed));
   kp_rgb_reset_state();
   k_sleep(K_MSEC(100));
-  CHECK(find(ROOT "state/effects/removed")->len == 0);
+  CHECK(find(ROOT "state/effects/removed")->len == sizeof(removed));
   perturb_and_reload();
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));

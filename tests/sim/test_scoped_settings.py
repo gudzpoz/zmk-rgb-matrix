@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Exercise real settings commit/startup, scoped saves and migration retries."""
+"""Exercise current settings commit/startup, scoped saves and independent retries."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -45,8 +45,8 @@ def main():
         assert run.returncode == 0, run.stdout[-20000:]
         for marker in (
             "restored before startup notification",
-            "failed migration retains legacy",
-            "migration retry",
+            "legacy records ignored",
+            "independent save despite persistent failure",
             "addressed save/reset/reload isolation",
             "global reset/reload",
         ):
@@ -54,8 +54,10 @@ def main():
         if name != "auto":
             assert "PASS scoped settings subtree/manual startup" in run.stdout, run.stdout
         errors = [line for line in run.stdout.splitlines() if "<err>" in line]
-        assert not errors or (name == "late-control" and all(
-            "canonical control is not ready" in line for line in errors)), run.stdout
+        assert all(
+            "set-value failure. key: keypaw/rgb_matrix/state error(-22)" in line
+            or (name == "late-control" and "canonical control is not ready" in line)
+            for line in errors), run.stdout
         print(f"PASS scoped settings native {name}", flush=True)
 
 
