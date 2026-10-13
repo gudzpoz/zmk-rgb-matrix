@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 
+from native_process import run_logged
 SIM = Path(__file__).resolve().parent
 MODULE = SIM.parent.parent
 REPO = MODULE.parent.parent
@@ -197,9 +198,8 @@ def selected_runtime(root, name, fragment="", selectors=SELECTORS, extra_conf=""
     command = [str(root / name / "build/zephyr/zmk.exe"),
                f"--capture={capture}", "--stop_at=5", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, timeout=30)
-    (root / f"{name}.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / f"{name}.log")
     assert run.returncode == 0, run.stdout[-16000:]
     for marker in (
         "PASS selector selected condition initial/shared/local/central gates",
@@ -252,9 +252,9 @@ def build(root, name, fragment, runtime=False, selectors=SELECTORS, extra_conf="
                "-b", "native_sim//zmk_test_mock", "-p", "--",
                f"-DZMK_CONFIG={config}", f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
     print("COMMAND", " ".join(command), flush=True)
-    result = subprocess.run(command, cwd=WORKSPACE, text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    (root / f"{name}-build.log").write_text(result.stdout)
+    result = run_logged(command, cwd=WORKSPACE, text=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        timeout=600, log_path=root / f"{name}-build.log")
     return result
 
 
@@ -311,9 +311,8 @@ def main():
     assert result.returncode == 0, result.stdout[-12000:]
     command = [str(root / "long-overlay/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT)
-    (root / "long-overlay.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / "long-overlay.log")
     assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout
     assert "<err>" not in run.stdout, run.stdout
     print("PASS long overlay with short canonical control", flush=True)
@@ -323,9 +322,8 @@ def main():
     command = [str(root / "runtime/build/zephyr/zmk.exe"), f"--capture={capture}",
                "--stop_at=6", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT)
-    (root / "runtime.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / "runtime.log")
     assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout[-12000:]
     assert "PASS selector public API/notifications/coalescing" in run.stdout, run.stdout
     ordered = ["a_static active=0", "a_motion reset", "a_motion active=1",
@@ -341,9 +339,8 @@ def main():
     assert result.returncode == 0, result.stdout[-12000:]
     command = [str(root / "absent-alias/build/zephyr/zmk.exe"), "--stop_at=1", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT)
-    (root / "absent-alias.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / "absent-alias.log")
     assert run.returncode == 0 and "PASS absent public selector alias" in run.stdout, run.stdout
     assert "<err>" not in run.stdout, run.stdout
     print("PASS absent public selector alias", flush=True)
@@ -356,9 +353,8 @@ def main():
     assert result.returncode == 0, result.stdout[-12000:]
     command = [str(root / "late-control/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT)
-    (root / "late-control.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / "late-control.log")
     assert run.returncode == 0, run.stdout[-12000:]
     assert "PASS canonical readiness deferred start" in run.stdout, run.stdout
     assert "PASS selector runtime" in run.stdout, run.stdout
@@ -402,10 +398,10 @@ def stage42(root):
 ''', runtime=True, selectors=SELECTED_CONDITIONS + SELECTORS,
                    extra_conf="CONFIG_KEYPAW_RGB_TRIGGERS=y\n")
     assert result.returncode == 0, result.stdout[-16000:]
-    run = subprocess.run([str(root / "selected-trigger/build/zephyr/zmk.exe"),
-                          "--stop_at=2", "-no-rt"], cwd=root, text=True,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-    (root / "selected-trigger.log").write_text(run.stdout)
+    run = run_logged([str(root / "selected-trigger/build/zephyr/zmk.exe"),
+                      "--stop_at=2", "-no-rt"], cwd=root, text=True,
+                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                     log_path=root / "selected-trigger.log")
     assert run.returncode == 0, run.stdout
     assert "PASS selector condition trigger selection during refresh" in run.stdout, run.stdout
     assert "<err>" not in run.stdout, run.stdout

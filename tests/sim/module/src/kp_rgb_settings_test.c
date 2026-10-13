@@ -141,6 +141,53 @@ static int selection(const zmk_event_t *event) {
 ZMK_LISTENER(scoped_settings_probe, selection);
 ZMK_SUBSCRIPTION(scoped_settings_probe, zmk_rgb_selector_selection_changed);
 
+static void perturb_and_reload(void) {
+  const struct device *effects[] = {DEV(probe_a), DEV(probe_b), DEV(probe_c),
+                                    DEV(probe_d)};
+  struct kp_rgb_hsb colors[ARRAY_SIZE(effects)];
+  uint32_t periods[ARRAY_SIZE(effects)];
+  const struct device *selected_a = zmk_rgb_selector_get_selected(DEV(selector_a));
+  const struct device *selected_b = zmk_rgb_selector_get_selected(DEV(selector_b));
+  bool on, current_on;
+  CHECK(zmk_rgb_matrix_get_user_state(&on) == 0);
+  kp_rgb_matrix_lock();
+  uint8_t brightness = kp_rgb_global.brightness;
+  kp_rgb_matrix_unlock();
+  for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
+    colors[i] = kp_rgb_effect_data(effects[i])->color;
+    periods[i] = kp_rgb_effect_period(effects[i]);
+    struct kp_rgb_hsb changed = {.h = (colors[i].h + 17) % 360,
+                                 .s = colors[i].s == 25 ? 75 : 25, .b = 100};
+    CHECK(zmk_rgb_matrix_set_color(effects[i], &changed) == 0);
+    CHECK(zmk_rgb_matrix_set_period(effects[i], periods[i] == 1700 ? 1800 : 1700) == 0);
+  }
+  CHECK(zmk_rgb_selector_select(DEV(selector_a),
+        selected_a == DEV(probe_a) ? DEV(probe_c) : DEV(probe_a)) == 0);
+  CHECK(zmk_rgb_selector_select(DEV(selector_b),
+        selected_b == DEV(probe_b) ? DEV(probe_d) : DEV(probe_b)) == 0);
+  CHECK((on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on()) == 0);
+  /* There is no public local-only brightness setter. */
+  kp_rgb_matrix_lock();
+  kp_rgb_global.brightness = brightness == 19 ? 27 : 19;
+  zmk_rgb_matrix_flush();
+  kp_rgb_matrix_unlock();
+  unsigned before = saves;
+  k_sleep(K_MSEC(60));
+  CHECK(saves == before);
+  CHECK(zmk_rgb_matrix_get_user_state(&current_on) == 0 && current_on != on);
+  CHECK(kp_rgb_global.brightness != brightness);
+  CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == selected_a);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == selected_b);
+  CHECK(zmk_rgb_matrix_get_user_state(&current_on) == 0 && current_on == on);
+  CHECK(kp_rgb_global.brightness == brightness);
+  for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
+    CHECK(kp_rgb_effect_data(effects[i])->color.h == colors[i].h);
+    CHECK(kp_rgb_effect_data(effects[i])->color.s == colors[i].s);
+    CHECK(kp_rgb_effect_period(effects[i]) == periods[i]);
+  }
+}
+
 static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
@@ -189,19 +236,41 @@ static void scenario(void *a, void *b, void *c) {
                 before_global.len));
   CHECK(!memcmp(find(ROOT "selectors/b/state")->bytes, before_b.bytes,
                 before_b.len));
-  CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
+  perturb_and_reload();
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == 4200);
   printk("PASS scoped settings addressed save/reset/reload isolation\n");
 
+  fail_path = ROOT "selectors/a/effects/alt";
+  failed = false;
+  CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_SPI_CMD, 2300) == 0);
+  CHECK(kp_rgb_selector_binding_apply(DEV(selector_b), RGB_SPI_CMD, 4300) == 0);
+  kp_rgb_matrix_lock();
+  kp_rgb_global.brightness = 47;
+  kp_rgb_matrix_unlock();
+  CHECK(kp_rgb_save_state() == 0);
+  k_sleep(K_MSEC(1100));
+  CHECK(failed);
+  struct kp_rgb_persist_global_state durable_global;
+  struct record *global_record = find(ROOT "state");
+  CHECK(kp_rgb_persist_decode_global(global_record->bytes, global_record->len,
+                                    &durable_global) == 0);
+  CHECK(durable_global.brightness == 47);
+  struct kp_rgb_persist_effect durable_parameters;
+  struct record *parameter_record = find(ROOT "selectors/b/effects/alt");
+  CHECK(kp_rgb_persist_decode_parameters(parameter_record->bytes,
+       parameter_record->len, &durable_parameters) == 0);
+  CHECK(durable_parameters.duration_ms == 4300);
+  printk("PASS scoped settings independent save despite persistent failure\n");
+  fail_path = NULL;
   struct kp_rgb_persist_effect removed = {
       .duration_ms = 2000, .h = 70, .s = 50};
   seed(ROOT "state/effects/removed", &removed, sizeof(removed));
   kp_rgb_reset_state();
   k_sleep(K_MSEC(100));
   CHECK(find(ROOT "state/effects/removed")->len == 0);
-  CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
+  perturb_and_reload();
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 120);

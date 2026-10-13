@@ -7,6 +7,7 @@ import re
 import subprocess
 import tempfile
 
+from native_process import run_logged
 from test_selector import SELECTORS, build
 
 SELECTOR_IDS = SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
@@ -47,11 +48,10 @@ def main():
     for name, (fragment, diagnostic) in cases.items():
         result = build(root, name, fragment, selectors=SELECTOR_IDS)
         assert result.returncode == 0, result.stdout[-16000:]
-        run = subprocess.run(
+        run = run_logged(
             [str(root / name / "build/zephyr/zmk.exe"), "--stop_at=1", "-no-rt"],
             cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=30)
-        (root / f"{name}.log").write_text(run.stdout)
+            log_path=root / f"{name}.log")
         assert run.returncode == 0, run.stdout
         if diagnostic:
             assert diagnostic in run.stdout, run.stdout

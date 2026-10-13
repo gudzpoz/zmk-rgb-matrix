@@ -155,6 +155,10 @@ static void kp_rgb_split_selector_dirty_locked(const struct device *owner) {
 static void kp_rgb_split_selectors_dirty_locked(void) {
  assert(held); kp_rgb_split_selector_dirty_locked(&owners[0]); kp_rgb_split_selector_dirty_locked(&owners[1]);
 }
+static void kp_rgb_split_selector_reset_locked(const struct device *owner) {
+ kp_rgb_split_selector_dirty_locked(owner);
+}
+static void kp_rgb_split_global_dirty_locked(void) { assert(held); }
 #endif
 '''
 
@@ -407,9 +411,10 @@ static void test_reset_startup_edges(void) {
  assert(kp_selector_start(&owners[0])==0 && data_a.selector.effect_index==0);
  assert(kp_selector_start(&owners[1])==0 && data_b.selector.effect_index==1);
  assert(callbacks==0 && data_a.reset_requested && data_b.reset_requested);
- /* Late readiness applies its defaults at start without disturbing restored ready siblings. */
+ /* Late readiness must preserve parameters accepted before membership refresh. */
  data_a.ready=false; effects[1].ready=true; parameters[0].duration_ms=4321;
- assert(kp_selector_start(&owners[0])==0 && parameters[0].duration_ms==4321 && parameters[1].duration_ms==700);
+ assert(zmk_rgb_matrix_set_period(&effects[1],3456)==0);
+ assert(kp_selector_start(&owners[0])==0 && parameters[0].duration_ms==4321 && parameters[1].duration_ms==3456);
  kp_selector_set_active(&owners[0],true,uptime);
  assert(callbacks==2 && !data_a.reset_requested && pending_a[2]);
  setup(); owners[0].ready=false; data_a.ready=false; data_a.prepared=false;

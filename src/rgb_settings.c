@@ -41,6 +41,7 @@ struct kp_selector_load {
   bool scoped_seen;
   bool dirty;
   bool reset;
+  bool migration_pending; /* Imported state must be durable before replacing v2. */
   uint32_t revision;
 };
 
@@ -305,6 +306,7 @@ int kp_rgb_settings_commit(void) {
     }
     load->scoped_pending = false;
     if (imported) {
+      load->migration_pending = true;
       kp_dirty_selector_locked(i);
       kp_dirty_global_locked();
       save = true;
@@ -466,6 +468,10 @@ static void kp_rgb_save_work_handler(struct k_work *work) {
       continue;
     uint32_t revision;
     int rc = kp_save_selector(i, &revision);
+    kp_rgb_matrix_lock();
+    if (rc == 0 && revision == kp_selectors[i].revision)
+      kp_selectors[i].migration_pending = false;
+    kp_rgb_matrix_unlock();
     /* Scoped defaults are durable before legacy fallback is removed. */
     if (rc == 0)
       rc = kp_clear_legacy_effects(i);
@@ -482,19 +488,30 @@ static void kp_rgb_save_work_handler(struct k_work *work) {
   bool dirty = kp_global_dirty;
   uint32_t revision = kp_global_revision;
   bool reset = kp_global_reset;
+  bool migration_pending = false;
+  if (kp_legacy_valid && !kp_global_seen) {
+    for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++)
+      migration_pending |= kp_selectors[i].migration_pending;
+  }
   kp_rgb_matrix_unlock();
-  if (dirty && err == 0) {
-    err = kp_save_global();
-    if (err == 0 && reset)
-      err = kp_purge_legacy_effects();
+  if (dirty && !migration_pending) {
+    int rc = kp_save_global();
     kp_rgb_matrix_lock();
-    if (err == 0 && revision == kp_global_revision) {
-      kp_global_dirty = kp_global_reset = false;
-      if (kp_rgb_persist_selector_count() != 0 &&
-          kp_rgb_selector_alias() != NULL)
-        kp_legacy_valid = false;
-    }
+    if (rc == 0 && revision == kp_global_revision &&
+        kp_rgb_persist_selector_count() != 0 &&
+        kp_rgb_selector_alias() != NULL)
+      kp_legacy_valid = false;
     kp_rgb_matrix_unlock();
+    if (rc == 0 && reset)
+      rc = kp_purge_legacy_effects();
+    kp_rgb_matrix_lock();
+    if (rc == 0 && revision == kp_global_revision)
+      kp_global_dirty = kp_global_reset = false;
+    if (kp_global_dirty && err == 0)
+      err = rc < 0 ? rc : -EAGAIN;
+    kp_rgb_matrix_unlock();
+  } else if (dirty && err == 0) {
+    err = -EAGAIN;
   }
   if (err < 0) {
     LOG_WRN("RGB settings save incomplete (err %d); retrying", err);

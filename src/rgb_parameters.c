@@ -9,9 +9,19 @@
 
 #include "rgb_matrix_internal.h"
 
-const struct device *kp_rgb_selector_alias(void) {
 #if DT_HAS_COMPAT_STATUS_OKAY(keypaw_behavior_rgb_matrix)
 #define KP_GLOBAL_CONTROL DT_INST(0, keypaw_behavior_rgb_matrix)
+#if DT_NODE_HAS_PROP(KP_GLOBAL_CONTROL, selector)
+BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(KP_GLOBAL_CONTROL, selector),
+                                keypaw_rgb_overlay_selector),
+             "RGB matrix selector alias must reference a selector overlay");
+BUILD_ASSERT(DT_NODE_HAS_STATUS(DT_PHANDLE(KP_GLOBAL_CONTROL, selector), okay),
+             "RGB matrix selector alias must reference an enabled selector");
+#endif
+#endif
+
+const struct device *kp_rgb_selector_alias(void) {
+#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_behavior_rgb_matrix)
   return COND_CODE_1(DT_NODE_HAS_PROP(KP_GLOBAL_CONTROL, selector),
                      (DEVICE_DT_GET(DT_PHANDLE(KP_GLOBAL_CONTROL, selector))),
                      (NULL));

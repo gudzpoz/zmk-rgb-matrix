@@ -31,6 +31,32 @@ int kp_rgb_selector_snapshot_locked(const struct device *selector,
   return 0;
 }
 
+int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
+                                         size_t *cursor,
+                                         struct kp_rgb_selector_snapshot *snapshot) {
+  if (cursor == NULL || snapshot == NULL)
+    return -EINVAL;
+  struct kp_rgb_selector *state = kp_rgb_selector_overlay_state_locked(selector);
+  const struct device *control = kp_rgb_selector_control(selector);
+  if (state == NULL || control == NULL || !device_is_ready(control))
+    return -ENODEV;
+  while (*cursor < state->effect_count) {
+    size_t slot = (*cursor)++;
+    const struct device *effect = kp_rgb_selector_at(state, slot);
+    if (effect == NULL || !device_is_ready(effect))
+      continue;
+    if (slot > UINT16_MAX)
+      return -EINVAL;
+    const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
+    *snapshot = (struct kp_rgb_selector_snapshot){.control = control,
+                                                 .slot = (uint16_t)slot,
+                                                 .color = data->color,
+                                                 .period_ms = data->duration_ms};
+    return 1;
+  }
+  return 0;
+}
+
 int kp_rgb_selector_snapshot_binding(
     const struct kp_rgb_selector_snapshot *snapshot, uint8_t step,
     struct zmk_behavior_binding *binding) {

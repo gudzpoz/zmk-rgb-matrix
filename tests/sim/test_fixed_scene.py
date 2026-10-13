@@ -8,6 +8,7 @@ import struct
 import subprocess
 import tempfile
 
+from native_process import run_logged
 from test_selector import build
 
 SCENE = '''
@@ -50,27 +51,35 @@ NO_CONTROL = '''
 def main():
     root = Path(tempfile.mkdtemp(prefix="rgb-fixed-scene-"))
     print(f"ARTIFACTS {root}", flush=True)
+    result = build(root, "split-no-endpoint", NO_CONTROL, runtime=True, selectors=SCENE,
+                   extra_conf="CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\n"
+                              "CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n")
+    assert result.returncode != 0
+    assert "non-local split overlays require the global RGB endpoint" in result.stdout, result.stdout[-16000:]
+    print("PASS non-local split overlay rejects missing global endpoint", flush=True)
     for name, extra in (("status", ""), ("zero", '''
 &rgb_matrix { /delete-property/ strip; mapping = <>; };
 '''), ("no-control", NO_CONTROL),
+                        ("no-control-split-local", NO_CONTROL + '&status_panel { local; };'),
                         ("no-control-zero", NO_CONTROL + '''
 &rgb_matrix { /delete-property/ strip; mapping = <>; };
 ''')):
         result = build(root, name, extra, runtime=True, selectors=SCENE,
                        extra_conf="CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\n"
                                   "CONFIG_KEYPAW_SIM_FIXED_SCENE_TEST=y\n" +
-                                  ("CONFIG_KEYPAW_RGB_TRIGGERS=y\n" if name.startswith("no-control") else ""))
+                                  ("CONFIG_KEYPAW_RGB_TRIGGERS=y\n" if name.startswith("no-control") else "") +
+                                  ("CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n" if "split" in name else ""))
         assert result.returncode == 0, result.stdout[-16000:]
         if name.startswith("no-control"):
             config = (root / name / "build/zephyr/.config").read_text()
-            assert "CONFIG_KEYPAW_RGB_TRIGGERS=y" in config, config
+            if "split" not in name:
+                assert "CONFIG_KEYPAW_RGB_TRIGGERS=y" in config, config
             assert "CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX=y" not in config, config
         capture = root / f"{name}.bin"
         command = [str(root / name / "build/zephyr/zmk.exe"),
                    f"--capture={capture}", "--stop_at=2", "-no-rt"]
-        run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, timeout=30)
-        (root / f"{name}.log").write_text(run.stdout)
+        run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, log_path=root / f"{name}.log")
         assert run.returncode == 0 and "PASS fixed scene" in run.stdout, run.stdout
         assert "<err>" not in run.stdout, run.stdout
         data = capture.read_bytes()
@@ -85,7 +94,7 @@ def main():
         assert (len(data) - offset) % stride == 0
         frames = [(struct.unpack_from("<I", data, pos)[0], data[pos + 4:pos + stride])
                   for pos in range(offset, len(data), stride)]
-        if name in ("status", "no-control"):
+        if name in ("status", "no-control", "no-control-split-local"):
             phases = dict((phase, int(time)) for phase, time in
                           re.findall(r"fixed scene phase (\w+) at (\d+)", run.stdout))
             assert set(phases) == {"empty", "status", "off", "inhibited", "resumed", "empty_again"}, phases

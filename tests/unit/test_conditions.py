@@ -11,7 +11,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 UNIT = ROOT / "tests/unit"
-CASES = ("startup", "startup-unready-selector", "startup-unrestored-settings", "dag", "deadline", "deadline-reset", "same-value", "isr", "cycle", "missing",
+CASES = ("startup", "startup-errors", "startup-unready-selector", "startup-unrestored-settings", "dag", "deadline", "deadline-reset", "same-value", "isr", "cycle", "missing",
          "undeclared", "invalid-deadline", "scope", "unused-scope", "self-feedback",
          "multi-feedback", "unready", "metadata", "short-circuit", "refresh", "refresh-interrupted", "early-refresh")
 

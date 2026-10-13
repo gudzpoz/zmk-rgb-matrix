@@ -182,7 +182,7 @@ int main(void) {
     f.pixels=destination; f.scratch=scratch; f.target_count=1;
     cfg.common.opacity=100;
     kp_ovl_render(&ov,&f);
-    assert(scratch[0].r==0 && scratch[0].g==0 && scratch[0].b==0);
+    assert(scratch[0].r==0xa5 && scratch[0].g==0xa5 && scratch[0].b==0xa5);
     assert(destination[0].r==9 && destination[0].g==11 && destination[0].b==13);
     assert(destination[1].r==104 && destination[1].g==73 && destination[1].b==101);
     const size_t reordered[2]={1,0}; f.targets=reordered; f.target_count=2;

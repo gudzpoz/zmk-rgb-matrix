@@ -7,18 +7,22 @@
 #include <zephyr/init.h>
 #include <zephyr/settings/settings.h>
 
-void zmk_rgb_matrix_start(void) {
-  __ASSERT(!k_is_in_isr(), "RGB startup requires thread context");
-  if (k_is_in_isr() || kp_rgb_settings_commit() < 0 || kp_rgb_selector_overlays_start() < 0) return;
+int zmk_rgb_matrix_start(void) {
+  if (k_is_in_isr())
+    return -EWOULDBLOCK;
+  int err = kp_rgb_settings_commit();
+  if (err < 0)
+    return err;
+  err = kp_rgb_selector_overlays_start();
+  if (err < 0)
+    return err;
   kp_rgb_conditions_start();
+  return 0;
 }
 
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_CONTROL_AUTO_START)
 
-static int control_start(void) {
-  zmk_rgb_matrix_start();
-  return 0;
-}
+static int control_start(void) { return zmk_rgb_matrix_start(); }
 
 #if IS_ENABLED(CONFIG_SETTINGS)
 

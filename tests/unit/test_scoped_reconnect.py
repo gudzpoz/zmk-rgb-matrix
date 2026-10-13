@@ -328,7 +328,7 @@ static void test_unready_and_control_independence(void) {
  kp_rgb_matrix_lock(); uint64_t a=kp_rgb_sync_selectors[0].revision,b=kp_rgb_sync_selectors[1].revision;
  kp_rgb_split_selectors_dirty_locked(); kp_rgb_matrix_unlock();
  assert(kp_rgb_sync_selectors[0].revision==a+1 && kp_rgb_sync_selectors[1].revision==b+1);
- before=attempt_count; tick(); drain(30); assert(attempt_count==before+12);
+ before=attempt_count; tick(); drain(30); assert(attempt_count==before+20);
 }
 int main(void) {
  test_init_poll_settle(); test_fairness_continual_dirty(); test_failure_isolation_and_completion_backoff();
@@ -347,16 +347,17 @@ def fixture():
     selector = (ROOT / "src/rgb_selector.c").read_text()
     control = (ROOT / "src/behaviors/selector.c").read_text()
     # The existing snapshot fixture supplies locked provider and parameter mocks.
-    prelude = PRELUDE[:PRELUDE.index("static unsigned dirty_calls;")]
+    prelude = PRELUDE[:PRELUDE.index("static void kp_rgb_split_selector_reset_locked")]
     code = prelude + MOCKS + structure(selector_h, "kp_rgb_selector") + "\n"
     code += sync_h[sync_h.index("#define RGB_SELECTOR_COLOR_CMD"):sync_h.index("/* Caller holds")]
     code += "\n".join(function(selector, n) for n in ("kp_rgb_selector_at", "kp_rgb_selector_member_slot"))
-    code += "\n".join(function(sync, n) for n in ("kp_rgb_selector_snapshot_locked", "kp_rgb_selector_snapshot_binding", "kp_rgb_selector_member_apply_locked"))
+    code += "\n".join(function(sync, n) for n in ("kp_rgb_selector_snapshot_locked", "kp_rgb_selector_next_snapshot_locked", "kp_rgb_selector_snapshot_binding", "kp_rgb_selector_member_apply_locked"))
     code += SCOPED_MOCKS[:SCOPED_MOCKS.index("static struct zmk_behavior_binding sent_binding;")]
     code += TRANSPORT
     code += "\n".join(re.search(r"enum " + n + r" \{.*?\};", split, re.S).group() for n in ("kp_rgb_sync_phase", "kp_rgb_sync_emit"))
     code += "\n".join(structure(split, n) for n in ("kp_rgb_global_snapshot", "kp_rgb_sync_selector", "kp_rgb_sync_selector_progress", "kp_rgb_sync_source"))
     code += r'''
+static uint64_t kp_rgb_global_revision;
 static struct kp_rgb_sync_selector kp_rgb_sync_selectors[3];
 static struct kp_rgb_sync_source kp_rgb_sync_sources[2];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
@@ -366,7 +367,7 @@ static size_t kp_rgb_sync_selector_cursor;
     # Constants are extracted rather than copied into the scheduler fixture.
     code += "\n".join(re.findall(r"^#define KP_RGB_SYNC_(?:STEP_DELAY_MS|MAX_BACKOFF_MS|BACKOFF_SHIFT_MAX) .*$", split, re.M)) + "\n"
     code += "\n".join(function(split, n) for n in (
-        "kp_rgb_sync_selector_count", "kp_rgb_split_selector_dirty_locked", "kp_rgb_split_selectors_dirty_locked",
+        "kp_rgb_sync_selector_count", "kp_rgb_split_selector_dirty_locked", "kp_rgb_split_selector_reset_locked", "kp_rgb_split_selectors_dirty_locked",
         "kp_rgb_sync_selectors_reset", "kp_rgb_sync_selectors_refresh", "kp_rgb_sync_refresh",
         "kp_rgb_sync_send_binding", "kp_rgb_split_send_selector", "kp_rgb_sync_selector_step_handler",
         "kp_rgb_sync_poll_handler", "kp_rgb_split_sync_init"))
@@ -381,7 +382,7 @@ def main():
         source.write_text(fixture())
         subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
             "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
-            str(source), "-o", str(binary)], check=True)
+            str(source), "-o", str(binary)], check=True, timeout=20)
         subprocess.run([str(binary)], check=True, timeout=10)
 
 

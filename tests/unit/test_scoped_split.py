@@ -59,6 +59,7 @@ static const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *,si
 static int kp_rgb_selector_member_slot(const struct kp_rgb_selector *,const struct device *);
 static int kp_rgb_set_color_locked(const struct device *,const struct kp_rgb_hsb *);
 static int kp_rgb_set_period_locked(const struct device *,uint32_t);
+static void kp_rgb_split_selector_reset_locked(const struct device *owner) { assert(held && owner); }
 static unsigned dirty_calls;
 static void kp_rgb_split_selector_dirty_locked(const struct device *owner) {
  assert(held && owner); dirty_calls++;
@@ -123,7 +124,7 @@ def main():
     code = PRELUDE + structure(selector_h, "kp_rgb_selector") + "\n" + sync_api
     # The common config/data layouts above are the narrow host definitions.
     code += "\n".join(function(selector_c, n) for n in ("kp_rgb_selector_at", "kp_rgb_selector_member_slot"))
-    code += "\n".join(function(sync_c, n) for n in ("kp_rgb_selector_snapshot_locked", "kp_rgb_selector_snapshot_binding", "kp_rgb_selector_member_apply_locked"))
+    code += "\n".join(function(sync_c, n) for n in ("kp_rgb_selector_snapshot_locked", "kp_rgb_selector_next_snapshot_locked", "kp_rgb_selector_snapshot_binding", "kp_rgb_selector_member_apply_locked"))
     code += TESTS
     code += "\n".join(function(split_c, n) for n in ("kp_rgb_sync_send_binding", "kp_rgb_split_send_selector"))
     code += wrapper
@@ -170,6 +171,21 @@ static void test_snapshot_binding_and_frozen_data(void) {
  assert(kp_rgb_selector_snapshot_binding(&a,1,&bind)==0 && bind.param2==500);
  assert(kp_rgb_selector_snapshot_binding(&b,0,&bind)==0 && bind.param2==RGB_COLOR_HSB_VAL(102,50,100));
  assert(locks==unlocks && !held && io_calls==0);
+}
+static void test_member_sweep_snapshot(void) {
+ setup(); size_t cursor=0; struct kp_rgb_selector_snapshot s;
+ kp_rgb_matrix_lock();
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],&cursor,&s)==1);
+ assert(s.slot==0 && s.color.h==100 && cursor==1);
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],&cursor,&s)==1);
+ assert(s.slot==2 && s.color.h==101 && cursor==3);
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],&cursor,&s)==0);
+ cursor=0; effects[0].ready=false;
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],&cursor,&s)==1 && s.slot==2);
+ controls[0].ready=false; cursor=0;
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],&cursor,&s)==-ENODEV && cursor==0);
+ assert(kp_rgb_selector_next_snapshot_locked(&owners[0],NULL,&s)==-EINVAL);
+ kp_rgb_matrix_unlock();
 }
 static void test_sender_transport_contract(void) {
  setup(); struct kp_rgb_selector_snapshot saved=snapshot(0), before=saved;
@@ -219,11 +235,11 @@ static void test_addressed_apply_and_validation(void) {
  controls[0].ready=false; kp_rgb_matrix_lock(); ret=kp_rgb_selector_snapshot_locked(&owners[0],&(struct kp_rgb_selector_snapshot){0}); kp_rgb_matrix_unlock(); assert(ret==-ENODEV);
  assert(io_calls==0 && !held && locks==unlocks);
 }
-int main(void) { test_snapshot_binding_and_frozen_data(); test_addressed_apply_and_validation(); test_sender_transport_contract(); puts("scoped split snapshots, member commands and transport passed"); }
+int main(void) { test_member_sweep_snapshot(); test_snapshot_binding_and_frozen_data(); test_addressed_apply_and_validation(); test_sender_transport_contract(); puts("scoped split snapshots, member commands and transport passed"); }
 '''
     with tempfile.TemporaryDirectory() as d:
         source=Path(d)/"scoped_split.c"; binary=Path(d)/"scoped_split"; source.write_text(code)
-        subprocess.run(shlex.split(os.environ.get("CC","cc"))+["-std=gnu11","-Wall","-Wextra","-Werror","-Wno-unused-function",str(source),"-o",str(binary)],check=True)
+        subprocess.run(shlex.split(os.environ.get("CC","cc"))+["-std=gnu11","-Wall","-Wextra","-Werror","-Wno-unused-function",str(source),"-o",str(binary)],check=True,timeout=20)
         subprocess.run([str(binary)],check=True,timeout=10)
 
 if __name__ == "__main__": main()

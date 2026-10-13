@@ -23,6 +23,11 @@ struct kp_rgb_selector_snapshot {
 /* Caller holds the matrix mutex. No callbacks, persistence or transport I/O. */
 int kp_rgb_selector_snapshot_locked(const struct device *selector,
                                     struct kp_rgb_selector_snapshot *snapshot);
+/* Advance cursor past the next ready enabled member; return 1, 0 at end,
+ * or a negative error. Caller holds the matrix mutex. */
+int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
+                                         size_t *cursor,
+                                         struct kp_rgb_selector_snapshot *snapshot);
 int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *selector,
                                         uint32_t command, uint32_t argument);
 /* Three absolute bindings: member color, member period, then selection.
@@ -43,9 +48,15 @@ int kp_rgb_split_send_selector(uint8_t source,
  * local APIs and peripheral reception do not request synchronization. */
 void kp_rgb_split_selector_dirty_locked(const struct device *selector);
 void kp_rgb_split_selectors_dirty_locked(void);
+void kp_rgb_split_selector_reset_locked(const struct device *selector);
+void kp_rgb_split_global_dirty_locked(void);
 #else
 static inline void kp_rgb_split_selector_dirty_locked(const struct device *selector) {
   (void)selector;
 }
 static inline void kp_rgb_split_selectors_dirty_locked(void) {}
+static inline void kp_rgb_split_selector_reset_locked(const struct device *selector) {
+  (void)selector;
+}
+static inline void kp_rgb_split_global_dirty_locked(void) {}
 #endif

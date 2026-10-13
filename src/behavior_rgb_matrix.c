@@ -43,14 +43,6 @@ BUILD_ASSERT(!DT_NODE_HAS_PROP(KP_CONTROLLER, leds),
 BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_CONTROLLER)) <= 9,
              "RGB controller name must fit the split behavior_dev field");
 
-#if DT_NODE_HAS_PROP(KP_CONTROLLER, selector)
-BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(KP_CONTROLLER, selector),
-                                keypaw_rgb_overlay_selector),
-             "RGB matrix selector alias must reference a selector overlay");
-BUILD_ASSERT(DT_NODE_HAS_STATUS(DT_PHANDLE(KP_CONTROLLER, selector), okay),
-             "RGB matrix selector alias must reference an enabled selector");
-#endif
-
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
 static const struct behavior_parameter_value_metadata no_arg_values[] = {
     {.display_name = "Toggle On/Off",
@@ -218,6 +210,7 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
       return -EINVAL;
     kp_rgb_reset_state();
     kp_rgb_matrix_lock();
+    kp_rgb_split_global_dirty_locked();
     kp_rgb_split_selectors_dirty_locked();
     kp_rgb_matrix_unlock();
     return 0;
@@ -234,6 +227,9 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
   }
   if (ret < 0)
     return ret;
+  kp_rgb_matrix_lock();
+  kp_rgb_split_global_dirty_locked();
+  kp_rgb_matrix_unlock();
   kp_rgb_save_state();
   return ret;
 }

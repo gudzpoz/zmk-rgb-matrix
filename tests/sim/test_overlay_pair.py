@@ -45,14 +45,14 @@ def main():
                    "-b", "native_sim//zmk_test_mock", "-p", "--",
                    f"-DZMK_CONFIG={config}",
                    f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
-        subprocess.run(command, cwd=WORKSPACE, check=True)
+        subprocess.run(command, cwd=WORKSPACE, check=True, timeout=600)
 
         capture = root / "pair.bin"
         run = subprocess.run(
             [str(build / "zephyr/zmk.exe"), "--effect=0", f"--capture={capture}",
              "--stop_at=4", "-no-rt"],
             cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            check=True,
+            check=True, timeout=30,
         )
         log = run.stdout
         assert capture.is_file() and capture.stat().st_size > 1000, "no useful capture"

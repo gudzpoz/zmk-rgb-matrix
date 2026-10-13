@@ -104,3 +104,15 @@ jobs:
         env:
           ZMK_WS: ${{ github.workspace }}/zmk-ws
         run: python3 tests/sim/test_configuration.py
+
+      - name: Native integration contracts
+        env:
+          ZMK_WS: ${{ github.workspace }}/zmk-ws
+        run: bash tests/sim/run-native.sh
+
+      - name: Retain native failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-test-logs
+          path: build/native-artifacts/**/*.log

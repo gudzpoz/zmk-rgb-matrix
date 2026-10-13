@@ -55,7 +55,7 @@ int main(void) {
    now_ms=kp_rgb_sync_sources[0].ready_at;
    kp_rgb_sync_step_handler(NULL);
  }
- assert(kp_rgb_sync_sources[0].ready_at-(now_ms-send_cost)==1000);
+ assert(kp_rgb_sync_sources[0].ready_at-now_ms==1000);
  before=sends; kp_rgb_sync_clock_handler(NULL);
  assert(sends==before+1 && bindings[before].param1==RGB_CLOCK_CMD);
  assert(!held); puts("global reconnect, offline settling, canonical selector transport and capped retries passed");

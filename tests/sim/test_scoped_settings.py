@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from native_process import run_logged
 from test_selector import SELECTORS, build
 
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
@@ -37,10 +38,10 @@ def main():
         result = build(root, name, fragment, runtime=True, selectors=SELECTORS,
                        extra_conf=CONF + config)
         assert result.returncode == 0, result.stdout[-20000:]
-        run = subprocess.run([str(root / name / "build/zephyr/zmk.exe"),
-                              "--stop_at=4", "-no-rt"], cwd=root, text=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-        (root / f"{name}.log").write_text(run.stdout)
+        run = run_logged([str(root / name / "build/zephyr/zmk.exe"),
+                          "--stop_at=4", "-no-rt"], cwd=root, text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         log_path=root / f"{name}.log")
         assert run.returncode == 0, run.stdout[-20000:]
         for marker in (
             "restored before startup notification",

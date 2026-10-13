@@ -301,6 +301,11 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
               (kp_rgb_effect_convert_central_state_dependent_params), (NULL))
 
+/* Initializes parameters before the effect becomes ready. An enabled selector's
+ * children use their DTS color at maximum brightness and their nonzero duration,
+ * or the parent's initial-duration-ms when zero; periods are clamped to the
+ * configured bounds. Private effects retain COMMON_DATA color and zero-duration
+ * fallback semantics. Selector preparation preserves accepted parameter changes. */
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
   KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                      \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
@@ -317,10 +322,22 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                "as the first field");                                          \
   static int cfg_inst##_init(const struct device *dev) {                       \
     uint32_t duration = DT_PROP_OR(node_id, duration, 0);                      \
-    kp_rgb_effect_data(dev)->duration_ms =                                     \
-        duration ? CLAMP(duration, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,   \
+    COND_CODE_1(                                                               \
+        KP_RGB_EFFECT_HAS_OWNER(node_id),                                      \
+        (kp_rgb_effect_data(dev)->color = (struct kp_rgb_hsb)                  \
+             KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0));               \
+         kp_rgb_effect_data(dev)->color.b = KP_RGB_BRT_MAX;                    \
+         if (duration == 0) {                                                  \
+           duration = DT_PROP(DT_PARENT(node_id), initial_duration_ms);        \
+         } kp_rgb_effect_data(dev)                                             \
+             ->duration_ms =                                                   \
+             CLAMP(duration, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,         \
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);),                \
+        (kp_rgb_effect_data(dev)->duration_ms =                                \
+             duration                                                          \
+                 ? CLAMP(duration, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,   \
                          CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)             \
-                 : kp_rgb_effect_period(dev);                                  \
+                 : kp_rgb_effect_period(dev);))                                \
     return 0;                                                                  \
   }                                                                            \
   IF_ENABLED(                                                                  \
@@ -368,10 +385,11 @@ struct kp_rgb_condition_api {
 /* Start control once defaults, all settings, and all provider sources are ready.
  * Idempotent, thread-context only. Required when CONTROL_AUTO_START is disabled;
  * otherwise called by the late settings commit or APPLICATION startup hook.
- * Each configured selector must have a ready child. Otherwise startup is deferred;
- * call again after its children are ready.
+ * Returns 0 when startup is accepted, not when asynchronous sampling or output
+ * completes. Returns -EWOULDBLOCK in ISR context, -ENODEV when required devices
+ * are not ready (retry after initialization), or a settings/ID validation error.
  */
-void zmk_rgb_matrix_start(void);
+int zmk_rgb_matrix_start(void);
 
 /* Any-context, non-blocking notification. NULL/unregistered devices are errors.
  * Notifications coalesce: intermediate source transitions need not be observed.
@@ -495,6 +513,10 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
 /* Declare a non-behavior overlay device and its target storage. Config/data must
  * embed their common headers first. render is required; other callbacks are optional. */
 #define KP_RGB_OVERLAY_DEFINE(inst, callbacks_expr, replaces, cfg_inst)        \
+  BUILD_ASSERT(!IS_ENABLED(CONFIG_ZMK_SPLIT) ||                                \
+                   DT_PROP(DT_DRV_INST(inst), local) ||                        \
+                   IS_ENABLED(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX),              \
+               "non-local split overlays require the global RGB endpoint");    \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
                    (const void *)&cfg_inst##_cfg ==                            \

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from native_process import run_logged
 from test_selector import SELECTORS, build
 
 SOLID_SELECTORS = (SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
@@ -38,11 +39,10 @@ def runtime(root, name, fragment):
                    runtime=True, selectors=SOLID_SELECTORS, extra_conf=CONF)
     assert result.returncode == 0, result.stdout[-20000:]
     command = [str(root / name / "build/zephyr/zmk.exe"),
-               "--stop_at=9", "-no-rt"]
+               "--stop_at=16", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
-    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, timeout=30)
-    (root / f"{name}.log").write_text(run.stdout)
+    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                     stderr=subprocess.STDOUT, log_path=root / f"{name}.log")
     assert run.returncode == 0, run.stdout[-20000:]
     for marker in (
         "off/inhibited reconnect endpoints/qualified ordering",
@@ -50,6 +50,9 @@ def runtime(root, name, fragment):
         "rapid changes/retry convergence",
         "disconnect/reconnect discards in-flight snapshot",
         "outside-mutex transport/local errors",
+        "reset repairs inactive members after frozen retry",
+        "global behavior repairs frozen power/brightness",
+        "global reset repairs all selectors/members",
         "transport acceptance only",
     ):
         assert f"PASS scoped split {marker}" in run.stdout, run.stdout
@@ -61,7 +64,7 @@ def runtime(root, name, fragment):
 
 
 def main():
-    root = Path(tempfile.mkdtemp(prefix="rgb-scoped-split-"))
+    root = Path(tempfile.mkdtemp(prefix="rgb-scoped-split-c1c2s6-"))
     print(f"ARTIFACTS {root}", flush=True)
     runtime(root, "transport", "")
     runtime(root, "transport-zero", '''

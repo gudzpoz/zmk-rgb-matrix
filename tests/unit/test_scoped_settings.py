@@ -135,7 +135,7 @@ static struct entry *lookup(const char *path) { for(size_t i=0;i<32;i++) if(stor
 static void put(const char *path,const void *bytes,size_t len) { struct entry *e=lookup(path);if(!e)for(size_t i=0;i<32;i++)if(!store[i].len){e=&store[i];break;}assert(e&&len<=sizeof(e->bytes));strcpy(e->path,path);memcpy(e->bytes,bytes,len);e->len=len; }
 static int io(const char *path,bool deletion) {
     assert(!held&&journal_count<256);int rc=0;
-    if(fail_count&&deletion==fail_delete&&fail_path&&!strcmp(path,fail_path)){fail_count--;rc=-EIO;}
+    if(fail_count&&deletion==fail_delete&&fail_path&&!strcmp(path,fail_path)){if(fail_count!=UINT_MAX)fail_count--;rc=-EIO;}
     struct operation *op=&journal[journal_count++];strcpy(op->path,path);op->deletion=deletion;op->result=rc;
     if(save_hook&&!deletion&&hook_path&&!strcmp(path,hook_path)){void(*hook)(void)=save_hook;save_hook=NULL;hook();assert(!held);}
     return rc;
@@ -337,7 +337,7 @@ static void cleanup(void) {
     clean_boot();stage_legacy();assert(registered_commit()==0);
     fail_path=LEGPAR;fail_delete=true;fail_count=1;run_work();
     assert(pending && lookup(LEGPAR) && lookup(PAR1));
-    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_blob));
+    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
     run_work();assert(!pending && !lookup(LEGPAR));
     assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
     stage_legacy();kp_rgb_matrix_lock();assert(kp_rgb_selector_apply_defaults_locked(&selectors[0])==0);kp_rgb_matrix_unlock();
@@ -384,6 +384,39 @@ static void assert_persisted_parameters(const char *path,uint16_t hue,uint16_t d
     struct kp_rgb_persist_effect value;
     assert(lookup(path) && kp_rgb_persist_decode_parameters(lookup(path)->bytes,lookup(path)->len,&value)==0);
     assert(value.h==hue && value.duration_ms==duration);
+}
+static void independent_failures(void) {
+    clean_boot();
+    kp_rgb_global.brightness=29;assert(kp_rgb_save_state()==0);run_work();
+    fail_path=PAR1;fail_delete=false;fail_count=UINT_MAX;
+    for(unsigned pass=0;pass<3;pass++) {
+        data[1][0].color.h=200+pass;
+        kp_rgb_global.brightness=40+pass;
+        assert(kp_rgb_save_selector_state(&owners[0],false)==0);
+        assert(kp_rgb_save_selector_state(&owners[1],false)==0);
+        assert(kp_rgb_save_state()==0);run_work();
+        assert(pending && scheduled_delay==1000 && kp_selectors[0].dirty);
+        assert(!kp_selectors[1].dirty && !kp_global_dirty);
+        assert_persisted_parameters(PAR2,200+pass,500);
+        struct kp_rgb_persist_global_state global;
+        assert(kp_rgb_persist_decode_global(lookup(GLOBAL)->bytes,lookup(GLOBAL)->len,&global)==0);
+        assert(global.brightness==40+pass);
+    }
+    assert(!lookup(PAR1));
+
+    clean_boot();stage_legacy();assert(registered_commit()==0);
+    fail_path=PAR2;fail_delete=false;fail_count=UINT_MAX;
+    assert(kp_rgb_save_selector_state(&owners[1],false)==0);run_work();
+    assert(pending && !kp_selectors[0].migration_pending && kp_selectors[1].dirty);
+    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
+
+    clean_boot();stage_legacy();assert(registered_commit()==0);
+    fail_path=LEGPAR;fail_delete=true;fail_count=UINT_MAX;run_work();
+    assert(pending && lookup(LEGPAR) && !kp_selectors[0].migration_pending);
+    kp_rgb_global.brightness=72;assert(kp_rgb_save_state()==0);run_work();
+    struct kp_rgb_persist_global_state global;
+    assert(kp_rgb_persist_decode_global(lookup(GLOBAL)->bytes,lookup(GLOBAL)->len,&global)==0);
+    assert(global.brightness==72 && !kp_global_dirty && pending);
 }
 static void reordering(void) {
     clean_boot();
@@ -453,6 +486,13 @@ static void reset_during_save(void) {
 }
 static void global_reset_during_save(void) {assert(!held);kp_rgb_reset_state();}
 static void interleaving(void) {
+    clean_boot();stage_legacy();assert(registered_commit()==0);
+    hook_path=PAR1;save_hook=reset_during_save;run_work();
+    assert(pending && kp_selectors[0].migration_pending && kp_global_dirty);
+    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_blob));
+    run_work();assert(!pending && !kp_selectors[0].migration_pending);
+    assert(lookup(GLOBAL)->len==sizeof(struct kp_rgb_persist_global_record));
+    assert_persisted_parameters(PAR1,10,500);
     clean_boot();
     assert(kp_rgb_save_selector_state(&owners[0],false)==0);
     hook_path=PAR1;save_hook=change_during_save;run_work();
@@ -540,6 +580,7 @@ int main(void) {
     assert(!strcmp(registered_subtree,KP_RGB_PERSIST_SUBTREE));
     precedence(false);precedence(true);validation();readiness();migration(PAR1);migration(SEL1);migration(GLOBAL);isolation();cleanup();no_alias();reset_legacy_scope();
     reordering();import_other();interleaving();reset_revision_interleaving();immutable_purge();reset_staged_legacy();
+    independent_failures();
     puts("scoped settings staging/precedence/migration/isolation/reset/retries passed");return 0;
 }
 '''

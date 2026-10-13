@@ -30,6 +30,7 @@ PRELUDE = r'''
 #define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
 #define CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS 100
+#define CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS 25
 #define CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS 30000
 #define K_MSEC(x) (x)
 #define K_NO_WAIT 0
@@ -48,6 +49,7 @@ struct zmk_behavior_binding_event { uint8_t layer,position; int64_t timestamp; u
 struct zmk_split_transport_central_api { int (*get_available_source_ids)(uint8_t *); };
 struct zmk_split_transport_central { const struct zmk_split_transport_central_api *api; };
 static struct { bool user_on; uint8_t brightness; } kp_rgb_global;
+static uint64_t kp_rgb_global_revision;
 static unsigned held;
 static void kp_rgb_matrix_lock(void) { assert(!held); held = 1; }
 static void kp_rgb_matrix_unlock(void) { assert(held); held = 0; }
@@ -56,7 +58,7 @@ static const struct device *const kp_rgb_sync_endpoint = &endpoint;
 static const struct device owners[] = {{"selector-a",true},{"selector-b",true}};
 static bool device_is_ready(const struct device *d) { return d->ready; }
 static int64_t now_ms, scheduled_delay;
-static struct k_work_delayable kp_rgb_sync_step, kp_rgb_sync_clock, kp_rgb_sync_selector_step;
+static struct k_work_delayable kp_rgb_sync_step, kp_rgb_sync_clock, kp_rgb_sync_selector_step, kp_rgb_sync_poll;
 static struct k_work_delayable *scheduled_work;
 static size_t kp_rgb_sync_selector_cursor;
 static int64_t k_uptime_get(void) { return now_ms; }
@@ -96,6 +98,12 @@ static int kp_rgb_selector_snapshot_locked(const struct device *owner, struct kp
  assert(held); size_t i = (size_t)(owner - owners); assert(i < 2); captures[i]++;
  *s = (struct kp_rgb_selector_snapshot){.control=owner,.slot=selected_slots[i],
  .color={123,45,67},.period_ms=890}; return 0;
+}
+static int kp_rgb_selector_next_snapshot_locked(const struct device *owner, size_t *cursor,
+ struct kp_rgb_selector_snapshot *s) {
+ assert(held);
+ if ((*cursor)++ != 0) return 0;
+ return kp_rgb_selector_snapshot_locked(owner,s) == 0 ? 1 : -ENODEV;
 }
 static int kp_rgb_selector_snapshot_binding(const struct kp_rgb_selector_snapshot *s,
  uint8_t step, struct zmk_behavior_binding *b) {
@@ -183,11 +191,12 @@ static const struct zmk_split_transport_central *kp_rgb_sync_transport;
         code = code.replace('{{.owner=&owners[0]}, {.owner=&owners[1]}, {0}}', '{{0}}')
     code += SELECTOR_MOCKS
     for name in ("kp_rgb_global_snapshot_locked", "kp_rgb_sync_selector_count",
-                 "kp_rgb_split_selector_dirty_locked", "kp_rgb_split_selectors_dirty_locked",
+                 "kp_rgb_split_selector_dirty_locked", "kp_rgb_split_global_dirty_locked",
+                 "kp_rgb_split_selector_reset_locked", "kp_rgb_split_selectors_dirty_locked",
                  "kp_rgb_sync_selectors_reset", "kp_rgb_sync_selectors_refresh", "kp_rgb_sync_refresh",
                  "kp_rgb_sync_send_binding", "kp_rgb_split_send_selector", "kp_rgb_sync_send",
                  "kp_rgb_sync_send_clock", "kp_rgb_sync_clock_handler", "kp_rgb_sync_emit_global",
-                 "kp_rgb_sync_step_handler", "kp_rgb_sync_selector_step_handler"):
+                 "kp_rgb_sync_step_handler", "kp_rgb_sync_selector_step_handler", "kp_rgb_sync_poll_handler"):
         code += function(source, name) + "\n"
     return code
 

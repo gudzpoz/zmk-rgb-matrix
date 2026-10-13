@@ -215,13 +215,14 @@ static void advance(int64_t to) {
     }
     ready();
 }
-static void start(void) {
+static int start(void) {
 #if CONFIG_KEYPAW_RGB_CONTROL_AUTO_START
-    assert(startup_hook() == 0);
+    int err = startup_hook();
 #else
-    zmk_rgb_matrix_start();
+    int err = zmk_rgb_matrix_start();
 #endif
     ready();
+    return err;
 }
 static void link_to(size_t parent, size_t child) {
     sources[parent].composite = true;
@@ -263,23 +264,31 @@ int main(int argc, char **argv) {
         start();
         assert(entries[0].fault && refresh_completions == 1 && completed_token == 2);
         assert(!control_work.queued && !control_work.scheduled);
+    } else if (!strcmp(name, "startup-errors")) {
+        isr = true;
+        assert(zmk_rgb_matrix_start() == -EWOULDBLOCK);
+        isr = false;
+        assert(!selector_starts && !evaluations && !schedules);
+        settings_commit_error = -EINVAL;
+        assert(start() == -EINVAL);
+        assert(!selector_starts && !evaluations && !schedules);
     } else if (!strcmp(name, "startup-unrestored-settings")) {
         sources[0].value = true;
         settings_commit_error = -ENODEV;
-        start();
+        assert(start() == -ENODEV);
         assert(!selector_starts && !evaluations && !schedules && !sources[0].calls);
         settings_commit_error = 0;
-        start();
+        assert(start() == 0);
         assert(selector_starts == 1 && evaluations == 1 && sources[0].calls == 1 && gate);
     } else if (!strcmp(name, "startup-unready-selector")) {
         sources[0].value = true;
         selector_start_error = -ENODEV;
-        start();
+        assert(start() == -ENODEV);
         assert(selector_starts == 1 && !evaluations && !schedules && !sources[0].calls);
         selector_start_error = 0;
-        start();
+        assert(start() == 0);
         assert(selector_starts == 2 && evaluations == 1 && sources[0].calls == 1 && gate);
-        zmk_rgb_matrix_start();
+        assert(zmk_rgb_matrix_start() == 0);
         ready();
         assert(selector_starts == 3 && evaluations == 1 && sources[0].calls == 1);
     } else if (!strcmp(name, "startup")) {

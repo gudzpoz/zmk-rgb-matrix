@@ -190,9 +190,6 @@ static void kp_selector_prepare_locked(struct kp_selector_data *data) {
   if (data->prepared)
     return;
   kp_selector_refresh_members(data);
-  struct kp_rgb_selector defaults = data->selector;
-  defaults.publish_changes = false;
-  kp_rgb_selector_apply_defaults_locked(&defaults);
   data->selector.effect_index = data->selector.initial_effect;
   data->selector.active_fx = NULL;
   data->prepared = true;
@@ -207,14 +204,6 @@ kp_rgb_selector_overlay_prepare_locked(const struct device *dev) {
     return NULL;
   struct kp_selector_data *data = dev->data;
   kp_selector_prepare_locked(data);
-  struct kp_rgb_selector defaults = data->selector;
-  defaults.publish_changes = false;
-  for (size_t i = 0; i < data->selector.effect_count; i++) {
-    const struct device *effect = data->instances[i].effect;
-    bool newly_ready = data->members[i] == NULL && effect != NULL && device_is_ready(effect);
-    data->members[i] = newly_ready ? effect : NULL;
-  }
-  kp_rgb_selector_apply_defaults_locked(&defaults);
   kp_selector_refresh_members(data);
   return &data->selector;
 }

@@ -120,7 +120,8 @@ static const struct kp_rgb_overlay_api selector_api={.callbacks=&kp_selector_cal
 static const struct kp_rgb_effect_callbacks child_callbacks={.render=child_render,.on_event=child_event,.reset=child_reset,.set_active=child_active_fn};
 static const struct kp_rgb_effect_api child_api={.callbacks=&child_callbacks};
 static const struct device owner_a={.name="selector-a"}, owner_b={.name="selector-b"};
-static struct kp_rgb_effect_common_data effect_data[5];
+static struct kp_rgb_effect_common_data effect_data[5]={
+    {{10,20,100},100}, {{40,50,100},200}, {{70,80,100},300}, {{100,10,100},400}, {{0},0}};
 static struct device effects[5];
 static const struct device *declared_a[]={&effects[0],NULL,&effects[1]};
 static const struct device *declared_b[]={&effects[2],&effects[3]};
@@ -211,7 +212,7 @@ int main(void) {
     defaults_a[2].duration_ms=0;
     assert(kp_selector_start(&selectors[0])==0 && a->selector.effect_index==2);
     assert(members_a[0]==NULL && members_a[2]==&effects[1]);
-    assert(effect_data[1].duration_ms==250);
+    assert(effect_data[1].duration_ms==200);
     assert(kp_rgb_selector_overlay_select_locked(&selectors[0],0)==-ENOENT);
     a->ready=false; a->prepared=false; unready_effect=NULL; defaults_a[2].duration_ms=200;
     assert(kp_selector_start(&selectors[0])==0);

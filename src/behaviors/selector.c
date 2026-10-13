@@ -96,8 +96,12 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
           ? (argument == 0 ? kp_rgb_selector_overlay_reset_locked(selector)
                            : -EINVAL)
           : kp_rgb_selector_dispatch_locked(state, command, argument);
-  if (err >= 0)
-    kp_rgb_split_selector_dirty_locked(selector);
+  if (err >= 0) {
+    if (command == RGB_RESET_CMD)
+      kp_rgb_split_selector_reset_locked(selector);
+    else
+      kp_rgb_split_selector_dirty_locked(selector);
+  }
   kp_rgb_matrix_unlock();
   if (err >= 0)
     err = kp_rgb_save_selector_state(selector, command == RGB_RESET_CMD);

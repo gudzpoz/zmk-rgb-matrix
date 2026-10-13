@@ -5,6 +5,7 @@
 #include <string.h>
 #include <zephyr/sys/printk.h>
 #include <zmk/rgb_selector.h>
+#include <drivers/behavior.h>
 #include <zmk/split/transport/central.h>
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_sync_internal.h"
@@ -17,6 +18,7 @@
 struct lane {
     unsigned phase, slot, selected, completed;
     uint32_t color, period, selected_color, selected_period;
+    uint32_t member_color[3], member_period[3];
 };
 struct attempt {
     uint8_t source;
@@ -30,7 +32,13 @@ static struct lane remote[2][2];
 static struct attempt attempts[512];
 static unsigned attempt_count, query_count;
 static unsigned power_count[2], brightness_count[2], overlay_count[2];
-static uint32_t power[2];
+static uint32_t power[2], brightness[2];
+static bool global_race;
+static void global_apply(uint32_t command, uint32_t argument) {
+    struct zmk_behavior_binding binding = {.behavior_dev = DEV(kprgb)->name,
+        .param1 = command, .param2 = argument};
+    CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
+}
 static unsigned connected;
 static bool fail_a;
 static zmk_split_transport_central_status_changed_cb_t status_cb;
@@ -86,20 +94,23 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
         struct lane *lane = &remote[source][index];
         uint32_t kind = command & KP_RGB_SELECTOR_COMMAND_MASK;
         if (kind == RGB_SELECTOR_COLOR_CMD) {
-            CHECK(lane->phase == 0);
+            CHECK(lane->phase == 0 || lane->phase == 2);
             lane->slot = command >> 16;
+            CHECK(lane->slot < ARRAY_SIZE(lane->member_color));
             lane->color = argument;
+            lane->member_color[lane->slot] = argument;
             lane->phase = 1;
         } else if (kind == RGB_SELECTOR_PERIOD_CMD) {
             CHECK(lane->phase == 1 && lane->slot == command >> 16);
             lane->period = argument;
+            lane->member_period[lane->slot] = argument;
             lane->phase = 2;
         } else {
             CHECK(command == RGB_EFS_CMD);
-            CHECK(lane->phase == 2 && lane->slot == argument);
+            CHECK(lane->phase == 2 && argument < ARRAY_SIZE(lane->member_color));
             lane->selected = argument;
-            lane->selected_color = lane->color;
-            lane->selected_period = lane->period;
+            lane->selected_color = lane->member_color[argument];
+            lane->selected_period = lane->member_period[argument];
             lane->completed++;
             lane->phase = 0;
         }
@@ -110,13 +121,24 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
             power_count[source]++;
         } else if (command == RGB_BRT_SET_CMD) {
             brightness_count[source]++;
+            brightness[source] = argument;
         } else if (command == RGB_OVL_STATE_CMD) {
             overlay_count[source]++;
         } else {
             CHECK(command == RGB_CLOCK_CMD);
         }
     }
+    bool inject = global_race && index < 0 && command == RGB_BRT_SET_CMD;
+    if (inject) global_race = false;
     k_mutex_unlock(&records_lock);
+    if (inject) {
+        global_apply(RGB_OFF_CMD, 0);
+        global_apply(RGB_BRT_SET_CMD, 19);
+        k_mutex_lock(&records_lock, K_FOREVER);
+        power[source] = RGB_OFF_CMD;
+        brightness[source] = 19;
+        k_mutex_unlock(&records_lock);
+    }
     return accepted ? 0 : -EIO;
 }
 
@@ -330,6 +352,75 @@ static void test_thread(void *a, void *b, void *c) {
     unsigned total_calls = attempt_count;
     k_mutex_unlock(&records_lock);
     printk("PASS scoped split outside-mutex transport/local errors\n");
+
+    k_mutex_lock(&records_lock, K_FOREVER);
+    unsigned reset_start = attempt_count;
+    k_mutex_unlock(&records_lock);
+    failing(true);
+    apply(DEV(selector_a), RGB_EFS_CMD, 2);
+    parameters(DEV(selector_a), 2, 211, 3211);
+    k_sleep(K_MSEC(200));
+    k_mutex_lock(&records_lock, K_FOREVER);
+    bool frozen_retry = false;
+    for (unsigned i = reset_start; i < attempt_count; i++) {
+        frozen_retry |= !attempts[i].accepted && attempts[i].source == 0 &&
+            attempts[i].command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2);
+    }
+    CHECK(frozen_retry);
+    k_mutex_unlock(&records_lock);
+    apply(DEV(selector_a), RGB_RESET_CMD, 0);
+    /* A normal revision must not erase the all-member reset obligation. */
+    parameters(DEV(selector_a), 1, 131, 2131);
+    failing(false);
+    k_sleep(K_MSEC(2000));
+    for (unsigned source = 0; source < 2; source++) {
+        struct lane value = lane(source, 0);
+        size_t cursor = 0;
+        kp_rgb_matrix_lock();
+        while (kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot) > 0) {
+            CHECK(value.member_color[snapshot.slot] ==
+                  RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b));
+            CHECK(value.member_period[snapshot.slot] == snapshot.period_ms);
+        }
+        CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
+        kp_rgb_matrix_unlock();
+        CHECK(value.selected == snapshot.slot && value.phase == 0);
+    }
+    printk("PASS scoped split reset repairs inactive members after frozen retry\n");
+
+    CHECK(zmk_rgb_matrix_on() == 0);
+    k_mutex_lock(&records_lock, K_FOREVER);
+    global_race = true;
+    k_mutex_unlock(&records_lock);
+    global_apply(RGB_BRT_SET_CMD, 83);
+    k_sleep(K_MSEC(1000));
+    k_mutex_lock(&records_lock, K_FOREVER);
+    CHECK(!global_race);
+    for (unsigned source = 0; source < 2; source++) {
+        CHECK(power[source] == RGB_OFF_CMD && brightness[source] == 19);
+    }
+    k_mutex_unlock(&records_lock);
+    printk("PASS scoped split global behavior repairs frozen power/brightness\n");
+
+    global_apply(RGB_RESET_CMD, 0);
+    k_sleep(K_MSEC(1500));
+    for (unsigned index = 0; index < 2; index++) {
+        const struct device *owner = index ? DEV(selector_b) : DEV(selector_a);
+        for (unsigned source = 0; source < 2; source++) {
+            struct lane value = lane(source, index);
+            size_t cursor = 0;
+            kp_rgb_matrix_lock();
+            while (kp_rgb_selector_next_snapshot_locked(owner, &cursor, &snapshot) > 0) {
+                CHECK(value.member_color[snapshot.slot] ==
+                      RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b));
+                CHECK(value.member_period[snapshot.slot] == snapshot.period_ms);
+            }
+            CHECK(kp_rgb_selector_snapshot_locked(owner, &snapshot) == 0);
+            kp_rgb_matrix_unlock();
+            CHECK(value.selected == snapshot.slot && value.phase == 0);
+        }
+    }
+    printk("PASS scoped split global reset repairs all selectors/members\n");
     printk("PASS scoped split transport acceptance only (%u calls)\n", total_calls);
 }
 K_THREAD_DEFINE(split_tests, 2048, test_thread, NULL, NULL, NULL, 8, 0, 0);
