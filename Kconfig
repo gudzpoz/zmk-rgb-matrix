@@ -142,7 +142,8 @@ config KEYPAW_BEHAVIOR_RGB_MATRIX
 config KEYPAW_RGB_TRIGGERS
     bool "RGB matrix trigger table"
     default y
-    depends on KEYPAW_BEHAVIOR_RGB_MATRIX
+    depends on KEYPAW_RGB_MATRIX
+    depends on DT_HAS_KEYPAW_RGB_TRIGGER_TABLE_ENABLED
     depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
     help
       Edge-triggered condition -> RGB command rules, declared as the children of
@@ -172,7 +173,9 @@ config KEYPAW_RGB_SPLIT_SYNC
       off, inhibited, hidden or has no local LEDs. Both halves must use matching
       canonical behavior names and member slots. Transport success means local
       acceptance, not acknowledged delivery or an atomic scene transaction.
-      The flat-controller reconnect protocol remains supported until cutover.
+      Requires an enabled keypaw,behavior-rgb-matrix global endpoint on both
+      halves for power, brightness, overlay gates and shared-clock commands,
+      even when no selectors are configured.
 
 if KEYPAW_RGB_SPLIT_SYNC
 

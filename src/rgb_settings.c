@@ -25,8 +25,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_RGB_PERSIST_KEY KP_RGB_PERSIST_SUBTREE "/state"
 #define KP_LEGACY_EFFECT_PREFIX "state/effects/"
 #define KP_LEGACY_EFFECT_PATH KP_RGB_PERSIST_SUBTREE "/" KP_LEGACY_EFFECT_PREFIX
-#define KP_FLAT_COUNT                                                          \
-  MAX(1, DT_CHILD_NUM(DT_INST(0, keypaw_behavior_rgb_matrix)))
 
 struct kp_parameter_load {
   struct kp_rgb_persist_effect scoped;
@@ -54,7 +52,6 @@ DT_INST_FOREACH_STATUS_OKAY(KP_SETTINGS_STORAGE)
 static struct kp_selector_load
     kp_selectors[MAX(1, DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT))] = {
         DT_INST_FOREACH_STATUS_OKAY(KP_SETTINGS_SELECTOR)};
-static struct kp_parameter_load kp_flat_parameters[KP_FLAT_COUNT];
 static struct kp_rgb_persist_blob kp_legacy;
 static struct kp_rgb_persist_global_state kp_global_load;
 static bool kp_legacy_valid, kp_legacy_pending, kp_global_pending,
@@ -193,17 +190,6 @@ static int kp_rgb_load_cb(const char *name, size_t len,
                                   read_cb, cb_arg);
     }
   }
-  /* The flat engine remains a compatibility bridge until Stage 7. */
-  if (legacy && kp_rgb_persist_selector_count() == 0) {
-    const char *id = name + sizeof(KP_LEGACY_EFFECT_PREFIX) - 1;
-    for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
-      const struct device *fx = kp_rgb_effect_at(i);
-      if (fx != NULL && kp_rgb_effect_cfg(fx)->persist_parameters &&
-          strcmp(id, kp_rgb_effect_cfg(fx)->persist_id) == 0)
-        return kp_load_parameters(&kp_flat_parameters[i], false, len, read_cb,
-                                  cb_arg);
-    }
-  }
   return 0;
 }
 
@@ -322,25 +308,6 @@ int kp_rgb_settings_commit(void) {
       kp_dirty_selector_locked(i);
       kp_dirty_global_locked();
       save = true;
-    }
-  }
-  if (kp_rgb_persist_selector_count() == 0) {
-    if (kp_legacy_pending && kp_legacy.has_selected) {
-      for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
-        const struct device *fx = kp_rgb_effect_at(i);
-        if (fx != NULL && strcmp(kp_rgb_effect_cfg(fx)->persist_id,
-                                 kp_legacy.selected_id) == 0) {
-          kp_rgb_select_effect_locked(i);
-          break;
-        }
-      }
-    }
-    for (size_t i = 0; i < kp_rgb_effect_count(); i++) {
-      if (kp_flat_parameters[i].legacy_pending) {
-        kp_restore_parameters_locked(kp_rgb_effect_at(i),
-                                     &kp_flat_parameters[i].legacy);
-        kp_flat_parameters[i].legacy_pending = false;
-      }
     }
   }
   kp_global_pending = kp_legacy_pending = false;
@@ -593,7 +560,6 @@ void kp_rgb_reset_state(void) {
   kp_global_pending = kp_legacy_pending = kp_legacy_valid = false;
   kp_global_seen = true;
   kp_global_reset = true;
-  memset(kp_flat_parameters, 0, sizeof(kp_flat_parameters));
   for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
     kp_reset_load_locked(i);
     kp_dirty_selector_locked(i);

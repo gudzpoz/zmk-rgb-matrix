@@ -34,6 +34,13 @@ static void scenario(void *a, void *b, void *c) {
   bool on;
   CHECK(zmk_rgb_matrix_get_state(&on) == 0 && on);
   CHECK(zmk_rgb_matrix_select_effect(0) == -ENODEV);
+  CHECK(zmk_rgb_matrix_cycle_effect(1) == -ENODEV);
+  const struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(status_color))->color;
+  CHECK(kp_rgb_effect_cfg(DEV(status_color))->owner == NULL);
+  CHECK(((const struct kp_rgb_effect_api *)DEV(status_color)->api)
+            ->behavior.binding_convert_central_state_dependent_params == NULL);
+  CHECK(zmk_rgb_matrix_set_color(DEV(status_color), &color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(status_color), 1000) == 0);
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_global.brightness == 50);
   CHECK(kp_rgb_global.tuning.max_brightness == 75);

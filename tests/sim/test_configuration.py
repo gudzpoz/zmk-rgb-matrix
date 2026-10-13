@@ -63,13 +63,22 @@ CASES = {
         duration = <2300>; };
 }; };
 '''),
-    "no-controller": (False, '&kprgb { status = "disabled"; };'),
+    "no-controller": (True, '&kprgb { status = "disabled"; };'),
     "two-controllers": (False, '''
 / { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";
     #binding-cells = <2>;
 }; }; };
 '''),
     "controller-leds": (False, "&kprgb { leds = <0 1>; };"),
+    "flat-controller-child": (False, '''&kprgb { flat_effect {
+        compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+    }; };'''),
+    "removed-overlays": (False, '&fx_solid { overlays = <&fixture_overlay>; };'),
+    "removed-no-overlays": (False, '&fx_solid { no-overlays; };'),
+    "removed-private-overlays": (False, '&fixture_overlay { fx_fixture { overlays = <&fixture_battery>; }; };'),
+    "removed-private-no-overlays": (False, '&fixture_overlay { fx_fixture { no-overlays; }; };'),
+    "removed-global-default": (False, '&kprgb { initial-brightness = <42>; };'),
+    "removed-flat-default": (False, '&kprgb { initial-effect = <0>; };'),
     "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
     "missing-child": (False, "&fixture_overlay { /delete-node/ fx_fixture; };"),
@@ -108,9 +117,15 @@ CASES = {
 
 
 DIAGNOSTICS = {
-    "no-controller": r"undefined reference",
     "two-controllers": r"exactly one enabled controller",
     "controller-leds": r"whole strip|['\"]leds['\"].*not declared",
+    "flat-controller-child": r"global control cannot own effects",
+    "removed-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
+    "removed-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
+    "removed-private-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
+    "removed-private-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
+    "removed-global-default": r"['\"]initial-brightness['\"].*not declared|defaults moved",
+    "removed-flat-default": r"['\"]initial-effect['\"].*not declared|defaults moved",
     "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
     "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
@@ -151,7 +166,7 @@ def main():
                        f"-DZMK_CONFIG={config}",
                        f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
             result = subprocess.run(command, cwd=WORKSPACE, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
             if (result.returncode == 0) != valid:
                 raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                      + result.stdout[-12000:])

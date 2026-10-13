@@ -156,7 +156,6 @@ static atomic_t kp_rgb_clock_offset_ms;
  * machinery still runs. */
 static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
-const struct device *const kp_rgb_no_overlays[1] = {NULL};
 
 static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[MAX(1, KP_RGB_OVERLAY_COUNT)];
 

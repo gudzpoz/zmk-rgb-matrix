@@ -95,6 +95,7 @@ static const struct device *zmk_behavior_get_binding(const char *name) {
 #define DT_FOREACH_STATUS_OKAY(compat,fn) fn(0) fn(1)
 #define DT_INST_FOREACH_STATUS_OKAY(fn) fn(0) fn(1)
 #define DT_DRV_INST(inst) (inst)
+#define DT_HAS_COMPAT_STATUS_OKAY(compat) 1
 #define LOG_ERR(...) ((void)0)
 #define DT_PHANDLE(node,prop) (node)
 #define DEVICE_DT_GET(node) (&owners[node])
@@ -132,8 +133,6 @@ static void child_active(const struct device *dev,bool active,int64_t now) {
 static const struct kp_rgb_effect_callbacks child_callbacks={.reset=child_reset,.set_active=child_active};
 static const struct kp_rgb_effect_api child_api={.callbacks=&child_callbacks};
 static struct kp_rgb_global kp_rgb_global;
-static struct kp_rgb_controller kp_rgb_controller;
-static size_t kp_rgb_effect_count(void) { return kp_rgb_controller.selector.effect_count; }
 static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) {
  assert(held); assert(dev && dev->data); return dev->data;
 }
@@ -184,7 +183,6 @@ static void setup(void) {
  data_a=(struct kp_selector_data){.selector={.owner=&owners[0],.effects=members_a,.effect_defaults=defaults_a,.effect_count=3,.active_fx=&effects[0],.initial_duration_ms=600,.initial_effect=0},.members=members_a,.instances=instances_a,.reset_pending=pending_a,.ready=true,.live_slot=SIZE_MAX};
  data_b=(struct kp_selector_data){.selector={.owner=&owners[1],.effects=members_b,.effect_defaults=defaults_b,.effect_count=2,.active_fx=&effects[2],.initial_duration_ms=650,.initial_effect=1},.members=members_b,.instances=instances_b,.reset_pending=pending_b,.ready=true,.live_slot=SIZE_MAX};
  flat=(struct device){.name="flat",.ready=true}; alias=&owners[1];
- kp_rgb_controller=(struct kp_rgb_controller){.dev=&flat,.selector={.owner=&flat}};
  kp_rgb_global=(struct kp_rgb_global){.brightness=17,.user_on=true,.initial_on=false,.initial_brightness=29,.tuning={80,20}};
 }
 static int apply(unsigned owner,uint32_t cmd,uint32_t arg) {
@@ -229,7 +227,7 @@ static void test_conversion_application(void) {
  setup(); roundtrip(0,RGB_EFF_CMD,RGB_EFS_CMD,2);
  setup(); roundtrip(0,RGB_EFR_CMD,RGB_EFS_CMD,2);
  setup(); roundtrip(1,RGB_EFF_CMD,RGB_EFS_CMD,1);
- assert(kp_rgb_global.brightness==17 && kp_rgb_controller.selector.active_fx==NULL);
+ assert(kp_rgb_global.brightness==17);
 }
 static void test_arguments(void) {
  setup(); unsigned f=flushes;
@@ -304,14 +302,9 @@ static void test_associations(void) {
  assert(zmk_rgb_matrix_set_color(NULL,&color)==-ENODEV && zmk_rgb_matrix_set_period(NULL,100)==-ENODEV);
  assert(zmk_rgb_matrix_set_color(&effects[4],NULL)==-EINVAL);
  effects[4].ready=false; assert(zmk_rgb_matrix_set_period(&effects[4],100)==-ENODEV);
- /* Flat direct bindings must never be redirected to the explicit alias. */
  configs[0].owner=&flat; configs[0].slot=0;
- const struct device *flat_members[]={&effects[0]};
- kp_rgb_controller.selector.effects=flat_members; kp_rgb_controller.selector.effect_count=1;
- direct(&effects[0],0,flat.name,RGB_LEGACY_EFS_CMD,0);
- struct zmk_behavior_binding binding={flat.name,RGB_LEGACY_EFS_CMD,0};
- assert(on_keymap_binding_pressed(&binding,event)==0);
- assert(kp_rgb_controller.selector.active_fx==&effects[0] && data_b.selector.effect_index==0);
+ direct(&effects[0],-ENODEV,NULL,0,0);
+ assert(data_b.selector.effect_index==0);
 }
 static void test_alias_brightness(void) {
  setup();
@@ -332,6 +325,15 @@ static void test_alias_brightness(void) {
  assert(zmk_rgb_matrix_cycle_effect(1)==-ENODEV); owners[1].ready=true;
 #else
  assert(zmk_rgb_matrix_select_effect(0)==-ENODEV && zmk_rgb_matrix_cycle_effect(1)==-ENODEV);
+ const uint32_t commands[]={RGB_HUI_CMD,RGB_HUD_CMD,RGB_SAI_CMD,RGB_SAD_CMD,
+                           RGB_SPI_CMD,RGB_SPD_CMD,RGB_EFS_CMD,RGB_EFF_CMD,RGB_EFR_CMD,RGB_COLOR_HSB_CMD};
+ for(size_t i=0;i<ARRAY_SIZE(commands);i++) {
+   struct zmk_behavior_binding binding={flat.name,commands[i],0},before=binding;
+   unsigned f=flushes,s=scoped_saves;
+   assert(on_keymap_binding_convert_central_state_dependent_params(&binding,event)==-ENODEV);
+   assert(binding.behavior_dev==before.behavior_dev && binding.param1==before.param1 && binding.param2==before.param2);
+   assert(on_keymap_binding_pressed(&binding,event)==-ENODEV && flushes==f && scoped_saves==s);
+ }
 #endif
  assert(scoped_saves==scoped_before);
  struct kp_rgb_effect_common_data before[5]; memcpy(before,parameters,sizeof(before));
@@ -345,7 +347,7 @@ static void test_alias_brightness(void) {
  brt.param2=UINT32_MAX; assert(on_keymap_binding_pressed(&brt,event)==-EINVAL);
  assert(kp_rgb_change_brt(INT8_MAX)==0 && kp_rgb_global.brightness==100);
  assert(kp_rgb_change_brt(INT8_MIN)==0 && kp_rgb_global.brightness==0);
- assert(!memcmp(before,parameters,sizeof(before)) && kp_rgb_controller.selector.active_fx==NULL);
+ assert(!memcmp(before,parameters,sizeof(before)));
  assert(kp_rgb_global.tuning.max_brightness==80 && kp_rgb_global.tuning.idle_brightness==20);
 }
 static void test_reset(void) {
@@ -500,19 +502,21 @@ def production_fixture():
     defines = (ROOT / "include/dt-bindings/keypaw/rgb_matrix.h").read_text()
     defines = re.sub(r"^#(?:include|pragma).*$", "", defines, flags=re.M)
     commands = (ROOT.parents[1] / "zmk/app/include/dt-bindings/zmk/rgb.h").read_text()
-    endpoints = internal[internal.index("#define RGB_LEGACY_EFS_CMD"):internal.index("#if IS_ENABLED(CONFIG_SETTINGS)")]
+    parameters = (ROOT / "src/rgb_parameters.c").read_text()
+    endpoints = internal[internal.index("#define RGB_BRT_SET_CMD"):internal.index("int kp_rgb_save_state(void)")]
     parts = [PRELUDE, commands, defines, endpoints]
     parts += [structure(selector_header, n) for n in ("kp_rgb_effect_defaults", "kp_rgb_selector")]
     parts.append(sync_header[sync_header.index("#define RGB_SELECTOR_COLOR_CMD"):sync_header.index("struct kp_rgb_selector_snapshot")])
     parts.append("#if !CENTRAL_SYNC\n" + sync_header[sync_header.index("static inline void kp_rgb_split_selector_dirty_locked"):sync_header.rindex("#endif")] + "#endif\n")
     parts += [structure(public, n) for n in ("kp_rgb_effect_common_config", "kp_rgb_effect_common_data")]
-    parts += [structure(internal, n) for n in ("kp_rgb_global", "kp_rgb_controller")]
+    parts += [structure(internal, n) for n in ("kp_rgb_global",)]
     parts += [structure(overlay, "kp_selector_data"), structure(control, "kp_selector_control_config"), structure(control, "kp_selector_control_entry"), FIXTURE]
     # Notification delivery is exercised by test_selector_public_api.py.
     parts.append('static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *s, const struct device *p) { (void)s; (void)p; }')
     parts += [function(instance, n) for n in ("kp_rgb_instance_callbacks", "kp_rgb_callbacks_reset", "kp_rgb_callbacks_set_active", "kp_rgb_effect_instance_set_active", "kp_rgb_effect_instance_reset", "kp_rgb_effect_instance_restart_clock")]
     parts += [function(selector, n) for n in ("kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index", "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked", "kp_rgb_selector_select_locked", "kp_rgb_selector_member_slot", "kp_rgb_selector_command", "kp_rgb_selector_convert_locked")]
-    parts += [function(behavior, n) for n in ("kp_rgb_selector_alias", "kp_rgb_parameter_target_ready", "kp_rgb_set_color_locked", "kp_rgb_set_period_locked", "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period", "kp_active_hsb", "kp_rgb_calc_brt_locked", "kp_rgb_change_brt", "kp_rgb_apply_defaults", "zmk_rgb_matrix_select_effect", "zmk_rgb_matrix_cycle_effect")]
+    parts += [function(parameters, n) for n in ("kp_rgb_selector_alias", "kp_rgb_parameter_target_ready", "kp_rgb_set_color_locked", "kp_rgb_set_period_locked", "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period", "kp_rgb_apply_defaults", "zmk_rgb_matrix_select_effect", "zmk_rgb_matrix_cycle_effect")]
+    parts += [function(behavior, n) for n in ("kp_rgb_calc_brt_locked", "kp_rgb_change_brt")]
     parts.append(function(sync_source, "kp_rgb_selector_member_apply_locked"))
     parts.append(function(selector, "kp_rgb_selector_dispatch_locked"))
     parts += [function(overlay, n) for n in ("kp_selector_reconcile", "kp_selector_set_active", "kp_rgb_selector_overlay_state_locked", "kp_rgb_selector_overlay_reset_locked", "kp_selector_refresh_members", "kp_selector_prepare_locked", "kp_rgb_selector_overlay_prepare_locked", "kp_selector_defaults_locked", "kp_selector_start")]
@@ -525,7 +529,8 @@ def production_fixture():
     parts += [macro.group(), function(overlay, "kp_rgb_selector_overlays_defaults_locked")]
     parts += [function(control, n) for n in ("kp_rgb_selector_control", "kp_rgb_selector_binding_convert", "kp_rgb_selector_binding_apply", "kp_control_selector", "kp_selector_convert", "kp_selector_pressed")]
     parts.append(function(settings, "kp_rgb_reset_state"))
-    parts += [function(behavior, n) for n in ("kp_rgb_effect_convert_central_state_dependent_params", "on_keymap_binding_convert_central_state_dependent_params", "on_keymap_binding_pressed")]
+    parts.append(function(parameters, "kp_rgb_effect_convert_central_state_dependent_params"))
+    parts += [function(behavior, n) for n in ("on_keymap_binding_convert_central_state_dependent_params", "on_keymap_binding_pressed")]
     return "\n".join(parts) + TESTS
 
 

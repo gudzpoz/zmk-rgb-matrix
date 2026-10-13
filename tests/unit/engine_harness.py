@@ -28,8 +28,8 @@ def function(name, source=SOURCE):
 TOGGLE_CASE = re.search(r"^  case RGB_TOG_CMD:\n.*?^    break;\n", BEHAVIOR_SOURCE, re.M | re.S)
 assert TOGGLE_CASE, "RGB toggle conversion"
 TOGGLE_FUNCTION = """
-static int convert_toggle(struct kp_rgb_controller *controller, struct binding *binding) {
-    (void)controller;
+static int convert_toggle(struct host_control *control, struct binding *binding) {
+    (void)control;
     switch (binding->param1) {
 """ + TOGGLE_CASE.group() + """
     default: return -EINVAL;
@@ -130,9 +130,8 @@ struct kp_rgb_selector {
  size_t effect_count,effect_index; const struct device *active_fx;
  int64_t initial_duration_ms; uint16_t initial_effect;
 };
-struct kp_rgb_controller { const struct device *dev; struct kp_rgb_selector selector; };
-static struct kp_rgb_controller kp_rgb_controller={.selector={.owner=&controller_dev}};
-#define ctx kp_rgb_controller
+struct host_control { const struct device *dev; struct kp_rgb_selector selector; };
+static struct host_control ctx={.selector={.owner=&controller_dev}};
 static struct kp_rgb_global kp_rgb_global={.tuning={100,100},.brightness=100};
 static pthread_mutex_t lock;
 static _Thread_local unsigned int held;

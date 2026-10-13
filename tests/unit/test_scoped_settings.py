@@ -3,108 +3,156 @@
 # SPDX-License-Identifier: MIT
 """Compile production settings/codecs with host metadata and journaled byte storage."""
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
 import tempfile
-from test_singleton import ROOT, fixture_code, function
-from test_singleton_settings import without_includes
 
-MOCKS = r'''
-#include <string.h>
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def without_includes(path):
+    return re.sub(r"^#(?:include|pragma).*\n", "", path.read_text(), flags=re.M)
+
+
+def function(source, name):
+    match = re.search(r"^(?:static )?(?:inline )?[\w\s*]+\b" + name + r"\([^;]*?\) \{", source, re.M)
+    assert match, name
+    start = match.start()
+    end = source.index("{", start) + 1
+    depth = 1
+    while depth:
+        depth += (source[end] == "{") - (source[end] == "}")
+        end += 1
+    return source[start:end]
+
+
+PRELUDE = r'''
+#include <assert.h>
+#include <errno.h>
 #include <limits.h>
-#define ARG_UNUSED(x) (void)(x)
-#define MIN(a,b) ((a)<(b)?(a):(b))
-#define MAX(a,b) ((a)>(b)?(a):(b))
-#define BUILD_ASSERT(x,...) _Static_assert(x, #x)
-#undef CONFIG_SETTINGS
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #define CONFIG_SETTINGS 1
+#define CONFIG_ZMK_LOG_LEVEL 0
 #define CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE 100
+#define CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS 100
+#define CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS 10000
+#define CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP 1
+#define CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP 1
+#define CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP 1
 #define SETTINGS_MAX_NAME_LEN 64
 #define SETTINGS_MAX_VAL_LEN 256
-#define snprintk snprintf
-#define LOG_MODULE_DECLARE(...)
-#define LOG_WRN(...) ((void)0)
-#define DT_INST(i,c) 0
-#define DT_CHILD_NUM(n) 4
-#define DT_DRV_INST(i) i
+#define KP_RGB_BRT_MAX 100
+#define KP_RGB_HUE_MAX 360
+#define KP_RGB_SAT_MAX 100
+#define IS_ENABLED(x) (x)
+#define DT_DRV_INST(i) (i)
+#define DT_INST(i,c) (i)
 #define DT_CHILD_NUM_STATUS_OKAY(n) 3
 #define DT_NUM_INST_STATUS_OKAY(c) 2
 #define DT_INST_FOREACH_STATUS_OKAY(fn) fn(0) fn(1)
+#define MAX(a,b) ((a)>(b)?(a):(b))
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define CLAMP(v,l,h) ((v)<(l)?(l):((v)>(h)?(h):(v)))
+#define ARG_UNUSED(x) ((void)(x))
+#define BUILD_ASSERT(x,...) _Static_assert(x,#x)
+#define snprintk snprintf
+#define LOG_MODULE_DECLARE(...)
+#define LOG_WRN(...) ((void)0)
 #define K_MSEC(x) (x)
 #define K_NO_WAIT 0
+
+struct device { void *data; const char *name; const void *config; };
+struct kp_rgb_hsb { uint16_t h; uint8_t s,b; };
+struct kp_rgb_effect_common_data { struct kp_rgb_hsb color; uint32_t duration_ms; };
+struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; const char *persist_id; bool persist_parameters; };
+struct kp_rgb_effect_defaults { struct kp_rgb_hsb color; uint32_t duration_ms; };
+struct kp_rgb_selector {
+    const struct device *owner;
+    const struct device *const *effects;
+    const struct kp_rgb_effect_defaults *effect_defaults;
+    size_t effect_count, effect_index;
+    const struct device *active_fx;
+    int64_t initial_duration_ms;
+    uint16_t initial_effect;
+    bool publish_changes, notification_pending;
+    struct kp_rgb_selector *notification_next;
+};
+struct kp_rgb_global { bool user_on; uint8_t brightness; bool initial_on; int32_t initial_brightness; };
+struct kp_rgb_global kp_rgb_global;
+static bool held, host_device_ready=true;
+static const struct device *unready_member;
+static unsigned lock_entries, flushes, reconciles;
+static bool reconciled_user_on;
+static void kp_rgb_matrix_lock(void) { assert(!held); held=true; lock_entries++; }
+static void kp_rgb_matrix_unlock(void) { assert(held); held=false; }
+static void zmk_rgb_matrix_flush(void) { flushes++; }
+static void kp_rgb_reconcile_power_locked(void) { assert(held); reconciles++; reconciled_user_on=kp_rgb_global.user_on; }
+static int kp_rgb_apply_defaults(void) {
+    bool acquired=!held;
+    if(acquired) kp_rgb_matrix_lock();
+    kp_rgb_global.user_on=kp_rgb_global.initial_on;
+    kp_rgb_global.brightness=(uint8_t)CLAMP(kp_rgb_global.initial_brightness,0,KP_RGB_BRT_MAX);
+    kp_rgb_reconcile_power_locked(); zmk_rgb_matrix_flush();
+    if(acquired) kp_rgb_matrix_unlock();
+    return 0;
+}
+static bool device_is_ready(const struct device *dev) { return host_device_ready && dev!=NULL && dev!=unready_member; }
+static bool k_is_in_isr(void) { return false; }
+static struct kp_rgb_effect_common_data *kp_rgb_effect_data(const struct device *dev) { return dev->data; }
+static const struct kp_rgb_effect_common_config *kp_rgb_effect_cfg(const struct device *dev) { return dev->config; }
+static void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,const struct device *previous) { (void)selector;(void)previous;assert(held); }
+static size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector);
+static const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,size_t slot);
+static uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,uint16_t current,int16_t delta);
+static int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector);
+static int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector);
+static int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,uint16_t slot);
 struct k_work { void (*handler)(struct k_work *); };
 struct k_work_delayable { struct k_work work; };
-#define K_WORK_DELAYABLE_DEFINE(n,f) static struct k_work_delayable n = {{f}}
 static struct k_work_delayable *pending;
 static int scheduled_delay;
-static int k_work_reschedule(struct k_work_delayable *w, int delay) {
-    pending=w; scheduled_delay=delay; return 1;
-}
-static void run_work(void) {
-    assert(pending && !held);
-    struct k_work_delayable *w=pending; pending=NULL; w->work.handler(&w->work);
-}
-typedef int (*settings_read_cb)(void *, void *, size_t);
-#define SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(n,p,g,s,c,e,prio) \
-    static const char *registered_subtree=p; \
-    static int (*registered_set)(const char *,size_t,settings_read_cb,void *)=s; \
-    static int (*registered_commit)(void)=c; \
-    _Static_assert(prio == INT_MAX-1, "restoration precedes automatic start")
+static int k_work_reschedule(struct k_work_delayable *work,int delay) { pending=work;scheduled_delay=delay;return 1; }
+#define K_WORK_DELAYABLE_DEFINE(name,fn) static struct k_work_delayable name={{fn}}
+typedef int (*settings_read_cb)(void *,void *,size_t);
+#define SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(name,path,get,set,commit,export,prio) static const char *registered_subtree=path; static int (*registered_set)(const char *,size_t,settings_read_cb,void *)=set; static int (*registered_commit)(void)=commit; _Static_assert(prio==INT_MAX-1,"settings commit priority")
 struct entry { char path[65]; unsigned char bytes[256]; size_t len; };
 static struct entry store[32];
 struct operation { char path[65]; bool deletion; int result; };
 static struct operation journal[256];
-static unsigned journal_count;
-static const char *fail_path;
-static bool fail_delete;
+static unsigned journal_count,reads;
+static const char *fail_path,*hook_path;
+static bool fail_delete,immutable_snapshot;
 static unsigned fail_count;
-static const char *hook_path;
 static void (*save_hook)(void);
-static bool immutable_snapshot;
 static struct entry direct_snapshot[32];
-static struct entry *lookup(const char *path) {
-    for (size_t i=0;i<32;i++) if(store[i].len && !strcmp(store[i].path,path)) return &store[i];
-    return NULL;
-}
-static void put(const char *path,const void *bytes,size_t len) {
-    struct entry *e=lookup(path);
-    if(!e) for(size_t i=0;i<32;i++) if(!store[i].len) {e=&store[i];break;}
-    assert(e && len<=sizeof(e->bytes)); strcpy(e->path,path); memcpy(e->bytes,bytes,len); e->len=len;
-}
+static struct entry *lookup(const char *path) { for(size_t i=0;i<32;i++) if(store[i].len && !strcmp(store[i].path,path)) return &store[i]; return NULL; }
+static void put(const char *path,const void *bytes,size_t len) { struct entry *e=lookup(path);if(!e)for(size_t i=0;i<32;i++)if(!store[i].len){e=&store[i];break;}assert(e&&len<=sizeof(e->bytes));strcpy(e->path,path);memcpy(e->bytes,bytes,len);e->len=len; }
 static int io(const char *path,bool deletion) {
-    assert(!held && journal_count<256);
-    int rc=0;
-    if(fail_count && deletion==fail_delete && !strcmp(path,fail_path)) {fail_count--;rc=-EIO;}
-    struct operation *op=&journal[journal_count++]; strcpy(op->path,path); op->deletion=deletion;op->result=rc;
-    if(save_hook && !deletion && !strcmp(path,hook_path)) {
-        void (*hook)(void)=save_hook;save_hook=NULL;hook();assert(!held);
-    }
+    assert(!held&&journal_count<256);int rc=0;
+    if(fail_count&&deletion==fail_delete&&fail_path&&!strcmp(path,fail_path)){fail_count--;rc=-EIO;}
+    struct operation *op=&journal[journal_count++];strcpy(op->path,path);op->deletion=deletion;op->result=rc;
+    if(save_hook&&!deletion&&hook_path&&!strcmp(path,hook_path)){void(*hook)(void)=save_hook;save_hook=NULL;hook();assert(!held);}
     return rc;
 }
-static int settings_save_one(const char *path,const void *bytes,size_t len) {
-    int rc=io(path,false); if(!rc) put(path,bytes,len); return rc;
-}
-static int settings_delete(const char *path) {
-    int rc=io(path,true); if(rc) return rc;
-    struct entry *e=lookup(path); if(!e) return -ENOENT; e->len=0; return 0;
-}
+static int settings_save_one(const char *path,const void *bytes,size_t len) { int rc=io(path,false);if(!rc)put(path,bytes,len);return rc; }
+static int settings_delete(const char *path) { int rc=io(path,true);if(rc)return rc;struct entry *e=lookup(path);if(!e)return -ENOENT;e->len=0;return 0; }
 static int read_blob(void *arg,void *out,size_t len);
-static int settings_load_subtree_direct(const char *prefix,
-    int (*cb)(const char *,size_t,settings_read_cb,void *,void *),void *arg) {
-    assert(!held);size_t n=strlen(prefix);
-    struct entry *source=immutable_snapshot?direct_snapshot:store;
-    for(size_t i=0;i<32;i++) if(source[i].len && !strncmp(source[i].path,prefix,n) && source[i].path[n]=='/') {
-        int rc=cb(source[i].path+n+1,source[i].len,read_blob,source[i].bytes,arg);if(rc)return rc;
-    }
+static int settings_load_subtree_direct(const char *prefix,int(*cb)(const char*,size_t,settings_read_cb,void*,void*),void *arg) {
+    assert(!held);size_t n=strlen(prefix);struct entry *source=immutable_snapshot?direct_snapshot:store;
+    for(size_t i=0;i<32;i++)if(source[i].len&&!strncmp(source[i].path,prefix,n)&&source[i].path[n]=='/'){int rc=cb(source[i].path+n+1,source[i].len,read_blob,source[i].bytes,arg);if(rc)return rc;}
     return 0;
 }
-static unsigned reads;
-static int read_blob(void *arg,void *out,size_t len) {assert(!held);reads++;memcpy(out,arg,len);return len;}
-static int short_read(void *arg,void *out,size_t len) {assert(!held);memcpy(out,arg,len-1);return len-1;}
-static int failed_read(void *arg,void *out,size_t len) {(void)arg;(void)out;(void)len;assert(!held);return -EIO;}
+static int read_blob(void *arg,void *out,size_t len) { assert(!held);reads++;memcpy(out,arg,len);return (int)len; }
+static int short_read(void *arg,void *out,size_t len) { assert(!held);memcpy(out,arg,len-1);return (int)len-1; }
+static int failed_read(void *arg,void *out,size_t len) { (void)arg;(void)out;(void)len;assert(!held);return -EIO; }
+static void run_work(void) { assert(pending&&!held);struct k_work_delayable*w=pending;pending=NULL;w->work.handler(&w->work); }
 '''
-
 METADATA = r'''
 static const struct device owners[2]={{.name="one"},{.name="two"}};
 static struct kp_rgb_effect_common_data data[2][3];
@@ -161,7 +209,6 @@ static void boot(void) {
     memset(kp_selectors,0,sizeof(kp_selectors));
     kp_selectors[0].parameters=kp_parameters_0; kp_selectors[1].parameters=kp_parameters_1;
     memset(kp_parameters_0,0,sizeof(kp_parameters_0));memset(kp_parameters_1,0,sizeof(kp_parameters_1));
-    memset(kp_flat_parameters,0,sizeof(kp_flat_parameters));
     kp_legacy_valid=kp_legacy_pending=kp_global_pending=kp_global_seen=false;
     kp_global_dirty=kp_global_reset=false;kp_global_revision=0;
     for(size_t i=0;i<2;i++) {
@@ -169,7 +216,6 @@ static void boot(void) {
         selectors[i]=(struct kp_rgb_selector){.owner=&owners[i],.effects=slots[i],.effect_count=4,
             .effect_defaults=defaults,.initial_effect=0,.initial_duration_ms=1000};
     }
-    kp_rgb_controller.selector=selectors[0];
     kp_rgb_global.initial_on=true;kp_rgb_global.initial_brightness=70;
     assert(kp_rgb_apply_defaults()==0);
     kp_rgb_matrix_lock();kp_rgb_selector_overlays_defaults_locked();kp_rgb_matrix_unlock();
@@ -500,30 +546,32 @@ int main(void) {
 
 
 def fixture():
-    code = fixture_code().replace(
-        'struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; };',
-        'struct kp_rgb_effect_common_config { const struct device *owner; uint16_t slot; const char *persist_id; bool persist_parameters; };')
-    code = code.replace('static bool host_device_ready = true;',
-                        'static bool host_device_ready = true; static const struct device *unready_member;')
-    code = code.replace('return host_device_ready;',
-                        'return host_device_ready && dev != unready_member;')
-    behavior = (ROOT / 'src/behavior_rgb_matrix.c').read_text()
-    code += function(behavior, 'zmk_rgb_matrix_set_color')
-    code += function(behavior, 'zmk_rgb_matrix_set_period')
-    return (code + MOCKS + without_includes(ROOT / 'include/zmk/rgb_persist.h')
-            + without_includes(ROOT / 'src/rgb_persist.c') + METADATA
-            + without_includes(ROOT / 'src/rgb_settings.c') + TESTS)
+    selector_source = (ROOT / "src/rgb_selector.c").read_text()
+    parameters_source = (ROOT / "src/rgb_parameters.c").read_text()
+    selector_functions = "\n".join(function(selector_source, name) for name in (
+        "kp_rgb_selector_count", "kp_rgb_selector_at", "kp_rgb_selector_calc_index",
+        "kp_rgb_selector_resolve_locked", "kp_rgb_selector_apply_defaults_locked",
+        "kp_rgb_selector_select_locked"))
+    parameter_functions = "\n".join(function(parameters_source, name) for name in (
+        "kp_rgb_parameter_target_ready", "kp_rgb_set_color_locked",
+        "kp_rgb_set_period_locked", "zmk_rgb_matrix_set_color",
+        "zmk_rgb_matrix_set_period"))
+    return (PRELUDE + without_includes(ROOT / "include/zmk/rgb_persist.h") +
+            without_includes(ROOT / "src/rgb_persist.c") + selector_functions +
+            parameter_functions + METADATA +
+            without_includes(ROOT / "src/rgb_settings.c") + TESTS)
 
 
 def main():
     with tempfile.TemporaryDirectory() as directory:
-        path = Path(directory) / 'scoped_settings.c'
+        path = Path(directory) / "scoped_settings.c"
         path.write_text(fixture())
-        binary = Path(directory) / 'scoped_settings'
-        subprocess.run(shlex.split(os.environ.get('CC', 'cc')) + [
-            '-std=gnu11', '-Wall', '-Wextra', '-Werror', str(path), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+        binary = Path(directory) / "scoped_settings"
+        subprocess.run(shlex.split(os.environ.get("CC", "cc")) + [
+            "-std=gnu11", "-Wall", "-Wextra", "-Werror", str(path), "-o", str(binary)
+        ], check=True, timeout=30)
+        subprocess.run([str(binary)], check=True, timeout=15)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

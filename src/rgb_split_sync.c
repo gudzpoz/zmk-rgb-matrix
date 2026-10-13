@@ -27,15 +27,17 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_SYNC_SOURCES MAX(ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT, 1)
-#define KP_RGB_SYNC_NO_EFFECT UINT16_MAX
 #define KP_RGB_SYNC_STEP_DELAY_MS 50
 #define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
 
+BUILD_ASSERT(DT_HAS_COMPAT_STATUS_OKAY(keypaw_behavior_rgb_matrix),
+             "RGB split synchronization requires an enabled global RGB matrix behavior");
+
+static const struct device *const kp_rgb_sync_endpoint =
+    DEVICE_DT_GET(DT_INST(0, keypaw_behavior_rgb_matrix));
+
 enum kp_rgb_sync_phase {
-  KP_RGB_SYNC_SELECT,
-  KP_RGB_SYNC_COLOR,
-  KP_RGB_SYNC_DURATION,
   KP_RGB_SYNC_BRIGHTNESS,
   KP_RGB_SYNC_POWER,
   KP_RGB_SYNC_OVERLAYS,
@@ -91,13 +93,7 @@ struct kp_rgb_sync_source {
   uint16_t mask_word;  /* next overlay word to push this time round */
   int64_t ready_at;
   enum kp_rgb_sync_phase phase;
-  /* Last effect fully pushed to this source; KP_RGB_SYNC_NO_EFFECT until one
-   * completes. A change of active effect away from it re-queues a push. */
-  uint16_t synced_effect;
-  /* Snapshot taken under kp_rgb_matrix_lock() at KP_RGB_SYNC_SELECT. */
-  uint16_t effect_index;
-  uint16_t duration_ms;
-  struct kp_rgb_hsb color;
+  bool global_captured;
   struct kp_rgb_global_snapshot global;
   int64_t selectors_ready_at;
   struct kp_rgb_sync_selector_progress selectors[KP_RGB_SYNC_SELECTOR_CAPACITY];
@@ -182,7 +178,6 @@ static void kp_rgb_sync_refresh(void) {
       kp_rgb_sync_sources[i].seen = false;
       kp_rgb_sync_sources[i].pending = false;
       kp_rgb_sync_sources[i].retry_count = 0;
-      kp_rgb_sync_sources[i].synced_effect = KP_RGB_SYNC_NO_EFFECT;
       kp_rgb_sync_selectors_reset(&kp_rgb_sync_sources[i]);
     }
   }
@@ -202,10 +197,6 @@ static void kp_rgb_sync_refresh(void) {
     }
   }
 
-  kp_rgb_matrix_lock();
-  uint16_t active = (uint16_t)kp_rgb_controller.selector.effect_index;
-  kp_rgb_matrix_unlock();
-
   int64_t now = k_uptime_get();
   for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
     struct kp_rgb_sync_source *st = &kp_rgb_sync_sources[s];
@@ -213,9 +204,9 @@ static void kp_rgb_sync_refresh(void) {
       st->seen = true;
       st->pending = true;
       st->retry_count = 0;
-      st->phase = KP_RGB_SYNC_SELECT;
+      st->phase = KP_RGB_SYNC_BRIGHTNESS;
       st->mask_word = 0;
-      st->synced_effect = KP_RGB_SYNC_NO_EFFECT;
+      st->global_captured = false;
       /* A peripheral is marked connected before its GATT characteristics are
        * discovered, and the split worker silently drops commands in that
        * window. */
@@ -228,17 +219,7 @@ static void kp_rgb_sync_refresh(void) {
     } else if (!present[s] && st->seen) {
       st->seen = false;
       st->pending = false; /* abort in flight; a reconnect re-syncs */
-      st->synced_effect = KP_RGB_SYNC_NO_EFFECT;
       kp_rgb_sync_selectors_reset(st);
-    } else if (present[s] && st->seen && !st->pending &&
-               st->synced_effect != active) {
-      /* Active effect changed to one this source has not received. */
-      st->pending = true;
-      st->retry_count = 0;
-      st->phase = KP_RGB_SYNC_SELECT;
-      st->mask_word = 0;
-      st->ready_at = now;
-      LOG_INF("Effect change queued for source %u", (uint32_t)s);
     }
   }
   kp_rgb_sync_selectors_refresh(now);
@@ -263,10 +244,10 @@ int kp_rgb_split_send_selector(uint8_t source,
 }
 
 static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
-  if (kp_rgb_controller.dev == NULL || !device_is_ready(kp_rgb_controller.dev))
+  if (!device_is_ready(kp_rgb_sync_endpoint))
     return false;
   struct zmk_behavior_binding binding = {
-      .behavior_dev = kp_rgb_controller.dev->name, .param1 = cmd, .param2 = arg};
+      .behavior_dev = kp_rgb_sync_endpoint->name, .param1 = cmd, .param2 = arg};
   return kp_rgb_sync_send_binding(source, &binding) >= 0;
 }
 
@@ -300,6 +281,12 @@ static void kp_rgb_sync_clock_handler(struct k_work *work) {
 
 static enum kp_rgb_sync_emit
 kp_rgb_sync_emit_global(uint8_t source, struct kp_rgb_sync_source *st) {
+  if (!st->global_captured) {
+    kp_rgb_matrix_lock();
+    kp_rgb_global_snapshot_locked(&st->global);
+    kp_rgb_matrix_unlock();
+    st->global_captured = true;
+  }
   uint32_t command, argument;
   switch (st->phase) {
   case KP_RGB_SYNC_BRIGHTNESS:
@@ -329,48 +316,6 @@ kp_rgb_sync_emit_global(uint8_t source, struct kp_rgb_sync_source *st) {
   return KP_RGB_SYNC_EMIT_SENT;
 }
 
-/* The flat-controller bridge keeps its original select-before-parameters wire
- * protocol. Selector snapshots use member-qualified parameters before selection. */
-static enum kp_rgb_sync_emit kp_rgb_sync_emit_one(uint8_t source,
-                                                  struct kp_rgb_sync_source *st) {
-  uint32_t command, argument;
-  switch (st->phase) {
-  case KP_RGB_SYNC_SELECT: {
-    kp_rgb_matrix_lock();
-    kp_rgb_global_snapshot_locked(&st->global);
-    st->effect_index = (uint16_t)kp_rgb_controller.selector.effect_index;
-    const struct device *effect = kp_rgb_controller.selector.active_fx;
-    if (effect != NULL) {
-      const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
-      st->color = data->color;
-      st->duration_ms = (uint16_t)MAX(data->duration_ms, 1u);
-    }
-    kp_rgb_matrix_unlock();
-    if (effect == NULL) {
-      st->phase = KP_RGB_SYNC_BRIGHTNESS;
-      return KP_RGB_SYNC_EMIT_SENT;
-    }
-    command = RGB_LEGACY_EFS_CMD;
-    argument = st->effect_index;
-    break;
-  }
-  case KP_RGB_SYNC_COLOR:
-    command = RGB_LEGACY_COLOR_CMD;
-    argument = RGB_COLOR_HSB_VAL(st->color.h, st->color.s, st->color.b);
-    break;
-  case KP_RGB_SYNC_DURATION:
-    command = RGB_LEGACY_PERIOD_CMD;
-    argument = st->duration_ms;
-    break;
-  default:
-    return kp_rgb_sync_emit_global(source, st);
-  }
-  if (!kp_rgb_sync_send(source, command, argument))
-    return KP_RGB_SYNC_EMIT_RETRY;
-  st->phase++;
-  return KP_RGB_SYNC_EMIT_SENT;
-}
-
 static void kp_rgb_sync_step_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_sync_refresh(); /* aborts vanished sources, queues new ones */
@@ -390,7 +335,7 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
       }
       continue;
     }
-    enum kp_rgb_sync_emit r = kp_rgb_sync_emit_one((uint8_t)s, st);
+    enum kp_rgb_sync_emit r = kp_rgb_sync_emit_global((uint8_t)s, st);
     if (r == KP_RGB_SYNC_EMIT_SENT) {
       st->retry_count = 0;
       next_ms = KP_RGB_SYNC_STEP_DELAY_MS;
@@ -408,7 +353,6 @@ static void kp_rgb_sync_step_handler(struct k_work *work) {
       continue; /* other sources still make progress */
     }
     st->pending = false;
-    st->synced_effect = st->effect_index;
   }
 
   if (next_ms >= 0) {

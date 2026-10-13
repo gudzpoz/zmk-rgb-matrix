@@ -14,6 +14,8 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   rgb_utils.c
   rgb_instance.c
   rgb_selector.c
+  rgb_parameters.c
+  rgb_settings.c
   rgb_selector_sync.c
   rgb_selector_api.c
   rgb_workqueue.c
@@ -46,11 +48,9 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/ca
 # BLE host-profile state exists only on the central.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_BLE conditions/ble.c)
 
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
-  # controller and effect persistence
-  behavior_rgb_matrix.c
-  rgb_settings.c
-  # global oscillators and static fields
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX behavior_rgb_matrix.c)
+
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   effects/solid.c
   effects/breathe.c
   effects/spectrum.c

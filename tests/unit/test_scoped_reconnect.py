@@ -57,7 +57,6 @@ static const struct zmk_split_transport_central_api transport_api={get_ids};
 static const struct zmk_split_transport_central transport_a={&transport_api},transport_b={&transport_api};
 static const struct zmk_split_transport_central *transport;
 static const struct zmk_split_transport_central *kp_rgb_sync_pick_transport(void) { assert(!held); return transport; }
-static struct { struct { unsigned effect_index; } selector; } kp_rgb_controller;
 static void kp_rgb_split_selector_dirty_locked(const struct device *);
 '''
 
@@ -92,7 +91,7 @@ static void setup(void) {
  memset(kp_rgb_sync_sources,0,sizeof(kp_rgb_sync_sources));
  memset(attempts,0,sizeof(attempts)); memset(counts,0,sizeof(counts)); memset(failing,0,sizeof(failing));
  attempt_count=0; send_duration=0; during_send=NULL; now_ms=0; query_error=0; isr=false;
- kp_rgb_controller.selector.effect_index=0; transport=&transport_a; kp_rgb_sync_transport=NULL;
+ transport=&transport_a; kp_rgb_sync_transport=NULL;
  kp_rgb_sync_selector_cursor=0; present[0]=present[1]=true;
  for(unsigned i=0;i<2;i++) {
   owners[i]=(struct device){.name=i?"owner-b":"owner-a",.ready=true};

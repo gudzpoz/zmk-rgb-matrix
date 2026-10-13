@@ -205,22 +205,9 @@ bool kp_rgb_effect_instance_render(struct kp_rgb_effect_instance *instance,
  * rendering any child, including helpers whose render callback will be skipped. */
 void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instance);
 
-/* Sentinel list meaning "this effect wants no overlays at all"; it is never
- * dereferenced, since the accompanying length is 0. */
-extern const struct device *const kp_rgb_no_overlays[];
-
 struct kp_rgb_effect_api {
   const struct behavior_driver_api behavior;
   const struct kp_rgb_effect_callbacks *callbacks;
-  /* Per-effect overlay override, filled in by KP_RGB_EFFECT_DEFINE from the
-   * effect node's devicetree:
-   *   overlays = <&a &b>;  -> exactly those, in order
-   *   no-overlays;         -> kp_rgb_no_overlays (non-NULL, length 0)
-   *   neither                -> NULL, every registered overlay in
-   *                             keypaw,rgb-overlays declaration order
-   */
-  const struct device *const *overlays;
-  size_t overlays_len;
 };
 
 BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
@@ -295,51 +282,20 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 
-/* Expand one entry of an `overlays = <&a &b>;` list. */
-#define KP_RGB_OVERLAYS_AT_IDX(idx, node_id)                                   \
-  DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, overlays, idx))
-
-/* Repeated phandles produce duplicate enumerators and fail the build. */
-#define KP_RGB_OVERLAY_UNIQUE(idx, node_id, cfg_inst)                          \
-  CONCAT(cfg_inst, _overlay_,                                                  \
-         DT_DEP_ORD(DT_PROP_BY_IDX(node_id, overlays, idx)))
-#define KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                          \
-  COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(node_id, overlays),                                     \
-      (enum {LISTIFY(DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAY_UNIQUE,    \
-                     (, ), node_id, cfg_inst)};                                \
-       static const struct device *const cfg_inst##_overlays[] = {LISTIFY(     \
-           DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAYS_AT_IDX, (, ),       \
-           node_id)};),                                                        \
-      ())
-
-#define KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst)                           \
-  COND_CODE_1(DT_PROP(node_id, no_overlays), (kp_rgb_no_overlays),             \
-              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, overlays),                \
-                           (cfg_inst##_overlays), (NULL))))
-
 #define KP_RGB_EFFECT_SLOT(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
-
-#define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
-  DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
 
 #define KP_RGB_EFFECT_HAS_OWNER(node_id)                                       \
   UTIL_AND(DT_NODE_HAS_STATUS(DT_PARENT(node_id), okay),                       \
-           UTIL_OR(KP_RGB_EFFECT_IS_REGISTRY(node_id),                         \
-                   DT_NODE_HAS_COMPAT(DT_PARENT(node_id),                      \
-                                      keypaw_rgb_overlay_selector)))
+           DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_overlay_selector))
 
 #define KP_RGB_EFFECT_OWNER(node_id)                                           \
   COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
               (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
 
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id), (),                          \
-              (BUILD_ASSERT(                                                   \
-                   !DT_NODE_HAS_PROP(node_id, overlays) &&                     \
-                       !DT_PROP(node_id, no_overlays),                         \
-                   "overlays/no-overlays are registry-only; overlays are not " \
-                   "composed onto a nested effect");))
+  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, overlays) &&                         \
+                   !DT_NODE_HAS_PROP(node_id, no_overlays),                    \
+               "effect overlays/no-overlays properties have been removed");
 
 #define KP_RGB_EFFECT_CONVERT_HOOK(node_id)                                    \
   COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
@@ -359,10 +315,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        (const void *)&cfg_inst##_data.common,                  \
                "effect data must embed struct kp_rgb_effect_common_data "      \
                "as the first field");                                          \
-  BUILD_ASSERT(DT_PROP_LEN_OR(node_id, overlays, 1) > 0,                       \
-               "an empty `overlays` list is not expressible; use "             \
-               "`no-overlays;` for an effect that wants none");                \
-  KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                                \
   static int cfg_inst##_init(const struct device *dev) {                       \
     uint32_t duration = DT_PROP_OR(node_id, duration, 0);                      \
     kp_rgb_effect_data(dev)->duration_ms =                                     \
@@ -386,8 +338,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        CONFIG_ZMK_BEHAVIOR_METADATA,                           \
                        (.parameter_metadata = &cfg_inst##_metadata, ))},       \
       .callbacks = callbacks_expr,                                             \
-      .overlays = KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst),                \
-      .overlays_len = DT_PROP_LEN_OR(node_id, overlays, 0),                    \
   };                                                                           \
   BEHAVIOR_DT_DEFINE(node_id, cfg_inst##_init, NULL, &cfg_inst##_data,         \
                      &cfg_inst##_cfg, POST_KERNEL,                             \
@@ -454,8 +404,8 @@ bool kp_rgb_condition_value(const struct device *condition);
   COND_CODE_1(DT_NODE_HAS_PROP(node_id, condition),                            \
               (DEVICE_DT_GET(DT_PROP(node_id, condition))), (NULL))
 
-/* Overlays composite in declaration order unless the selected effect overrides
- * the list. They consume cached condition gates and own any embedded effects. */
+/* Overlays composite in declaration order, consume cached condition gates and
+ * own any embedded effects. */
 
 struct kp_rgb_overlay_api {
   const struct device *condition; /* NULL = unconditional */

@@ -113,8 +113,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
         } else if (command == RGB_OVL_STATE_CMD) {
             overlay_count[source]++;
         } else {
-            CHECK(command == RGB_LEGACY_EFS_CMD || command == RGB_LEGACY_COLOR_CMD ||
-                  command == RGB_LEGACY_PERIOD_CMD || command == RGB_CLOCK_CMD);
+            CHECK(command == RGB_CLOCK_CMD);
         }
     }
     k_mutex_unlock(&records_lock);

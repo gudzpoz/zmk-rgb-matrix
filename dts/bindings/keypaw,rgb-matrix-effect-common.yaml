@@ -14,8 +14,8 @@ properties:
     default: 0
     description: |
       Animation period in milliseconds; shorter means faster. Zero (the default)
-      uses the owning controller or selector's `initial-duration-ms` for selectable
-      effects, or 1000 ms for effects owned by other providers.
+      uses the owning selector's `initial-duration-ms` for selectable effects,
+      or 1000 ms for effects owned by other providers.
 
   persist-id:
     type: string
@@ -27,22 +27,4 @@ properties:
       dots or '@'; IDs must be unique among enabled children of the same selector.
       Identical IDs in different selectors are valid. For opted-in parameters,
       the selector ID plus this ID must contain at most 27 characters to fit
-      Zephyr's 64-character settings key limit. Legacy flat-controller effects
-      retain their identifier-compatible, globally unique ID contract.
-
-  overlays:
-    type: phandles
-    required: false
-    description: |
-      Controller-selectable effects only. Overlay list to paint while this effect is
-      active, replacing the default of every registered overlay in
-      `rgb_overlays` declaration order. A devicetree array cannot be empty, so
-      use `no-overlays;` for an effect that wants none. Entries must be unique
-      within this list. The same overlay may be included in different selectable
-      effects' lists.
-
-  no-overlays:
-    type: boolean
-    description: |
-      Draw no overlays at all for this effect. Allowed only on controller-selectable
-      effects, not effects owned by other providers.
+      Zephyr's 64-character settings key limit.

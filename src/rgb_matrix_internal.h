@@ -34,13 +34,7 @@ struct kp_rgb_global {
   int32_t initial_brightness;
 };
 
-struct kp_rgb_controller {
-  const struct device *dev;
-  struct kp_rgb_selector selector;
-};
-
 extern struct kp_rgb_global kp_rgb_global;
-extern struct kp_rgb_controller kp_rgb_controller;
 
 struct kp_rgb_scene_runtime {
   struct kp_rgb_callback_state state;
@@ -90,11 +84,6 @@ void kp_rgb_control_refresh_release_locked(void);
 void kp_rgb_reconcile_power_locked(void);
 void kp_rgb_request_runtime_reset_locked(void);
 
-int kp_rgb_resolve_active(void);
-uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
-int kp_rgb_select_effect(uint16_t index);
-int kp_rgb_cycle_effect(int16_t direction);
-
 extern const size_t kp_rgb_all_targets[MAX(1, KP_LED_COUNT)];
 const size_t *kp_rgb_overlay_targets(const struct device *dev);
 size_t kp_rgb_overlay_target_count(const struct device *dev);
@@ -130,10 +119,6 @@ static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
 static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
 
-/* Temporary flat-controller transport endpoints bypass the explicit selector alias. */
-#define RGB_LEGACY_EFS_CMD 0x104
-#define RGB_LEGACY_COLOR_CMD 0x105
-#define RGB_LEGACY_PERIOD_CMD 0x106
 #define RGB_BRT_SET_CMD 0x107
 
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word. */
@@ -142,31 +127,10 @@ static inline void kp_rgb_triggers_quarantine(void) {}
 #define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
 #define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
 
-#if IS_ENABLED(CONFIG_SETTINGS)
-#define KP_RGB_MAX_REGISTRY_EFFECTS KP_RGB_PERSIST_MAX_EFFECTS
-#else
-#define KP_RGB_MAX_REGISTRY_EFFECTS UINT8_MAX
-#endif
-
-size_t kp_rgb_effect_count(void);
-const struct device *kp_rgb_effect_at(size_t index);
-size_t kp_rgb_selected_effect(void);
 int kp_rgb_save_state(void);
 int kp_rgb_save_selector_state(const struct device *selector, bool reset);
 int kp_rgb_settings_commit(void);
-int kp_rgb_select_effect_locked(uint16_t index);
 
-/* Restore presets and user intent, then reconcile local output permission. */
+/* Restore global defaults and reconcile local output permission. */
 int kp_rgb_apply_defaults(void);
 void kp_rgb_reset_state(void);
-
-int kp_rgb_calc_effect(int16_t direction);
-struct kp_rgb_hsb kp_rgb_calc_hue(int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_sat(int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_brt(int8_t direction);
-int kp_rgb_change_hue(int8_t direction);
-int kp_rgb_change_sat(int8_t direction);
-int kp_rgb_change_brt(int8_t direction);
-int kp_rgb_set_hsb(struct kp_rgb_hsb color);
-int kp_rgb_change_duration(int16_t direction);
-int kp_rgb_set_duration(uint32_t duration_ms);
