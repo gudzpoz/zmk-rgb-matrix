@@ -192,42 +192,6 @@ ZTEST(kp_rgb_persist, current_selector_codec) {
   zassert_equal(kp_rgb_persist_decode_selector(raw_legacy, sizeof(raw_legacy), &decoded), -EINVAL);
 }
 
-ZTEST(kp_rgb_persist, current_parameters_codec) {
-  struct kp_rgb_persist_effect effect = {.duration_ms = 0x1234, .h = 0x0123, .s = 67};
-  struct kp_rgb_persist_parameters_record record = {0};
-  const uint8_t expected[] = {1, 0x34, 0x12, 0x23, 0x01, 67};
-  zassert_ok(kp_rgb_persist_encode_parameters(&effect, &record));
-  zassert_mem_equal(&record, expected, sizeof(expected));
-  struct kp_rgb_persist_effect decoded = {0};
-  zassert_ok(kp_rgb_persist_decode_parameters(expected, sizeof(expected), &decoded));
-  zassert_equal(decoded.duration_ms, 0x1234);
-  zassert_equal(decoded.h, 0x0123);
-  zassert_equal(decoded.s, 67);
-  uint8_t invalid[] = {1, 0x34, 0x12, 0x69, 0x01, 67};
-  zassert_equal(kp_rgb_persist_decode_parameters(invalid, sizeof(invalid), &decoded), -EINVAL);
-  uint8_t raw_legacy[] = {0x90, 0x01, 0x68, 0x01, 80, 0xa5};
-  zassert_equal(kp_rgb_persist_decode_parameters(raw_legacy, sizeof(raw_legacy), &decoded), -EINVAL);
-  zassert_equal(decoded.duration_ms, 0x1234);
-  zassert_equal(decoded.h, 0x0123);
-  zassert_equal(decoded.s, 67);
-}
-
-ZTEST(kp_rgb_persist, effect_range_check) {
-  zassert_true(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX,
-                                      .s = KP_RGB_SAT_MAX}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.s = KP_RGB_SAT_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(NULL));
-}
-
-ZTEST(kp_rgb_persist, duration_clamp) {
-  zassert_equal(kp_rgb_persist_clamp_duration(50, 100, 10000), 100);
-  zassert_equal(kp_rgb_persist_clamp_duration(20000, 100, 10000), 10000);
-  zassert_equal(kp_rgb_persist_clamp_duration(500, 100, 10000), 500);
-}
 
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(kp_rgb_math, NULL, NULL, NULL, NULL, NULL);

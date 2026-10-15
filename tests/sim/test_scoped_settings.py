@@ -11,35 +11,40 @@ from native_process import run_logged
 from native_build import SELECTORS, build
 
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
-             .replace(' animate;', '') + '''
-&selector_a { persist-id = "a"; };
-&selector_b { persist-id = "b"; };
-&probe_a { persist-id = "shared"; };
-&probe_b { persist-id = "shared"; };
-&probe_c { persist-id = "alt"; };
-&probe_d { persist-id = "alt"; };
-''')
+             .replace(' animate;', ''))
+NORMALIZED_SELECTORS = (SELECTORS
+    .replace('&rgb_overlays {', '&rgb_overlays { #address-cells = <1>; #size-cells = <0>;')
+    .replace('compatible = "keypaw,rgb-overlay-selector";',
+             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
+    .replace('compatible = "keypaw,rgb-matrix-solid";',
+             'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
+    .replace('selector_a: selector_a {',
+             'selector_a: selector-a@1 { reg = <1>; #address-cells = <1>; #size-cells = <0>;')
+    .replace('selector_b: selector_b {',
+             'selector_b: selector-b@2 { reg = <2>; #address-cells = <1>; #size-cells = <0>;')
+    .replace('probe_c: a_motion {', 'probe_c: a-motion@3 { reg = <3>;')
+    .replace('probe_d: b_alt {', 'probe_d: b-alt@4 { reg = <4>;'))
 REORDERED = '''
 &rgb_overlays {
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
     selector_b: selector_b {
-        compatible = "keypaw,rgb-overlay-selector"; persist-id = "b"; initial-effect = <1>;
+        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <1>;
         initial-duration-ms = <0xffffffff>; leds = <2 3>; condition = <&preview_visible>;
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
-            color = <0x00ffff>; duration = <0>; persist-id = "alt"; };
+            color = <0x00ffff>; duration = <0>; };
         probe_b: b_static { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
-            color = <0xffff00>; persist-id = "shared"; };
+            color = <0xffff00>; };
     };
     selector_a: selector_a {
-        compatible = "keypaw,rgb-overlay-selector"; persist-id = "a"; initial-effect = <3>;
+        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <3>;
         leds = <0 1>; condition = <&preview_visible>;
         optout: optout { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
             color = <0xff0000>; };
         probe_c: a_motion { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
-            color = <0x0000ff>; persist-id = "alt"; };
+            color = <0x0000ff>; };
         disabled { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; status = "disabled"; };
         probe_a: a_static { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
-            color = <0x00ff00>; persist-id = "shared"; };
+            color = <0x00ff00>; };
     };
     ordinary: ordinary { compatible = "keypaw,rgb-overlay"; leds = <1>;
         condition = <&preview_visible>;
@@ -63,7 +68,7 @@ CONFIG_SETTINGS_CUSTOM=y
 CONFIG_KEYPAW_SIM_SETTINGS_TEST=y
 CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20
 '''
-SCENARIOS = ("existing", "validation", "debounce", "global-failure", "staged-reset",
+SCENARIOS = ("existing", "validation", "old-custom-ids", "runtime-parameters", "normalized-names", "debounce", "global-failure", "staged-reset",
              "selector-dirty", "selector-reset", "selector-failed-dirty",
              "selector-failed-reset", "global-dirty", "global-reset",
              "global-failed-dirty", "global-failed-reset", "reset-revision-second-failure", "reordering")
@@ -75,8 +80,7 @@ CONFIGS = {
     "late-member": ('&probe_b { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };',
                     "CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"),
     "reordered": ("", ""),
-    "ids-duplicate": ('&selector_b { persist-id = "a"; };', ""),
-    "ids-invalid": ('&selector_b { persist-id = "bad/id"; };', ""),
+    "normalized-names": ("", ""),
 }
 
 
@@ -91,7 +95,7 @@ def unique_log(root, stem):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=SCENARIOS + ("ids-duplicate", "ids-invalid"), action="append")
+    parser.add_argument("--scenario", choices=SCENARIOS, action="append")
     parser.add_argument("--config", choices=CONFIGS, action="append")
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--repeat", type=int, default=1)
@@ -105,12 +109,15 @@ def main():
     for name in args.config or CONFIGS:
         fragment, config = CONFIGS[name]
         if not args.no_build:
+            selectors = (REORDERED if name == "reordered" else
+                         NORMALIZED_SELECTORS if name == "normalized-names" else SELECTORS)
             result = build(root, name, fragment, runtime=True,
-                           selectors=REORDERED if name == "reordered" else SELECTORS,
+                           selectors=selectors,
                            extra_conf=CONF + config)
             assert result.returncode == 0, result.stdout[-20000:]
-        scenarios = ((name,) if name.startswith("ids-") else
-                     ("reordering", "validation", "staged-reset") if name == "reordered" else SCENARIOS)
+        scenarios = (("normalized-names",) if name == "normalized-names" else
+                     ("reordering", "validation", "old-custom-ids", "staged-reset") if name == "reordered" else
+                     tuple(scenario for scenario in SCENARIOS if scenario != "normalized-names"))
         selected = args.scenario or scenarios
         assert all(scenario in scenarios for scenario in selected), (name, selected, scenarios)
         for scenario in (scenario for _ in range(args.repeat) for scenario in selected):
@@ -135,9 +142,7 @@ def main():
                 assert "PASS scoped settings subtree/manual startup" in result.stdout
             errors = [line for line in result.stdout.splitlines() if "<err>" in line]
             assert all("set-value failure. key: keypaw/rgb_matrix/" in line or
-                       (name == "late-control" and "canonical control is not ready" in line) or
-                       (name == "ids-duplicate" and "RGB selector persist-id or node name must be globally unique" in line) or
-                       (name == "ids-invalid" and "persistence IDs invalid (err -22)" in line)
+                       (name == "late-control" and "canonical control is not ready" in line)
                        for line in errors), result.stdout
             print(f"PASS scoped settings native {name}/{scenario}", flush=True)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Host tests for the current scoped RGB persistence codecs and ID rules."""
+"""Host tests for the current scoped RGB persistence codecs."""
 import os
 from pathlib import Path
 import shlex
@@ -39,21 +39,6 @@ static void test_wire_codecs(void) {
     struct kp_rgb_persist_selector_record sd = {0};
     assert(kp_rgb_persist_decode_selector(&sr, sizeof(sr), &sd) == 0);
     assert(!strcmp(sd.selected_id, "solid"));
-
-    struct kp_rgb_persist_effect effect = {.duration_ms = 0x1234, .h = 0x0123, .s = 67};
-    struct kp_rgb_persist_parameters_record pr = {0};
-    assert(kp_rgb_persist_encode_parameters(&effect, &pr) == 0);
-    const uint8_t parameter_bytes[] = {1, 0x34, 0x12, 0x23, 0x01, 67};
-    assert(sizeof(pr) == sizeof(parameter_bytes) && memcmp(&pr, parameter_bytes, sizeof(pr)) == 0);
-    struct kp_rgb_persist_effect pd = {0};
-    assert(kp_rgb_persist_decode_parameters(parameter_bytes, sizeof(parameter_bytes), &pd) == 0);
-    assert(pd.duration_ms == 0x1234 && pd.h == 0x0123 && pd.s == 67);
-
-    effect.h = 360;
-    assert(kp_rgb_persist_encode_parameters(&effect, &pr) == 0);
-    assert(pr.hue_le[0] == 0 && pr.hue_le[1] == 0);
-    const uint8_t hue360[] = {1, 9, 0, 104, 1, 22};
-    assert(kp_rgb_persist_decode_parameters(hue360, sizeof(hue360), &pd) == 0 && pd.h == 0);
 }
 
 #define REJECT_UNCHANGED(fn, bytes, length, output) do { \
@@ -61,6 +46,19 @@ static void test_wire_codecs(void) {
     assert((fn)((bytes), (length), &(output)) == -EINVAL); \
     assert(memcmp(&(output), &before, sizeof(output)) == 0); \
 } while (0)
+
+static void test_selector_codec_accepts_bounded_bytes(void) {
+    const char punctuation[] = "punctuation/+ =@.-_\\";
+    const char nonascii[] = {(char)0xc3, (char)0xa9, 0};
+    const char maximum[32] = "1234567890123456789012345678901";
+    const char *accepted[] = {punctuation, nonascii, maximum};
+    for (size_t i = 0; i < sizeof(accepted) / sizeof(accepted[0]); i++) {
+        struct kp_rgb_persist_selector_record encoded = {0}, decoded = {0};
+        assert(kp_rgb_persist_encode_selector(accepted[i], &encoded) == 0);
+        assert(kp_rgb_persist_decode_selector(&encoded, sizeof(encoded), &decoded) == 0);
+        assert(strcmp(decoded.selected_id, accepted[i]) == 0);
+    }
+}
 
 static void test_invalid_records_and_legacy(void) {
     struct kp_rgb_persist_global_state g = {true, 55};
@@ -76,76 +74,39 @@ static void test_invalid_records_and_legacy(void) {
     struct kp_rgb_persist_selector_record s = {.version = 77}; strcpy(s.selected_id, "keep");
     REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 32, s);
     bads[0] = 9; REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 33, s);
-    bads[0] = 1; strcpy((char *)bads + 1, "bad/id"); REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 33, s);
+    bads[0] = 1; bads[1] = 0; REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 33, s);
     memset(bads + 1, 'a', 32); REJECT_UNCHANGED(kp_rgb_persist_decode_selector, bads, 33, s);
     REJECT_UNCHANGED(kp_rgb_persist_decode_selector, NULL, 33, s);
+    assert(kp_rgb_persist_encode_selector("ok", NULL) == -EINVAL);
+    assert(kp_rgb_persist_decode_selector(bads, sizeof(bads), NULL) == -EINVAL);
 
-    struct kp_rgb_persist_effect p = {.duration_ms = 123, .h = 45, .s = 67};
-    uint8_t badp[] = {0, 1, 0, 2, 0, 3};
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 6, p);
-    badp[0] = 1; badp[3] = 105; badp[4] = 1;
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 6, p);
-    badp[3] = 2; badp[4] = 0; badp[5] = 101;
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 6, p);
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, badp, 5, p);
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, NULL, 6, p);
+    struct kp_rgb_persist_selector_record encoded = {.version = 55};
+    strcpy(encoded.selected_id, "keep");
+    struct kp_rgb_persist_selector_record before = encoded;
+    assert(kp_rgb_persist_encode_selector(NULL, &encoded) == -EINVAL);
+    assert(memcmp(&encoded, &before, sizeof(encoded)) == 0);
+    assert(kp_rgb_persist_encode_selector("", &encoded) == -EINVAL);
+    assert(memcmp(&encoded, &before, sizeof(encoded)) == 0);
+    char too_long[33]; memset(too_long, 'x', 32); too_long[32] = 0;
+    assert(kp_rgb_persist_encode_selector(too_long, &encoded) == -EINVAL);
+    assert(memcmp(&encoded, &before, sizeof(encoded)) == 0);
+    char unterminated[32]; memset(unterminated, 'x', sizeof(unterminated));
+    assert(kp_rgb_persist_encode_selector(unterminated, &encoded) == -EINVAL);
+    assert(memcmp(&encoded, &before, sizeof(encoded)) == 0);
 
     /* The former combined legacy blob is not a valid v3 global record. */
     uint8_t raw_legacy_global[36] = {2, 1, 50, 1};
     REJECT_UNCHANGED(kp_rgb_persist_decode_global, raw_legacy_global, sizeof(raw_legacy_global), g);
-    /* Unsupported selector versions and non-v1 parameter bytes are rejected. */
+    /* Unsupported selector versions are rejected. */
     uint8_t raw_legacy_selector[33] = {2};
     REJECT_UNCHANGED(kp_rgb_persist_decode_selector, raw_legacy_selector, sizeof(raw_legacy_selector), s);
-    uint8_t raw_legacy_parameters[] = {0x90, 0x01, 0x68, 0x01, 80, 0xa5};
-    REJECT_UNCHANGED(kp_rgb_persist_decode_parameters, raw_legacy_parameters,
-                     sizeof(raw_legacy_parameters), p);
-}
-
-static void test_ids(void) {
-    char id31[32]; memset(id31, 'x', 31); id31[31] = 0;
-    char id32[33]; memset(id32, 'x', 32); id32[32] = 0;
-    assert(kp_rgb_persist_id_valid(id31) && !kp_rgb_persist_id_valid(id32));
-    assert(!kp_rgb_persist_id_valid(NULL) && !kp_rgb_persist_id_valid(""));
-    assert(!kp_rgb_persist_id_valid("a/b") && !kp_rgb_persist_id_valid("a="));
-    assert(!kp_rgb_persist_id_valid("a b") && !kp_rgb_persist_id_valid("a\t"));
-    const char nonascii[] = {(char)0xc3, (char)0xa9, 0};
-    assert(!kp_rgb_persist_id_valid(nonascii));
-
-    const struct kp_rgb_persist_effect_id a[] = {{"same", true}, {NULL, true}, {"other", false}};
-    const struct kp_rgb_persist_effect_id b[] = {{"same", false}};
-    const struct kp_rgb_persist_selector_ids selectors[] = {{"selA", a, 3}, {"selB", b, 1}};
-    assert(kp_rgb_persist_validate_ids(selectors, 2) == 0);
-    const struct kp_rgb_persist_selector_ids duplicate_selector[] = {{"x", NULL, 0}, {"x", NULL, 0}};
-    assert(kp_rgb_persist_validate_ids(duplicate_selector, 2) == -EEXIST);
-    const struct kp_rgb_persist_effect_id duplicate_members[] = {{"x", false}, {"x", false}};
-    const struct kp_rgb_persist_selector_ids duplicate_member_selector[] = {{"sel", duplicate_members, 2}};
-    assert(kp_rgb_persist_validate_ids(duplicate_member_selector, 1) == -EEXIST);
-    const struct kp_rgb_persist_effect_id invalid_enabled[] = {{"bad/id", false}};
-    const struct kp_rgb_persist_selector_ids invalid_selector[] = {{"sel", invalid_enabled, 1}};
-    assert(kp_rgb_persist_validate_ids(invalid_selector, 1) == -EINVAL);
-    assert(kp_rgb_persist_validate_ids(NULL, 1) == -EINVAL);
-
-    char selector[32], effect[32]; memset(selector, 's', 13); selector[13] = 0;
-    memset(effect, 'e', 14); effect[14] = 0;
-    const struct kp_rgb_persist_effect_id budget_ok[] = {{effect, true}};
-    const struct kp_rgb_persist_selector_ids budget_selector[] = {{selector, budget_ok, 1}};
-    assert(KP_RGB_PERSIST_EFFECT_ID_BUDGET == 27);
-    assert(kp_rgb_persist_validate_ids(budget_selector, 1) == 0);
-    selector[13] = 's'; selector[14] = 0;
-    assert(kp_rgb_persist_validate_ids(budget_selector, 1) == -ENAMETOOLONG);
-    char id30[31]; memset(id30, 's', 30); id30[30] = 0;
-    const struct kp_rgb_persist_effect_id optout[] = {{id31, false}};
-    const struct kp_rgb_persist_selector_ids long_optout[] = {{id30, optout, 1}};
-    assert(kp_rgb_persist_validate_ids(long_optout, 1) == 0);
-    const struct kp_rgb_persist_selector_ids oversized_selector[] = {{id31, optout, 1}};
-    assert(kp_rgb_persist_validate_ids(oversized_selector, 1) == -ENAMETOOLONG);
 }
 
 int main(void) {
     test_wire_codecs();
+    test_selector_codec_accepts_bounded_bytes();
     test_invalid_records_and_legacy();
-    test_ids();
-    puts("scoped persistence codecs and IDs passed");
+    puts("scoped persistence codecs passed");
     return 0;
 }
 '''

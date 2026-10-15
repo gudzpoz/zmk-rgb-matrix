@@ -24,30 +24,15 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_PERSIST_KEY KP_RGB_PERSIST_SUBTREE "/state"
 
-struct kp_parameter_load {
-  struct kp_rgb_persist_effect scoped;
-  bool scoped_pending;
-};
-
 struct kp_selector_load {
   struct kp_rgb_persist_selector_record scoped;
-  struct kp_parameter_load *parameters;
   bool scoped_pending;
   bool dirty;
   uint32_t revision;
 };
 
-#define KP_SETTINGS_PARAMETER_COUNT(node_id) + DT_NODE_HAS_PROP(node_id, persist_id)
-#define KP_SETTINGS_PARAMETER_TOTAL(inst)                                     \
-  (0 DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_SETTINGS_PARAMETER_COUNT))
-#define KP_SETTINGS_STORAGE(inst)                                              \
-  static struct kp_parameter_load                                              \
-      kp_parameters_##inst[MAX(1, KP_SETTINGS_PARAMETER_TOTAL(inst))];
-DT_INST_FOREACH_STATUS_OKAY(KP_SETTINGS_STORAGE)
-#define KP_SETTINGS_SELECTOR(inst) {.parameters = kp_parameters_##inst},
 static struct kp_selector_load
-    kp_selectors[MAX(1, DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT))] = {
-        DT_INST_FOREACH_STATUS_OKAY(KP_SETTINGS_SELECTOR)};
+    kp_selectors[MAX(1, DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT))];
 static struct kp_rgb_persist_global_state kp_global_load;
 static bool kp_global_pending, kp_global_dirty;
 static uint32_t kp_global_revision;
@@ -55,31 +40,9 @@ static uint32_t kp_global_revision;
 static void kp_rgb_save_work_handler(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(kp_rgb_save_work, kp_rgb_save_work_handler);
 
-static int kp_path(char *out, const char *selector, const char *effect) {
-  int len = effect == NULL
-                ? snprintk(out, SETTINGS_MAX_NAME_LEN + 1, "%s%s/state",
-                           KP_RGB_PERSIST_SELECTOR_PREFIX, selector)
-                : snprintk(out, SETTINGS_MAX_NAME_LEN + 1, "%s%s/effects/%s",
-                           KP_RGB_PERSIST_SELECTOR_PREFIX, selector, effect);
-  return len < 0 || len > SETTINGS_MAX_NAME_LEN ? -ENAMETOOLONG : 0;
-}
-
-static struct kp_rgb_persist_effect
-kp_parameters_locked(const struct device *fx) {
-  const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-  return (struct kp_rgb_persist_effect){
-      .duration_ms = data->duration_ms, .h = data->color.h, .s = data->color.s};
-}
-
-static void
-kp_restore_parameters_locked(const struct device *fx,
-                             const struct kp_rgb_persist_effect *record) {
-  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-  data->color.h = record->h == KP_RGB_HUE_MAX ? 0 : record->h;
-  data->color.s = record->s;
-  data->duration_ms = kp_rgb_persist_clamp_duration(
-      record->duration_ms, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-      CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+static void kp_path(char *out, const char *selector) {
+  snprintk(out, SETTINGS_MAX_NAME_LEN + 1, "%s%s/state",
+           KP_RGB_PERSIST_SELECTOR_PREFIX, selector);
 }
 
 static int kp_read(size_t len, size_t expected, settings_read_cb read_cb,
@@ -88,22 +51,6 @@ static int kp_read(size_t len, size_t expected, settings_read_cb read_cb,
     return -EINVAL;
   int rc = read_cb(cb_arg, out, expected);
   return rc < 0 ? rc : (rc == (int)expected ? 0 : -EINVAL);
-}
-
-static int kp_load_parameters(struct kp_parameter_load *load, size_t len,
-                              settings_read_cb read_cb, void *cb_arg) {
-  struct kp_rgb_persist_effect value;
-  struct kp_rgb_persist_parameters_record bytes;
-  int err = kp_read(len, sizeof(bytes), read_cb, cb_arg, &bytes);
-  if (err == 0)
-    err = kp_rgb_persist_decode_parameters(&bytes, sizeof(bytes), &value);
-  if (err < 0)
-    return err;
-  kp_rgb_matrix_lock();
-  load->scoped = value;
-  load->scoped_pending = true;
-  kp_rgb_matrix_unlock();
-  return 0;
 }
 
 static int kp_rgb_load_cb(const char *name, size_t len,
@@ -127,7 +74,7 @@ static int kp_rgb_load_cb(const char *name, size_t len,
   for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
     const struct kp_rgb_persist_selector_ids *ids =
         kp_rgb_persist_selector_at(i, NULL);
-    kp_path(path, ids->id, NULL);
+    kp_path(path, ids->id);
     if (strcmp(name, path + sizeof(KP_RGB_PERSIST_SUBTREE)) == 0) {
       struct kp_rgb_persist_selector_record bytes, value;
       int err = kp_read(len, sizeof(bytes), read_cb, cb_arg, &bytes);
@@ -140,15 +87,6 @@ static int kp_rgb_load_cb(const char *name, size_t len,
       kp_selectors[i].scoped_pending = true;
       kp_rgb_matrix_unlock();
       return 0;
-    }
-    size_t parameter = 0;
-    for (size_t j = 0; j < ids->effect_count; j++) {
-      if (!ids->effects[j].persist_parameters)
-        continue;
-      struct kp_parameter_load *load = &kp_selectors[i].parameters[parameter++];
-      kp_path(path, ids->id, ids->effects[j].id);
-      if (strcmp(name, path + sizeof(KP_RGB_PERSIST_SUBTREE)) == 0)
-        return kp_load_parameters(load, len, read_cb, cb_arg);
     }
   }
   return 0;
@@ -165,21 +103,10 @@ static void kp_dirty_global_locked(void) {
 }
 
 static void kp_reset_load_locked(size_t index) {
-  struct kp_selector_load *load = &kp_selectors[index];
-  const struct kp_rgb_persist_selector_ids *ids =
-      kp_rgb_persist_selector_at(index, NULL);
-  load->scoped_pending = false;
-  size_t parameter = 0;
-  for (size_t j = 0; j < ids->effect_count; j++) {
-    if (ids->effects[j].persist_parameters)
-      load->parameters[parameter++].scoped_pending = false;
-  }
+  kp_selectors[index].scoped_pending = false;
 }
 
 int kp_rgb_settings_commit(void) {
-  int err = kp_rgb_persist_ids_validate();
-  if (err < 0)
-    return err;
   kp_rgb_matrix_lock();
   /* Validate readiness before consuming any staged records. */
   for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
@@ -222,16 +149,6 @@ int kp_rgb_settings_commit(void) {
       }
       kp_rgb_selector_select_locked(selector, slot);
     }
-    size_t parameter_index = 0;
-    for (size_t j = 0; j < ids->effect_count; j++) {
-      if (!ids->effects[j].persist_parameters)
-        continue;
-      struct kp_parameter_load *parameter = &load->parameters[parameter_index++];
-      if (parameter->scoped_pending)
-        kp_restore_parameters_locked(kp_rgb_persist_member_at(i, j),
-                                     &parameter->scoped);
-      parameter->scoped_pending = false;
-    }
     load->scoped_pending = false;
   }
   kp_global_pending = false;
@@ -254,35 +171,21 @@ static int kp_save_selector(size_t index, uint32_t *revision) {
   struct kp_rgb_selector *selector =
       kp_rgb_selector_overlay_prepare_locked(owner);
   *revision = kp_selectors[index].revision;
-  int err =
-      selector == NULL || selector->active_fx == NULL
-          ? -ENODEV
-          : kp_rgb_persist_encode_selector(
-                kp_rgb_effect_cfg(selector->active_fx)->persist_id, &selection);
+  int err = -ENODEV;
+  if (selector != NULL && selector->active_fx != NULL) {
+    for (size_t i = 0; i < ids->effect_count; i++) {
+      if (kp_rgb_persist_member_at(index, i) == selector->active_fx) {
+        err = kp_rgb_persist_encode_selector(ids->effects[i].id, &selection);
+        break;
+      }
+    }
+  }
   kp_rgb_matrix_unlock();
   if (err < 0)
     return err;
   char path[SETTINGS_MAX_NAME_LEN + 1];
-  for (size_t j = 0; j < ids->effect_count; j++) {
-    if (!ids->effects[j].persist_parameters)
-      continue;
-    struct kp_rgb_persist_parameters_record bytes;
-    kp_rgb_matrix_lock();
-    const struct device *fx = kp_rgb_persist_member_at(index, j);
-    bool ready = device_is_ready(fx);
-    if (ready) {
-      struct kp_rgb_persist_effect value = kp_parameters_locked(fx);
-      kp_rgb_persist_encode_parameters(&value, &bytes);
-    }
-    kp_rgb_matrix_unlock();
-    kp_path(path, ids->id, ids->effects[j].id);
-    int rc = ready ? settings_save_one(path, &bytes, sizeof(bytes)) : -ENODEV;
-    if (err == 0)
-      err = rc;
-  }
-  kp_path(path, ids->id, NULL);
-  int rc = settings_save_one(path, &selection, sizeof(selection));
-  return err < 0 ? err : rc;
+  kp_path(path, ids->id);
+  return settings_save_one(path, &selection, sizeof(selection));
 }
 
 static int kp_save_global(void) {
@@ -334,7 +237,7 @@ static void kp_rgb_save_work_handler(struct k_work *work) {
 
 #else
 
-int kp_rgb_settings_commit(void) { return kp_rgb_persist_ids_validate(); }
+int kp_rgb_settings_commit(void) { return 0; }
 
 #endif
 

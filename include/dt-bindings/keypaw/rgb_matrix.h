@@ -20,10 +20,10 @@
  * commands end with, so a layer change never schedules a flash write. */
 #define RGB_OVL_STATE_CMD 0x101
 
-/* User-bindable: clear every RGB behavior's persisted state on this half and
- * restore the devicetree defaults, so a reflash or a reordered effect registry
- * starts clean. &kprgb is BEHAVIOR_LOCALITY_GLOBAL, so one press on the central
- * reaches each half, and each half deletes only its own keys. */
+/* Restore defaults for the addressed selector, or global state and all selectors
+ * through the global control. param2 must be zero. With settings enabled,
+ * selection/global defaults are saved asynchronously; parameter defaults are
+ * runtime-only. Obsolete settings records are not deleted. */
 #define RGB_RESET_CMD 0x102
 #define RGB_RESET RGB_RESET_CMD 0
 

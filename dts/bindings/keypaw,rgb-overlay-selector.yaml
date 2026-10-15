@@ -3,10 +3,11 @@
 
 description: |
   RGB effect selector. Renders its selected nested effect onto the overlay's
-  targets and blends it over earlier output at the configured opacity.
-  Each selector owns separate effect devices and retains its selection while
-  hidden, OFF or inhibited. Declare at least one enabled effect child; at least
-  one child must be ready before RGB control starts.
+  targets and blends it over earlier output at the configured opacity. Each
+  selector owns separate effect devices and retains its selection while hidden,
+  OFF or inhibited. Declare at least one enabled effect child; at least one
+  child must be ready before RGB control starts. ZMK behavior device names must
+  be globally unique and not contain any special characters.
 
 compatible: "keypaw,rgb-overlay-selector"
 
@@ -32,13 +33,3 @@ properties:
       Default period in milliseconds for children whose duration is zero or
       omitted. Clamped to KEYPAW_RGB_MATRIX_DURATION_MIN_MS and
       KEYPAW_RGB_MATRIX_DURATION_MAX_MS. A child's nonzero duration overrides it.
-
-  persist-id:
-    type: string
-    description: |
-      Stable settings identity; defaults to this selector's full node name.
-      Must be unique among enabled selectors and contain 1..30 ASCII letters,
-      digits, underscores, hyphens, dots or '@'. Opted-in child parameter keys
-      must fit Zephyr's 64-character settings key limit: this ID and the child's
-      ID together may contain at most 27 characters. Identity validation runs
-      before RGB control starts, including when settings are disabled.

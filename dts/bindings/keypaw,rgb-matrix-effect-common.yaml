@@ -16,15 +16,3 @@ properties:
       Animation period in milliseconds; shorter means faster. Zero (the default)
       uses the owning selector's `initial-duration-ms` for selectable effects,
       or 1000 ms for effects owned by other providers.
-
-  persist-id:
-    type: string
-    required: false
-    description: |
-      Opts this selectable effect's hue, saturation and duration into persistence.
-      Selection always uses this ID, or the full node name when omitted.
-      Selector members require 1..31 ASCII letters, digits, underscores, hyphens,
-      dots or '@'; IDs must be unique among enabled children of the same selector.
-      Identical IDs in different selectors are valid. For opted-in parameters,
-      the selector ID plus this ID must contain at most 27 characters to fit
-      Zephyr's 64-character settings key limit.

@@ -234,9 +234,6 @@ int kp_rgb_effect_convert_central_state_dependent_params(
   .common = {                                                                  \
       .owner = KP_RGB_EFFECT_OWNER(DT_DRV_INST(inst)),                         \
       .slot = KP_RGB_EFFECT_SLOT(inst),                                        \
-      .persist_id = DT_PROP_OR(DT_DRV_INST(inst), persist_id,                  \
-                               DT_NODE_FULL_NAME(DT_DRV_INST(inst))),          \
-      .persist_parameters = DT_NODE_HAS_PROP(DT_DRV_INST(inst), persist_id),   \
   }
 #define KP_RGB_EFFECT_COMMON_DATA(inst, default_color_, default_duration_)     \
   .common = {                                                                  \
@@ -251,8 +248,6 @@ int kp_rgb_effect_convert_central_state_dependent_params(
 struct kp_rgb_effect_common_config {
   const struct device *owner; /* Selector device, or NULL for a non-selectable effect. */
   uint16_t slot; /* Child position within its parent, including disabled siblings. */
-  const char *persist_id;
-  bool persist_parameters;
 };
 struct kp_rgb_effect_common_data {
   uint16_t duration_ms;    /* single cycle animation duration */
@@ -387,7 +382,7 @@ struct kp_rgb_condition_api {
  * otherwise called by the late settings commit or APPLICATION startup hook.
  * Returns 0 when startup is accepted, not when asynchronous sampling or output
  * completes. Returns -EWOULDBLOCK in ISR context, -ENODEV when required devices
- * are not ready (retry after initialization), or a settings/ID validation error.
+ * are not ready (retry after initialization).
  */
 int zmk_rgb_matrix_start(void);
 

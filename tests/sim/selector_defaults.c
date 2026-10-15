@@ -7,6 +7,7 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/settings/settings.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
 
@@ -60,9 +61,32 @@ static int before_preparation(void) {
 }
 SYS_INIT(before_preparation, APPLICATION, 80);
 
+#if IS_ENABLED(CONFIG_SETTINGS)
+int settings_backend_init(void) { return 0; }
+
+static unsigned parameter_reads;
+static ssize_t read_obsolete_parameter(void *arg, void *data, size_t len) {
+  ARG_UNUSED(arg); ARG_UNUSED(data); ARG_UNUSED(len);
+  parameter_reads++;
+  return -EIO;
+}
+static void stage_obsolete_parameters(void) {
+  const char *paths[] = {
+      "keypaw/rgb_matrix/selectors/default_selector/effects/ready",
+      "keypaw/rgb_matrix/selectors/default_late_selector/effects/late",
+  };
+  for (size_t i = 0; i < ARRAY_SIZE(paths); i++)
+    CHECK(settings_call_set_handler(paths[i], 6, read_obsolete_parameter, NULL, NULL) == 0);
+  CHECK(parameter_reads == 0);
+}
+#endif
+
 static void defaults_test(void *a, void *b, void *c) {
   ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
   check_parameters(DEV(default_ready), early_color, 4321);
+#if IS_ENABLED(CONFIG_SETTINGS)
+  stage_obsolete_parameters();
+#endif
   CHECK(zmk_rgb_matrix_start() == -ENODEV);
   check_parameters(DEV(default_ready), early_color, 4321);
   CHECK(device_init(DEV(default_late)) == 0);
@@ -72,6 +96,10 @@ static void defaults_test(void *a, void *b, void *c) {
   CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
   CHECK(zmk_rgb_matrix_start() == 0);
   CHECK(zmk_rgb_matrix_start() == 0);
+#if IS_ENABLED(CONFIG_SETTINGS)
+  stage_obsolete_parameters();
+  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+#endif
   check_parameters(DEV(default_ready), early_color, 4321);
   check_parameters(DEV(default_late), late_color, 3456);
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == DEV(default_ready));

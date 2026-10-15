@@ -64,10 +64,7 @@ def main():
         elif image == "owner":
             fragment += "&selector_a { opacity = <50>; }; &selector_b { opacity = <50>; };\n"
         elif image in ("local-only", "local-no-alias"):
-            fragment += '''&selector_a { persist-id = "a"; };
-&selector_b { persist-id = "b"; };
-&probe_a { persist-id = "first"; }; &probe_c { persist-id = "alt"; };
-/ { chosen { zephyr,bt-hci = &control_hci; };
+            fragment += '''/ { chosen { zephyr,bt-hci = &control_hci; };
 control_hci: control_hci { compatible = "zephyr,bt-hci-userchan"; }; };
 '''
             conf += '''CONFIG_SETTINGS=y

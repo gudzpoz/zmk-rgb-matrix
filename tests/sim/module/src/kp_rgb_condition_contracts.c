@@ -4,6 +4,7 @@
 #include <zephyr/irq_offload.h>
 #include <zephyr/init.h>
 #include <zephyr/settings/settings.h>
+#include <zephyr/sys/util.h>
 #include <limits.h>
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
@@ -12,6 +13,9 @@
 #include "../../../../src/rgb_matrix_internal.h"
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
+#define KP_TEST_NODE_TOKEN(node) STRINGIFY(DT_NODE_FULL_NAME_TOKEN(node))
+#define KP_TEST_SELECTOR_A_STATE \
+    "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
 struct source {
     atomic_t value, calls, period, invalid_deadline, undeclared, notify, pause;
     const struct device *deps[3];
@@ -495,8 +499,8 @@ static int settings_provider_commit(void) {
     KP_CHECK(calls(DEV(cc_root)) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     struct kp_rgb_persist_selector_record record;
-    KP_CHECK(kp_rgb_persist_encode_selector("a_motion", &record) == 0);
-    KP_CHECK(settings_runtime_set("keypaw/rgb_matrix/selectors/selector_a/state", &record, sizeof(record)) == 0);
+    KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
+    KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
     provider_commits++;
     return 0;
 }
@@ -514,11 +518,21 @@ static void special_cases(void) {
         start(); KP_CHECK(calls(DEV(cc_root)) == 1);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
         KP_CHECK(zmk_rgb_matrix_start() == 0); drain(); KP_CHECK(calls(DEV(cc_root)) == 1);
-    } else if (kp_test_case("startup-errors")) {
-        KP_CHECK(zmk_rgb_matrix_start() == -EINVAL);
-        KP_CHECK(zmk_rgb_matrix_start() == -EINVAL);
-        drain(); KP_CHECK(calls(DEV(cc_root)) == 0);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    } else if (kp_test_case("startup-normalized-names")) {
+#if IS_ENABLED(CONFIG_SETTINGS)
+        KP_CHECK(calls(DEV(cc_root)) == 0);
+        struct kp_rgb_persist_selector_record record;
+        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)), &record) == 0);
+        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+        KP_CHECK(zmk_rgb_matrix_start() == 0);
+        drain();
+        KP_CHECK(device_is_ready(DEV(selector_a)) && device_is_ready(DEV(probe_a)));
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        KP_CHECK(kp_rgb_condition_valid(DEV(cc_selected_a)));
+        expect_selection(true);
+#else
+        KP_CHECK(false);
+#endif
     } else if (kp_test_case("startup-auto")) {
         wait_calls(DEV(cc_root), 1);
         KP_CHECK(gate(DEV(ordinary)) && calls(DEV(cc_root)) == 1);
@@ -538,8 +552,8 @@ static void special_cases(void) {
         KP_CHECK(calls(DEV(cc_root)) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
         struct kp_rgb_persist_selector_record record;
-        KP_CHECK(kp_rgb_persist_encode_selector("a_motion", &record) == 0);
-        KP_CHECK(settings_runtime_set("keypaw/rgb_matrix/selectors/selector_a/state", &record, sizeof(record)) == 0);
+        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
+        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
         KP_CHECK(calls(DEV(cc_root)) == 0);
         start(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_event)) == 1);
@@ -670,7 +684,7 @@ void kp_test_conditions_run(void) {
 #else
         KP_CHECK(false);
 #endif
-    } else if (kp_test_case("startup-unready-selector") || kp_test_case("startup-errors") ||
+    } else if (kp_test_case("startup-unready-selector") || kp_test_case("startup-normalized-names") ||
         kp_test_case("startup-auto") || kp_test_case("startup-unrestored-settings") ||
         kp_test_case("startup-settings-manual") ||
         kp_test_case("overlay-zero") || kp_test_case("trigger-no-table") ||

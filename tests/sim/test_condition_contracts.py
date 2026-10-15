@@ -16,7 +16,7 @@ SCENARIOS = (
     'initial-shared', 'scoped-listener', 'third-party', 'coalesced', 'reentrant',
     'trigger-mutation', 'resume-held', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
-    'startup-unready-selector', 'startup-errors', 'startup-auto',
+    'startup-unready-selector', 'startup-normalized-names', 'startup-auto',
     'startup-unrestored-settings', 'startup-settings-manual',
     'overlay-zero', 'trigger-no-table', 'trigger-actions', 'trigger-unregistered-root',
     'stale-source-refresh', 'held-source-refresh',
@@ -96,7 +96,7 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 
 VARIANTS = {
     'startup-unready-selector': ('deferred', '&rgbs_a { compatible = "test,rgb-condition-contract-control", "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };', ''),
-    'startup-errors': ('bad-id', '&selector_a { persist-id = "invalid/id"; };', ''),
+    'startup-normalized-names': ('normalized', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'startup-auto': ('auto', '', 'CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y\n'),
     'startup-unrestored-settings': ('settings-auto', '',
         'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\nCONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y\n'),
@@ -139,7 +139,6 @@ DIAGNOSTICS = {
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
     'startup-unready-selector': 'canonical control is not ready',
-    'startup-errors': 'persistence IDs invalid (err -22)',
 }
 
 
@@ -169,7 +168,21 @@ def main():
             groups.setdefault(variant, []).append(scenario)
         for (variant, addition, options), scenarios in groups.items():
             image = f'{role}-{variant}'
-            result = build(root, image, fragment + addition, selectors=SELECTOR_FIXTURE,
+            selectors = SELECTOR_FIXTURE
+            if variant == 'normalized':
+                selectors = (selectors
+                    .replace('&rgb_overlays {', '&rgb_overlays { #address-cells = <1>; #size-cells = <0>;')
+                    .replace('compatible = "keypaw,rgb-overlay-selector";',
+                             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
+                    .replace('compatible = "keypaw,rgb-matrix-solid";',
+                             'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
+                    .replace('selector_a: selector_a {',
+                             'selector_a: selector-a@1 { reg = <1>; #address-cells = <1>; #size-cells = <0>;')
+                    .replace('selector_b: selector_b {',
+                             'selector_b: selector-b@2 { reg = <2>; #address-cells = <1>; #size-cells = <0>;')
+                    .replace('probe_c: a_motion {', 'probe_c: a-motion@3 { reg = <3>;')
+                    .replace('probe_a: a_static {', 'probe_a: a-static@4 { reg = <4>;'))
+            result = build(root, image, fragment + addition, selectors=selectors,
                            extra_conf=conf + options)
             if result.returncode:
                 raise AssertionError(f'{image} build failed: {root / (image + "-build.log")}\n{result.stdout[-15000:]}')

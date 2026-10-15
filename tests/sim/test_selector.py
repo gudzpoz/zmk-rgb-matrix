@@ -222,7 +222,7 @@ def main():
         assert re.search(diagnostic, result.stdout), result.stdout[-12000:]
         print(f"PASS selector configuration {name}", flush=True)
     long_selectors = SELECTORS.replace("selector_a: selector_a {",
-                                      'selector_a: selector_with_a_long_overlay_name { persist-id = "main";')
+                                      'selector_a: ' + 's' * 30 + ' {')
     result = build(root, "long-overlay", "", runtime=True, selectors=long_selectors)
     assert result.returncode == 0, result.stdout[-12000:]
     command = [str(root / "long-overlay/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]

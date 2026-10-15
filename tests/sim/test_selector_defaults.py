@@ -58,16 +58,18 @@ OVERLAY = '''
 '''
 
 
-def main():
-    root = Path(tempfile.mkdtemp(prefix="rgb-selector-defaults-"))
-    print(f"ARTIFACTS {root}", flush=True)
+def run_variant(root, settings):
+    root = root / ("settings" if settings else "no-settings")
+    root.mkdir()
     config = root / "config"
     config.mkdir()
     (config / "native_sim.keymap").write_text((SIM / "config/native_sim.keymap").read_text())
     (config / "native_sim.conf").write_text(
         (SIM / "config/native_sim.conf").read_text() +
         "\nCONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"
-        "CONFIG_ASSERT=y\n")
+        "CONFIG_ASSERT=y\n"
+        f"CONFIG_SETTINGS={'y' if settings else 'n'}\n" +
+        ("CONFIG_SETTINGS_CUSTOM=y\n" if settings else ""))
     (config / "native_sim.overlay").write_text(
         f'#include "{SIM / "config/native_sim.overlay"}"\n' + OVERLAY)
     plugin = root / "defaults-module"
@@ -94,6 +96,12 @@ def main():
     assert result.returncode == 0, result.stdout
     assert "PASS selector defaults" in result.stdout, result.stdout
     print(result.stdout, end="")
+
+def main():
+    root = Path(tempfile.mkdtemp(prefix="rgb-selector-defaults-"))
+    print(f"ARTIFACTS {root}", flush=True)
+    for settings in (False, True):
+        run_variant(root, settings)
 
 
 if __name__ == "__main__":

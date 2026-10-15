@@ -10,8 +10,11 @@
 #include <zephyr/init.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/printk.h>
+#include <zephyr/sys/util.h>
 #include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/rgb_selector.h>
+#include <drivers/behavior.h>
+#include <zmk/behavior.h>
 
 #include "cmdline.h"
 #include "soc.h"
@@ -37,12 +40,19 @@ NATIVE_TASK(settings_options, PRE_BOOT_1, 11);
     }                                                                          \
   } while (0)
 #define ROOT "keypaw/rgb_matrix/"
+#define KP_TEST_NODE_TOKEN(node) STRINGIFY(DT_NODE_FULL_NAME_TOKEN(node))
+#define SELECTOR_A_PATH ROOT "selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/"
+#define SELECTOR_B_PATH ROOT "selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_b)) "/"
+#define A_STATIC_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a))
+#define A_ALT_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c))
+#define B_STATIC_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_b))
+#define B_ALT_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_d))
 
 #if !DT_NODE_EXISTS(DT_NODELABEL(selector_a))
 #include "kp_rgb_singleton_settings_test.inc"
 #else
 struct record {
-  char name[SETTINGS_MAX_NAME_LEN + 1];
+  char name[SETTINGS_MAX_NAME_LEN + 32];
   uint8_t bytes[36];
   size_t len;
 };
@@ -52,6 +62,7 @@ static bool failed;
 static const char *fail_once_path;
 static unsigned fail_once_attempt, fail_once_seen;
 static bool initial_load_done;
+static bool external_storage_loaded;
 static unsigned reads;
 static unsigned saves;
 
@@ -75,12 +86,8 @@ static void storage_query(void *a, void *b, void *c) {
     unsigned action = hook_action;
     hook_action = 0;
     if (action == 1) {
-      CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-          KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-          RGB_COLOR_HSB_VAL(288, 55, 100)) == 0);
-      CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-          KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), 2888) == 0);
-      CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 2) == 0);
+      CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD,
+          kp_rgb_effect_cfg(DEV(probe_c))->slot) == 0);
     } else if (action == 2) {
       CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
     } else if (action == 3) {
@@ -112,6 +119,11 @@ static struct record *find(const char *name) {
 
 static ssize_t read_record(void *arg, void *out, size_t len) {
   struct record *record = arg;
+  CHECK(strstr(record->name, "/effects/") == NULL);
+  CHECK(strcmp(record->name, ROOT "selectors/a/state"));
+  CHECK(strcmp(record->name, ROOT "selectors/b/state"));
+  CHECK(strcmp(record->name, ROOT "selectors/selector-a@1/state"));
+  CHECK(strcmp(record->name, ROOT "selectors/selector-b@2/state"));
   reads++;
   len = MIN(len, record->len);
   if (read_mode < 0) return -EIO;
@@ -136,6 +148,14 @@ static int load(struct settings_store *store,
 static int save(struct settings_store *store, const char *name,
                 const char *bytes, size_t len) {
   ARG_UNUSED(store);
+  if (initial_load_done) {
+    CHECK(strstr(name, "/effects/") == NULL);
+    CHECK(strcmp(name, ROOT "selectors/a/state"));
+    CHECK(strcmp(name, ROOT "selectors/b/state"));
+    CHECK(strcmp(name, ROOT "selectors/selector-a@1/state"));
+    CHECK(strcmp(name, ROOT "selectors/selector-b@2/state"));
+    CHECK(len != 0);
+  }
   saves++;
   bool fail_once = fail_once_path && !strcmp(name, fail_once_path) &&
                    ++fail_once_seen == fail_once_attempt;
@@ -180,24 +200,34 @@ int settings_backend_init(void) {
   kp_rgb_persist_encode_global(&global, &global_record);
   seed(ROOT "state", &global_record, sizeof(global_record));
   struct kp_rgb_persist_selector_record selection;
-  CHECK(kp_rgb_persist_encode_selector("alt", &selection) == 0);
+  CHECK(kp_rgb_persist_encode_selector(A_ALT_NAME, &selection) == 0);
+  seed(SELECTOR_A_PATH "state", &selection, sizeof(selection));
+  CHECK(kp_rgb_persist_encode_selector(B_ALT_NAME, &selection) == 0);
+  seed(SELECTOR_B_PATH "state", &selection, sizeof(selection));
+  CHECK(kp_rgb_persist_encode_selector(A_STATIC_NAME, &selection) == 0);
   seed(ROOT "selectors/a/state", &selection, sizeof(selection));
+  CHECK(kp_rgb_persist_encode_selector(B_STATIC_NAME, &selection) == 0);
   seed(ROOT "selectors/b/state", &selection, sizeof(selection));
-  struct kp_rgb_persist_effect value = {.duration_ms = 2100, .h = 42, .s = 70};
-  struct kp_rgb_persist_parameters_record parameters;
-  value.h = 123;
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
-  seed(ROOT "selectors/a/effects/shared", &parameters, sizeof(parameters));
-  value.h = 240;
-  value.duration_ms = 3100;
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
-  seed(ROOT "selectors/b/effects/shared", &parameters, sizeof(parameters));
-  value.h = 240; value.s = 100; value.duration_ms = 1000;
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
-  seed(ROOT "selectors/a/effects/alt", &parameters, sizeof(parameters));
-  value.duration_ms = CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS;
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameters) == 0);
-  seed(ROOT "selectors/b/effects/alt", &parameters, sizeof(parameters));
+  if (!strcmp(settings_case, "normalized-names")) {
+    CHECK(kp_rgb_persist_encode_selector(A_STATIC_NAME, &selection) == 0);
+    seed(ROOT "selectors/selector-a@1/state", &selection, sizeof(selection));
+    CHECK(kp_rgb_persist_encode_selector(B_STATIC_NAME, &selection) == 0);
+    seed(ROOT "selectors/selector-b@2/state", &selection, sizeof(selection));
+  }
+  /* Obsolete v1 parameter bytes are deliberately independent of production codecs. */
+  const uint8_t parameters[] = {1, 0x34, 0x08, 123, 0, 70};
+  const uint8_t malformed[] = {99, 0xff, 0xff, 0xff, 0xff, 101};
+  const uint8_t oversized[36] = {1};
+  seed(SELECTOR_A_PATH "effects/shared", parameters, sizeof(parameters));
+  seed(SELECTOR_B_PATH "effects/shared", parameters, sizeof(parameters));
+  seed(SELECTOR_A_PATH "effects/" A_STATIC_NAME, parameters, sizeof(parameters));
+  seed(SELECTOR_B_PATH "effects/" B_STATIC_NAME, parameters, sizeof(parameters));
+  seed(SELECTOR_A_PATH "effects/" A_ALT_NAME, malformed, sizeof(malformed));
+  seed(SELECTOR_B_PATH "effects/" B_ALT_NAME, oversized, sizeof(oversized));
+  seed(SELECTOR_A_PATH "effects/disabled", parameters, sizeof(parameters));
+  seed(SELECTOR_A_PATH "effects/missing", parameters, 1);
+  seed(SELECTOR_A_PATH "effects/optout", parameters, sizeof(parameters));
+  seed(ROOT "selectors/missing/effects/shared", parameters, sizeof(parameters));
   uint8_t obsolete[36] = {0};
   obsolete[0] = 2;
   seed(ROOT "state/effects/alt", obsolete, sizeof(obsolete));
@@ -206,6 +236,7 @@ int settings_backend_init(void) {
     if (file) {
       CHECK(fread(records, sizeof(records), 1, file) == 1);
       CHECK(fclose(file) == 0);
+      external_storage_loaded = true;
       for (size_t i = 0; i < ARRAY_SIZE(records); i++) {
         CHECK(memchr(records[i].name, 0, sizeof(records[i].name)));
         CHECK(records[i].len <= sizeof(records[i].bytes));
@@ -220,15 +251,26 @@ int settings_backend_init(void) {
   return 0;
 }
 
+static void check_defaults(void) {
+  const struct device *effects[] = {DEV(probe_a), DEV(probe_b), DEV(probe_c), DEV(probe_d)};
+  const unsigned hues[] = {120, 60, 240, 180};
+  for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
+    const struct kp_rgb_hsb *color = &kp_rgb_effect_data(effects[i])->color;
+    CHECK(color->h == hues[i] && color->s == 100 && color->b == 100);
+    CHECK(kp_rgb_effect_period(effects[i]) ==
+          (i == 0 || i == 2 ? CLAMP(1000, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+                                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
+                           : CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
+  }
+}
+
 static void check_restored(void) {
   CHECK(initial_load_done);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) ==
+        (external_storage_loaded ? DEV(probe_b) : DEV(probe_d)));
   CHECK(kp_rgb_global.brightness == 61 && kp_rgb_global.user_on);
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 123);
-  CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 240);
-  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
-  CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3100);
+  check_defaults();
 }
 
 static bool boot_checked;
@@ -263,6 +305,8 @@ static void perturb_and_reload(void) {
                                  .s = colors[i].s == 25 ? 75 : 25, .b = 100};
     CHECK(zmk_rgb_matrix_set_color(effects[i], &changed) == 0);
     CHECK(zmk_rgb_matrix_set_period(effects[i], periods[i] == 1700 ? 1800 : 1700) == 0);
+    colors[i] = changed;
+    periods[i] = kp_rgb_effect_period(effects[i]);
   }
   CHECK(zmk_rgb_selector_select(DEV(selector_a),
         selected_a == DEV(probe_a) ? DEV(probe_c) : DEV(probe_a)) == 0);
@@ -291,59 +335,164 @@ static void perturb_and_reload(void) {
   }
 }
 
-static void durable_parameters(const char *path, unsigned hue, unsigned period) {
-  struct record *record = find(path);
-  struct kp_rgb_persist_effect value;
-  CHECK(kp_rgb_persist_decode_parameters(record->bytes, record->len, &value) == 0);
-  CHECK(value.h == hue && value.duration_ms == period);
+static void check_selection_bytes(const void *bytes, size_t len, const char *id) {
+  struct kp_rgb_persist_selector_record value;
+  CHECK(kp_rgb_persist_decode_selector(bytes, len, &value) == 0);
+  CHECK(!strcmp(value.selected_id, id));
 }
+
+static void durable_selection(const char *path, const char *id) {
+  struct record *record = find(path);
+  check_selection_bytes(record->bytes, record->len, id);
+}
+
 static unsigned durable_brightness(void) {
   struct record *record = find(ROOT "state");
   struct kp_rgb_persist_global_state value;
   CHECK(kp_rgb_persist_decode_global(record->bytes, record->len, &value) == 0);
   return value.brightness;
 }
+
+static void select_member(const struct device *selector, const struct device *member) {
+  CHECK(kp_rgb_selector_binding_apply(selector, RGB_EFS_CMD,
+                                     kp_rgb_effect_cfg(member)->slot) == 0);
+}
+
 static void stage(const char *path, const void *bytes, size_t len) {
   struct record record = {.len = len};
   CHECK(len <= sizeof(record.bytes));
+  strcpy(record.name, path);
   memcpy(record.bytes, bytes, len);
   CHECK(settings_call_set_handler(path, len, read_record, &record, NULL) == 0);
 }
+
+static void obsolete_parameters(void) {
+  const char *paths[] = {
+      SELECTOR_A_PATH "effects/shared", SELECTOR_A_PATH "effects/" A_STATIC_NAME,
+      SELECTOR_A_PATH "effects/" A_ALT_NAME, SELECTOR_B_PATH "effects/shared",
+      SELECTOR_B_PATH "effects/" B_ALT_NAME, SELECTOR_B_PATH "effects/" B_STATIC_NAME,
+      SELECTOR_A_PATH "effects/disabled",
+      SELECTOR_A_PATH "effects/missing", SELECTOR_A_PATH "effects/optout",
+      ROOT "selectors/missing/effects/shared", ROOT "state/effects/any"};
+  const uint8_t valid[] = {1, 0x34, 0x08, 123, 0, 70};
+  const uint8_t malformed[] = {99, 0xff, 0xff, 0xff, 0xff, 101};
+  const uint8_t oversized[36] = {1};
+  unsigned before_reads = reads, before_saves = saves;
+  for (size_t i = 0; i < ARRAY_SIZE(paths); i++) {
+    stage(paths[i], valid, sizeof(valid));
+    stage(paths[i], malformed, sizeof(malformed));
+    stage(paths[i], valid, 1);
+    stage(paths[i], oversized, sizeof(oversized));
+    read_mode = -1; stage(paths[i], valid, sizeof(valid));
+    read_mode = 1; stage(paths[i], valid, sizeof(valid));
+    read_mode = 0;
+  }
+  CHECK(reads == before_reads && saves == before_saves);
+}
+
+static void invoke(const struct device *device, uint32_t command, uint32_t argument,
+                   const struct device *endpoint) {
+  struct zmk_behavior_binding binding = {
+      .behavior_dev = device->name, .param1 = command, .param2 = argument};
+  struct zmk_behavior_binding converted = binding;
+  CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
+      &converted, (struct zmk_behavior_binding_event){0}) == 0);
+  CHECK(!strcmp(converted.behavior_dev, endpoint->name));
+  CHECK(zmk_behavior_invoke_binding(&binding, (struct zmk_behavior_binding_event){0}, true) == 0);
+  CHECK(zmk_behavior_invoke_binding(&binding, (struct zmk_behavior_binding_event){0}, false) == 0);
+}
+
+static void qualified_parameter(const struct device *control, uint32_t command,
+                                uint32_t argument) {
+  struct zmk_behavior_binding binding = {
+      .behavior_dev = control->name, .param1 = command, .param2 = argument};
+  /* Split reception applies already-qualified bindings without central conversion. */
+  CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
+  CHECK(behavior_keymap_binding_released(&binding, (struct zmk_behavior_binding_event){0}) == 0);
+}
+
+static void runtime_parameters(void) {
+  unsigned before = saves;
+  const uint32_t commands[] = {RGB_HUI_CMD, RGB_HUD_CMD, RGB_SAI_CMD, RGB_SAD_CMD,
+                              RGB_SPI_CMD, RGB_SPD_CMD, RGB_COLOR_HSB_CMD};
+  for (size_t i = 0; i < ARRAY_SIZE(commands); i++) {
+    uint32_t argument = commands[i] == RGB_COLOR_HSB_CMD ? RGB_COLOR_HSB_VAL(211, 37, 100) : 0;
+    invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
+    invoke(DEV(kprgb), commands[i], argument, DEV(rgbs_a));
+    k_sleep(K_MSEC(60));
+    CHECK(saves == before);
+  }
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 211);
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 37);
+  qualified_parameter(DEV(rgbs_a),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
+      RGB_COLOR_HSB_VAL(288, 55, 100));
+  qualified_parameter(DEV(rgbs_a),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
+      2888);
+  qualified_parameter(DEV(rgbs_b),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, kp_rgb_effect_cfg(DEV(probe_b))->slot),
+      3888);
+  k_sleep(K_MSEC(1100)); CHECK(saves == before);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 288);
+  CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2888);
+  CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 288);
+  CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2888);
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 211);
+  CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
+  struct record before_b = *find(SELECTOR_B_PATH "state");
+  struct record before_global = *find(ROOT "state");
+  /* A direct effect binding is selection, not a parameter command. */
+  invoke(DEV(probe_a), 0, 0, DEV(rgbs_a));
+  k_sleep(K_MSEC(100));
+  CHECK(saves == before + 1);
+  durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 288);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
+  CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
+  CHECK(find(before_b.name)->len == before_b.len);
+  CHECK(!memcmp(find(before_b.name)->bytes, before_b.bytes, before_b.len));
+  invoke(DEV(probe_b), 0, 0, DEV(rgbs_b));
+  k_sleep(K_MSEC(100)); CHECK(saves == before + 2);
+  CHECK(!strcmp(journal[1].path, SELECTOR_B_PATH "state"));
+  durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
+  durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+  CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
+  CHECK(find(before_global.name)->len == before_global.len);
+  CHECK(!memcmp(find(before_global.name)->bytes, before_global.bytes, before_global.len));
+  unsigned settled = saves; k_sleep(K_MSEC(1100)); CHECK(saves == settled);
+  perturb_and_reload();
+}
+
 static void validation_case(void) {
-  struct kp_rgb_persist_global_record valid = {.version = 3, .user_on = 0,
-                                                    .brightness = 66};
-  struct kp_rgb_persist_selector_record ordered_selection;
-  CHECK(kp_rgb_persist_encode_selector("shared", &ordered_selection) == 0);
-  struct kp_rgb_persist_effect ordered_value = {.h = 211, .s = 37, .duration_ms = 1234};
-  struct kp_rgb_persist_parameters_record ordered_parameter;
-  CHECK(kp_rgb_persist_encode_parameters(&ordered_value, &ordered_parameter) == 0);
+  struct kp_rgb_persist_global_record valid = {.version = 3, .user_on = 0, .brightness = 66};
+  struct kp_rgb_persist_selector_record selected;
+  struct kp_rgb_hsb live = {.h = 211, .s = 37, .b = 100};
+  CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &live) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 1234) == 0);
   for (unsigned order = 0; order < 2; order++) {
     valid.brightness = 66 + order;
-    CHECK(kp_rgb_persist_encode_selector(order ? "alt" : "shared", &ordered_selection) == 0);
-    ordered_value.h = 211 + order;
-    ordered_value.duration_ms = 1234 + order;
-    CHECK(kp_rgb_persist_encode_parameters(&ordered_value, &ordered_parameter) == 0);
+    CHECK(kp_rgb_persist_encode_selector(order ? A_ALT_NAME : A_STATIC_NAME, &selected) == 0);
     if (order) {
       stage(ROOT "state", &valid, sizeof(valid));
-      stage(ROOT "selectors/a/state", &ordered_selection, sizeof(ordered_selection));
-      stage(ROOT "selectors/a/effects/shared", &ordered_parameter, sizeof(ordered_parameter));
+      stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
     }
     unsigned before = reads;
     uint8_t legacy[36] = {2};
     stage(ROOT "state", legacy, sizeof(legacy));
-    stage(ROOT "state/effects/any", legacy, sizeof(legacy));
     stage(ROOT "unknown", legacy, sizeof(legacy));
+    obsolete_parameters();
     CHECK(reads == before);
     if (!order) {
       stage(ROOT "state", &valid, sizeof(valid));
-      stage(ROOT "selectors/a/state", &ordered_selection, sizeof(ordered_selection));
-      stage(ROOT "selectors/a/effects/shared", &ordered_parameter, sizeof(ordered_parameter));
+      stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
     }
     struct kp_rgb_persist_global_record invalid[] = {
-        {.version = 2, .user_on = 0, .brightness = 66},
-        {.version = 3, .user_on = 2, .brightness = 66},
-        {.version = 3, .user_on = 0, .brightness = 101},
-        {.version = 3, .user_on = 0, .brightness = 66, .reserved = 1}};
+        {.version = 2, .brightness = 66}, {.version = 3, .user_on = 2, .brightness = 66},
+        {.version = 3, .brightness = 101}, {.version = 3, .brightness = 66, .reserved = 1}};
     for (size_t i = 0; i < ARRAY_SIZE(invalid); i++)
       stage(ROOT "state", &invalid[i], sizeof(invalid[i]));
     stage(ROOT "state", &valid, sizeof(valid) - 1);
@@ -353,52 +502,29 @@ static void validation_case(void) {
     bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
     CHECK(kp_rgb_global.brightness == valid.brightness);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == (order ? DEV(probe_c) : DEV(probe_a)));
-    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == ordered_value.h);
-    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 37);
-    CHECK(kp_rgb_effect_period(DEV(probe_a)) == ordered_value.duration_ms);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == live.h);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == live.s);
+    CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1234);
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
   }
-  struct kp_rgb_persist_selector_record selected;
-  CHECK(kp_rgb_persist_encode_selector("shared", &selected) == 0);
-  stage(ROOT "selectors/a/state", &selected, sizeof(selected));
+  CHECK(kp_rgb_persist_encode_selector(A_STATIC_NAME, &selected) == 0);
+  stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
   selected.version = 99;
-  stage(ROOT "selectors/a/state", &selected, sizeof(selected));
-  stage(ROOT "selectors/a/state", &selected, sizeof(selected) - 1);
-  read_mode = 1; stage(ROOT "selectors/a/state", &selected, sizeof(selected));
-  read_mode = -1; stage(ROOT "selectors/a/state", &selected, sizeof(selected)); read_mode = 0;
-  struct kp_rgb_persist_effect value = {.h = 123, .s = 44, .duration_ms = 888};
-  struct kp_rgb_persist_parameters_record parameter;
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameter) == 0);
-  stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter));
-  struct kp_rgb_persist_parameters_record bad = parameter;
-  bad.version = 99; stage(ROOT "selectors/a/effects/shared", &bad, sizeof(bad));
-  bad = parameter; bad.hue_le[0] = 105; bad.hue_le[1] = 1;
-  stage(ROOT "selectors/a/effects/shared", &bad, sizeof(bad));
-  bad = parameter; bad.saturation = 101;
-  stage(ROOT "selectors/a/effects/shared", &bad, sizeof(bad));
-  stage(ROOT "selectors/a/effects/shared", &bad, sizeof(bad) - 1);
-  read_mode = 1; stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter));
-  read_mode = -1; stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter)); read_mode = 0;
+  stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
+  stage(SELECTOR_A_PATH "state", &selected, sizeof(selected) - 1);
+  read_mode = 1; stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
+  read_mode = -1; stage(SELECTOR_A_PATH "state", &selected, sizeof(selected)); read_mode = 0;
   unsigned before = reads;
   stage(ROOT "selectors/missing/state", &selected, sizeof(selected));
-  stage(ROOT "selectors/a/effects/disabled", &parameter, sizeof(parameter));
-  stage(ROOT "selectors/a/effects/missing", &parameter, sizeof(parameter));
+  obsolete_parameters();
   CHECK(reads == before);
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 123);
-  CHECK(kp_rgb_effect_period(DEV(probe_a)) == 888);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
   CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
   CHECK(kp_rgb_persist_encode_selector("removed", &selected) == 0);
-  stage(ROOT "selectors/a/state", &selected, sizeof(selected));
-  stage(ROOT "selectors/b/state", &selected, sizeof(selected));
-  value = (struct kp_rgb_persist_effect){.h = 360, .s = 0, .duration_ms = 0};
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameter) == 0);
-  stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter));
-  value = (struct kp_rgb_persist_effect){.h = 359, .s = 100, .duration_ms = 65535};
-  CHECK(kp_rgb_persist_encode_parameters(&value, &parameter) == 0);
-  stage(ROOT "selectors/b/effects/alt", &parameter, sizeof(parameter));
+  stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
+  stage(SELECTOR_B_PATH "state", &selected, sizeof(selected));
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
@@ -407,35 +533,112 @@ static void validation_case(void) {
   CHECK(DT_PROP(DT_NODELABEL(selector_b), initial_effect) == 1);
   CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(probe_b)));
 #endif
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 0);
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 0);
-  CHECK(kp_rgb_effect_period(DEV(probe_a)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 359);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == live.h);
+  CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1234);
+  CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 180);
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   CHECK(kp_rgb_save_selector_state(DEV(probe_a), true) == -ENODEV);
-  k_sleep(K_MSEC(100));
-  CHECK(saves == 0);
+  k_sleep(K_MSEC(100)); CHECK(saves == 0);
 }
-static void extended_case(void) {
-  if (!strcmp(settings_case, "reordering")) {
-    CHECK(settings_storage);
-#if DT_NODE_EXISTS(DT_NODELABEL(optout))
-    struct kp_rgb_persist_effect ignored = {.h = 111, .s = 22, .duration_ms = 2222};
-    struct kp_rgb_persist_parameters_record ignored_bytes;
-    CHECK(kp_rgb_persist_encode_parameters(&ignored, &ignored_bytes) == 0);
-    struct record ignored_record = {.len = sizeof(ignored_bytes)};
-    memcpy(ignored_record.bytes, &ignored_bytes, sizeof(ignored_bytes));
-    unsigned before_reads = reads;
-    CHECK(settings_call_set_handler(ROOT "selectors/a/effects/optout", sizeof(ignored_bytes),
-                                    read_record, &ignored_record, NULL) == 0);
-    CHECK(reads == before_reads);
+
+static void old_custom_ids(void) {
+  const struct record old_a = *find(ROOT "selectors/a/state");
+  const struct record old_b = *find(ROOT "selectors/b/state");
+  const struct record global = *find(ROOT "state");
+  unsigned before_reads = reads, before_saves = saves;
+  stage(old_a.name, old_a.bytes, old_a.len);
+  stage(old_b.name, old_b.bytes, old_b.len);
+  CHECK(reads == before_reads);
+  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+  check_restored();
+
+  const char *old_members[] = {"alt", "shared", "shared_012345678901234567890123"};
+  for (size_t i = 0; i < ARRAY_SIZE(old_members); i++) {
+    CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+    struct kp_rgb_persist_selector_record selected;
+    CHECK(kp_rgb_persist_encode_selector(old_members[i], &selected) == 0);
+    before_reads = reads;
+    stage(SELECTOR_A_PATH "state", &selected, sizeof(selected));
+    stage(SELECTOR_B_PATH "state", &selected, sizeof(selected));
+    CHECK(reads == before_reads + 2);
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+    bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
+    CHECK(kp_rgb_global.brightness == 61);
+    check_defaults();
+  }
+  k_sleep(K_MSEC(100));
+  CHECK(saves == before_saves);
+  const struct record *unchanged[] = {&old_a, &old_b, &global};
+  for (size_t i = 0; i < ARRAY_SIZE(unchanged); i++) {
+    const struct record *current = find(unchanged[i]->name);
+    CHECK(current->len == unchanged[i]->len);
+    CHECK(!memcmp(current->bytes, unchanged[i]->bytes, current->len));
+  }
+  durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
+  durable_selection(SELECTOR_B_PATH "state", B_ALT_NAME);
+}
+
+static void normalized_names_case(void) {
+  CHECK(!strcmp(SELECTOR_A_PATH, ROOT "selectors/selector_a_1/"));
+  CHECK(!strcmp(SELECTOR_B_PATH, ROOT "selectors/selector_b_2/"));
+  CHECK(!strcmp(A_ALT_NAME, "a_motion_3"));
+  CHECK(!strcmp(B_ALT_NAME, "b_alt_4"));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
+  durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
+  durable_selection(SELECTOR_B_PATH "state", B_ALT_NAME);
+
+  struct record old_a = *find(ROOT "selectors/selector-a@1/state");
+  struct record old_b = *find(ROOT "selectors/selector-b@2/state");
+  unsigned before_reads = reads;
+  CHECK(settings_call_set_handler(old_a.name, old_a.len, read_record, &old_a, NULL) == 0);
+  CHECK(settings_call_set_handler(old_b.name, old_b.len, read_record, &old_b, NULL) == 0);
+  CHECK(reads == before_reads);
+
+  struct kp_rgb_persist_selector_record legacy_member;
+  CHECK(kp_rgb_persist_encode_selector("a-motion@3", &legacy_member) == 0);
+  stage(SELECTOR_A_PATH "state", &legacy_member, sizeof(legacy_member));
+  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+  select_member(DEV(selector_a), DEV(probe_c));
+  k_sleep(K_MSEC(100));
+  CHECK(journal_count == 1);
+  CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
+  durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
+  perturb_and_reload();
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
+  CHECK(find(old_a.name)->len == old_a.len &&
+        !memcmp(find(old_a.name)->bytes, old_a.bytes, old_a.len));
+  CHECK(find(old_b.name)->len == old_b.len &&
+        !memcmp(find(old_b.name)->bytes, old_b.bytes, old_b.len));
+}
+
+static void extended_case(void) {
+  if (!strcmp(settings_case, "normalized-names")) {
+    normalized_names_case();
+  } else if (!strcmp(settings_case, "old-custom-ids")) {
+    old_custom_ids();
+  } else if (!strcmp(settings_case, "runtime-parameters")) {
+    runtime_parameters();
+  } else if (!strcmp(settings_case, "reordering")) {
+    CHECK(settings_storage);
+    obsolete_parameters();
+#if DT_NODE_EXISTS(DT_NODELABEL(optout))
     CHECK(kp_rgb_effect_data(DEV(optout))->color.h == 0);
 #endif
-    CHECK(kp_rgb_save_selector_state(DEV(selector_a), false) == 0);
-    CHECK(kp_rgb_save_selector_state(DEV(selector_b), false) == 0);
+    select_member(DEV(selector_a), DEV(probe_a));
+    select_member(DEV(selector_b), DEV(probe_b));
     k_sleep(K_MSEC(100));
-    perturb_and_reload(); check_restored();
+    durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+    durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
+    perturb_and_reload();
+    select_member(DEV(selector_a), DEV(probe_c));
+    k_sleep(K_MSEC(100));
+    perturb_and_reload();
     FILE *file = fopen(settings_storage, "wb"); CHECK(file);
     CHECK(fwrite(records, sizeof(records), 1, file) == 1);
     CHECK(fclose(file) == 0);
@@ -444,25 +647,25 @@ static void extended_case(void) {
   } else if (!strcmp(settings_case, "debounce")) {
     unsigned before = saves;
     int64_t started = k_uptime_get();
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_SPI_CMD, 2300) == 0);
-    k_sleep(K_MSEC(10));
-    CHECK(saves == before);
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_SPI_CMD, 2400) == 0);
+    select_member(DEV(selector_a), DEV(probe_a));
+    k_sleep(K_MSEC(10)); CHECK(saves == before);
+    select_member(DEV(selector_a), DEV(probe_c));
     k_sleep(K_MSEC(10)); CHECK(saves == before);
     k_sleep(K_MSEC(60));
-    CHECK(journal_count > 0 && journal[0].time >= started + 30);
-    durable_parameters(ROOT "selectors/a/effects/alt", 240, 2400);
+    CHECK(journal_count == 1 && journal[0].time >= started + 30);
+    CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
+    durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
     perturb_and_reload();
   } else if (!strcmp(settings_case, "global-failure")) {
     fail_path = ROOT "state";
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 72; kp_rgb_matrix_unlock();
     CHECK(kp_rgb_save_state() == 0);
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_SPI_CMD, 2300) == 0);
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_b), RGB_SPI_CMD, 4300) == 0);
+    select_member(DEV(selector_a), DEV(probe_a));
+    select_member(DEV(selector_b), DEV(probe_b));
     k_sleep(K_MSEC(2200));
     CHECK(failed && durable_brightness() == 61);
-    durable_parameters(ROOT "selectors/a/effects/alt", 240, 2300);
-    durable_parameters(ROOT "selectors/b/effects/alt", 240, 4300);
+    durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+    durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
     unsigned failures = 0; int64_t last = -1;
     for (unsigned i = 0; i < journal_count; i++) if (journal[i].result < 0) {
       CHECK(!strcmp(journal[i].path, ROOT "state"));
@@ -475,57 +678,41 @@ static void extended_case(void) {
     perturb_and_reload();
   } else if (!strcmp(settings_case, "reset-revision-second-failure")) {
     struct record before_global = *find(ROOT "state");
-    struct record before_b_state = *find(ROOT "selectors/b/state");
-    struct record before_b_shared = *find(ROOT "selectors/b/effects/shared");
-    struct record before_b_alt = *find(ROOT "selectors/b/effects/alt");
+    struct record before_b = *find(SELECTOR_B_PATH "state");
+    CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
     hook_action = 2;
-    hook_path = ROOT "selectors/a/effects/shared";
+    hook_path = SELECTOR_A_PATH "state";
     fail_once_path = hook_path;
     fail_once_attempt = 2;
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-        RGB_COLOR_HSB_VAL(299, 70, 100)) == 0);
+    select_member(DEV(selector_a), DEV(probe_c));
     k_sleep(K_MSEC(100));
     CHECK(hook_calls == 1 && fail_once_seen == 1 && !failed);
-    durable_parameters(ROOT "selectors/a/effects/shared", 299, 2100);
-    struct kp_rgb_persist_selector_record retained;
-    struct record *selection_record = find(ROOT "selectors/a/state");
-    CHECK(kp_rgb_persist_decode_selector(selection_record->bytes, selection_record->len,
-                                        &retained) == 0);
-    CHECK(!strcmp(retained.selected_id, "alt"));
+    durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    check_defaults();
     k_sleep(K_MSEC(1100));
     CHECK(failed && fail_once_seen == 2);
-    durable_parameters(ROOT "selectors/a/effects/shared", 299, 2100);
+    durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
     k_sleep(K_MSEC(1100));
     CHECK(fail_once_seen == 3);
-    durable_parameters(ROOT "selectors/a/effects/shared", 120, 1000);
-    CHECK(kp_rgb_persist_decode_selector(selection_record->bytes, selection_record->len,
-                                        &retained) == 0);
-    CHECK(!strcmp(retained.selected_id, "shared"));
-    unsigned attempts = 0;
-    int64_t last = -1;
+    durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+    unsigned attempts = 0; int64_t last = -1;
     for (unsigned i = 0; i < journal_count; i++) {
-      if (strcmp(journal[i].path, fail_once_path)) continue;
+      CHECK(!strcmp(journal[i].path, fail_once_path));
       CHECK(last < 0 || journal[i].time - last >= 1000);
       last = journal[i].time;
       CHECK(journal[i].result == (attempts == 1 ? -EIO : 0));
-      struct kp_rgb_persist_effect value;
-      CHECK(kp_rgb_persist_decode_parameters(journal[i].bytes, journal[i].len, &value) == 0);
-      CHECK(value.h == (attempts == 0 ? 299 : 120));
-      CHECK(value.duration_ms == (attempts == 0 ? 2100 : 1000));
+      check_selection_bytes(journal[i].bytes, journal[i].len, attempts == 0 ? A_ALT_NAME : A_STATIC_NAME);
       attempts++;
     }
     CHECK(attempts == 3);
-    const struct record *unchanged[] = {&before_global, &before_b_state,
-                                      &before_b_shared, &before_b_alt};
+    const struct record *unchanged[] = {&before_global, &before_b};
     for (size_t i = 0; i < ARRAY_SIZE(unchanged); i++) {
       struct record *current = find(unchanged[i]->name);
       CHECK(current->len == unchanged[i]->len);
       CHECK(!memcmp(current->bytes, unchanged[i]->bytes, current->len));
     }
-    unsigned settled = saves;
-    k_sleep(K_MSEC(1100)); CHECK(saves == settled);
+    unsigned settled = saves; k_sleep(K_MSEC(1100)); CHECK(saves == settled);
     perturb_and_reload();
   } else if (!strcmp(settings_case, "staged-reset")) {
     struct kp_rgb_persist_global_state global = {.user_on = false, .brightness = 33};
@@ -533,45 +720,50 @@ static void extended_case(void) {
     CHECK(kp_rgb_persist_encode_global(&global, &global_record) == 0);
     stage(ROOT "state", &global_record, sizeof(global_record));
     struct kp_rgb_persist_selector_record selection;
-    CHECK(kp_rgb_persist_encode_selector("shared", &selection) == 0);
-    stage(ROOT "selectors/a/state", &selection, sizeof(selection));
-    stage(ROOT "selectors/b/state", &selection, sizeof(selection));
-    struct kp_rgb_persist_effect value = {.h = 267, .s = 61, .duration_ms = 2345};
-    struct kp_rgb_persist_parameters_record parameter;
-    CHECK(kp_rgb_persist_encode_parameters(&value, &parameter) == 0);
-#if DT_NODE_EXISTS(DT_NODELABEL(optout))
-    unsigned before_reads = reads;
-    stage(ROOT "selectors/a/effects/optout", &parameter, sizeof(parameter));
-    CHECK(reads == before_reads);
-#endif
-    stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter));
-    stage(ROOT "selectors/b/effects/shared", &parameter, sizeof(parameter));
-    stage(ROOT "selectors/a/effects/alt", &parameter, sizeof(parameter));
+    CHECK(kp_rgb_persist_encode_selector(A_ALT_NAME, &selection) == 0);
+    stage(SELECTOR_A_PATH "state", &selection, sizeof(selection));
+    CHECK(kp_rgb_persist_encode_selector(B_STATIC_NAME, &selection) == 0);
+    stage(SELECTOR_B_PATH "state", &selection, sizeof(selection));
+    struct kp_rgb_hsb live = {.h = 267, .s = 61, .b = 100};
+    CHECK(zmk_rgb_matrix_set_color(DEV(probe_b), &live) == 0);
+    CHECK(zmk_rgb_matrix_set_period(DEV(probe_b), 2345) == 0);
+    struct kp_rgb_hsb changed_a = {.h = 313, .s = 22, .b = 100};
+    CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &changed_a) == 0);
+    CHECK(zmk_rgb_matrix_set_color(DEV(probe_c), &changed_a) == 0);
+    CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2777) == 0);
+    CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 3777) == 0);
+    obsolete_parameters();
     CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 120);
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 100);
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 100);
+    CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
+    CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
 #if DT_NODE_EXISTS(DT_NODELABEL(optout))
     CHECK(kp_rgb_effect_data(DEV(optout))->color.h == 0);
 #endif
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 267);
-    bool on;
-    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
+    CHECK(kp_rgb_effect_period(DEV(probe_b)) == 2345);
+    bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
     CHECK(kp_rgb_global.brightness == 33);
     CHECK(kp_rgb_save_state() == 0);
-    k_sleep(K_MSEC(100));
     CHECK(kp_rgb_save_selector_state(DEV(selector_b), false) == 0);
     k_sleep(K_MSEC(100)); perturb_and_reload();
-    stage(ROOT "selectors/a/effects/shared", &parameter, sizeof(parameter));
+    CHECK(kp_rgb_persist_encode_selector(A_ALT_NAME, &selection) == 0);
+    stage(SELECTOR_A_PATH "state", &selection, sizeof(selection));
+    CHECK(kp_rgb_persist_encode_selector(B_ALT_NAME, &selection) == 0);
+    stage(SELECTOR_B_PATH "state", &selection, sizeof(selection));
     stage(ROOT "state", &global_record, sizeof(global_record));
-    stage(ROOT "selectors/b/state", &selection, sizeof(selection));
-    stage(ROOT "selectors/b/effects/shared", &parameter, sizeof(parameter));
+    obsolete_parameters();
     kp_rgb_reset_state();
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
-    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 120);
-    CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 60);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+    check_defaults();
     CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
     CHECK(kp_rgb_global.brightness == 100);
     k_sleep(K_MSEC(100)); perturb_and_reload();
@@ -580,30 +772,45 @@ static void extended_case(void) {
     bool reset = strstr(settings_case, "reset") != NULL;
     bool failed_save = strstr(settings_case, "failed") != NULL;
     hook_action = global ? (reset ? 4 : 3) : (reset ? 2 : 1);
-    hook_path = global ? ROOT "state" : ROOT "selectors/a/effects/shared";
+    hook_path = global ? ROOT "state" : SELECTOR_A_PATH "state";
     if (failed_save) fail_path = hook_path;
     if (global) {
       kp_rgb_matrix_lock(); kp_rgb_global.brightness = 12; kp_rgb_matrix_unlock();
       CHECK(kp_rgb_save_state() == 0);
     } else {
-      CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-          KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-          RGB_COLOR_HSB_VAL(299, 70, 100)) == 0);
+      /* Reset and dirty hooks have distinct final IDs. */
+      if (reset) {
+        CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+        select_member(DEV(selector_a), DEV(probe_c));
+      } else select_member(DEV(selector_a), DEV(probe_a));
     }
     k_sleep(K_MSEC(100));
     CHECK(hook_calls == 1 && hook_path == NULL);
-    if (!failed_save) {
-      if (global) {
-        struct kp_rgb_persist_global_state captured;
-        CHECK(kp_rgb_persist_decode_global(journal[0].bytes, journal[0].len, &captured) == 0);
-        CHECK(captured.brightness == 12);
-      } else durable_parameters(ROOT "selectors/a/effects/shared", 299, 2100);
+    CHECK(journal_count > 0 && journal[0].result == (failed_save ? -EIO : 0));
+    if (global) {
+      struct kp_rgb_persist_global_state captured;
+      CHECK(kp_rgb_persist_decode_global(journal[0].bytes, journal[0].len, &captured) == 0);
+      CHECK(captured.brightness == 12);
+    } else {
+      check_selection_bytes(journal[0].bytes, journal[0].len, reset ? A_ALT_NAME : A_STATIC_NAME);
+      durable_selection(SELECTOR_A_PATH "state", failed_save || reset ? A_ALT_NAME : A_STATIC_NAME);
     }
     fail_path = NULL;
     k_sleep(K_MSEC(1100));
     if (global) CHECK(durable_brightness() == (reset ? 100 : 45));
-    else durable_parameters(ROOT "selectors/a/effects/shared", reset ? 120 : 288,
-                            reset ? 1000 : 2888);
+    else durable_selection(SELECTOR_A_PATH "state", reset ? A_STATIC_NAME : A_ALT_NAME);
+    int64_t last = -1;
+    unsigned attempts = 0;
+    for (unsigned i = 0; i < journal_count; i++) {
+      const char *path = global ? ROOT "state" : SELECTOR_A_PATH "state";
+      if (strcmp(journal[i].path, path)) continue;
+      /* Global reset can queue one immediate follow-up during backend I/O. */
+      CHECK(last < 0 || (global && reset && attempts == 1) ||
+            journal[i].time - last >= 1000);
+      last = journal[i].time;
+      attempts++;
+    }
+    CHECK(attempts >= 2);
     unsigned settled = saves; k_sleep(K_MSEC(1100)); CHECK(saves == settled);
     perturb_and_reload();
   }
@@ -616,17 +823,6 @@ static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(b);
   ARG_UNUSED(c);
   k_sleep(K_MSEC(100));
-  if (!strncmp(settings_case, "ids-", 4)) {
-    int error = !strcmp(settings_case, "ids-duplicate") ? -EEXIST : -EINVAL;
-    CHECK(kp_rgb_settings_commit() == error);
-    zmk_rgb_matrix_start();
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
-    bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
-    CHECK(kp_rgb_global.brightness == 100);
-    CHECK(!boot_checked && saves == 0);
-    printk("PASS settings %s\n", settings_case); exit(0);
-  }
 #if !IS_ENABLED(CONFIG_KEYPAW_RGB_CONTROL_AUTO_START)
   CHECK(initial_load_done);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
@@ -656,82 +852,76 @@ static void scenario(void *a, void *b, void *c) {
 #endif
   check_restored();
   if (strcmp(settings_case, "existing")) extended_case();
-  struct record *obsolete_record = find(ROOT "state/effects/alt");
-  unsigned before_reads = reads;
-  CHECK(settings_call_set_handler(ROOT "state/effects/alt", obsolete_record->len,
-                                  read_record, obsolete_record, NULL) == 0);
-  CHECK(reads == before_reads);
+  obsolete_parameters();
   uint8_t legacy_state[36] = {2};
   struct record legacy_record = {.len = sizeof(legacy_state)};
+  strcpy(legacy_record.name, ROOT "state");
   memcpy(legacy_record.bytes, legacy_state, sizeof(legacy_state));
+  unsigned before_reads = reads;
   /* Zephyr logs and discards h_set errors; rejection must not read or stage. */
   CHECK(settings_call_set_handler(ROOT "state", legacy_record.len, read_record,
                                   &legacy_record, NULL) == 0);
   CHECK(reads == before_reads);
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
   check_restored();
-  printk("PASS legacy state rejected and obsolete effect ignored\n");
   k_sleep(K_MSEC(150));
   CHECK(!failed && saves == 0);
   CHECK(find(ROOT "state")->len == sizeof(struct kp_rgb_persist_global_record));
   CHECK(find(ROOT "state/effects/alt")->len == sizeof(uint8_t[36]));
   printk("PASS scoped settings legacy records ignored\n");
-  k_sleep(K_MSEC(1200));
-  CHECK(find(ROOT "state")->len == sizeof(struct kp_rgb_persist_global_record));
-  CHECK(find(ROOT "state/effects/alt")->len == sizeof(uint8_t[36]));
+  k_sleep(K_MSEC(1200)); CHECK(saves == 0);
 
-  struct record before_b = *find(ROOT "selectors/b/state");
+  struct record before_b = *find(SELECTOR_B_PATH "state");
   struct record before_global = *find(ROOT "state");
   CHECK(kp_rgb_selector_binding_apply(DEV(selector_b), RGB_SPI_CMD, 4200) == 0);
-  k_sleep(K_MSEC(100));
-  CHECK(find(ROOT "selectors/b/state")->len == before_b.len);
+  k_sleep(K_MSEC(100)); CHECK(saves == 0);
   CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
   k_sleep(K_MSEC(100));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == 4200);
-  CHECK(!memcmp(find(ROOT "state")->bytes, before_global.bytes,
-                before_global.len));
-  CHECK(!memcmp(find(ROOT "selectors/b/state")->bytes, before_b.bytes,
-                before_b.len));
+  CHECK(!memcmp(find(ROOT "state")->bytes, before_global.bytes, before_global.len));
+  CHECK(!memcmp(find(SELECTOR_B_PATH "state")->bytes, before_b.bytes, before_b.len));
+  durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
   perturb_and_reload();
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-  CHECK(kp_rgb_effect_period(DEV(probe_d)) == 4200);
+  /* Reload keeps the changed live parameters, not the pre-reload values. */
+  CHECK(kp_rgb_effect_period(DEV(probe_d)) == 1700);
   printk("PASS scoped settings addressed save/reset/reload isolation\n");
 
-  fail_path = ROOT "selectors/a/effects/alt";
+  fail_path = SELECTOR_A_PATH "state";
   failed = false;
-  CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_SPI_CMD, 2300) == 0);
-  CHECK(kp_rgb_selector_binding_apply(DEV(selector_b), RGB_SPI_CMD, 4300) == 0);
-  kp_rgb_matrix_lock();
-  kp_rgb_global.brightness = 47;
-  kp_rgb_matrix_unlock();
+  select_member(DEV(selector_a), DEV(probe_c));
+  select_member(DEV(selector_b), DEV(probe_b));
+  kp_rgb_matrix_lock(); kp_rgb_global.brightness = 47; kp_rgb_matrix_unlock();
   CHECK(kp_rgb_save_state() == 0);
-  k_sleep(K_MSEC(1100));
-  CHECK(failed);
-  struct kp_rgb_persist_global_state durable_global;
-  struct record *global_record = find(ROOT "state");
-  CHECK(kp_rgb_persist_decode_global(global_record->bytes, global_record->len,
-                                    &durable_global) == 0);
-  CHECK(durable_global.brightness == 47);
-  struct kp_rgb_persist_effect durable_parameters;
-  struct record *parameter_record = find(ROOT "selectors/b/effects/alt");
-  CHECK(kp_rgb_persist_decode_parameters(parameter_record->bytes,
-       parameter_record->len, &durable_parameters) == 0);
-  CHECK(durable_parameters.duration_ms == 4300);
+  k_sleep(K_MSEC(1100)); CHECK(failed);
+  CHECK(durable_brightness() == 47);
+  durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+  durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
+  unsigned failures = 0; int64_t last = -1;
+  for (unsigned i = 0; i < journal_count; i++) if (journal[i].result < 0) {
+    CHECK(!strcmp(journal[i].path, fail_path));
+    CHECK(last < 0 || journal[i].time - last >= 1000);
+    last = journal[i].time; failures++;
+  }
+  CHECK(failures >= 2);
   printk("PASS scoped settings independent save despite persistent failure\n");
   fail_path = NULL;
-  uint8_t removed[36] = {2};
-  seed(ROOT "state/effects/removed", removed, sizeof(removed));
+  k_sleep(K_MSEC(1100));
+  durable_selection(SELECTOR_A_PATH "state", A_ALT_NAME);
+  unsigned settled = saves; k_sleep(K_MSEC(1100)); CHECK(saves == settled);
   kp_rgb_reset_state();
   k_sleep(K_MSEC(100));
-  CHECK(find(ROOT "state/effects/removed")->len == sizeof(removed));
-  perturb_and_reload();
+  CHECK(find(ROOT "state/effects/alt")->len == sizeof(uint8_t[36]));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 120);
-  CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 60);
+  check_defaults();
+  durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
+  durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
+  CHECK(durable_brightness() == 100);
+  perturb_and_reload();
   CHECK(saves > 0 && boot_checked);
   printk("PASS scoped settings global reset/reload\n");
   exit(0);

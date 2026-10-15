@@ -98,21 +98,8 @@ CASES = {
 &fixture_overlay { condition = <&selected_preview>; };
 &fixture_battery { condition = <&selected_preview>; };
 '''),
-    "persist-id": (True, '''
-&fx_solid { persist-id = "solid_main"; };
-&fx_solid_v { persist-id = "solid_vertical"; };
-'''),
-    "persist-id-duplicate": (True, '''
-&fx_solid { persist-id = "duplicate"; };
-&fx_solid_v { persist-id = "duplicate"; };
-'''),
-    "persist-id-too-long": (False, '''
-&fx_solid { persist-id = "persist_id_that_is_far_beyond_the_storage_limit"; };
-'''),
-    "node-name-too-long": (False, '''
-&preview_selector { fx_this_node_name_is_far_beyond_the_storage_limit {
-    compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
-'''),
+    "removed-selector-persist-id": (False, '&preview_selector { persist-id = "preview"; };'),
+    "removed-effect-persist-id": (False, '&fx_solid { persist-id = "solid"; };'),
 }
 
 
@@ -130,8 +117,8 @@ DIAGNOSTICS = {
     "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
-    "persist-id-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
-    "node-name-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
+    "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
+    "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
 }
 
 for effect in ("rain", "starlight"):
@@ -170,13 +157,6 @@ def main():
             if (result.returncode == 0) != valid:
                 raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                      + result.stdout[-12000:])
-            if name == "persist-id-duplicate":
-                run = subprocess.run([str(root / name / "build/zephyr/zmk.exe"),
-                                      "--stop_at=1", "-no-rt"], cwd=root, text=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     timeout=30)
-                assert run.returncode == 0, run.stdout
-                assert "persistence IDs invalid" in run.stdout, run.stdout
             if name.startswith("period-"):
                 assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
             if not valid:
