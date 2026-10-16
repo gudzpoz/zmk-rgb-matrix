@@ -17,7 +17,10 @@ size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector) {
 
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot) {
-  return slot < selector->effect_count ? selector->effects[slot] : NULL;
+  if (slot >= selector->effect_count)
+    return NULL;
+  const struct device *effect = selector->members[slot].effect;
+  return effect != NULL && device_is_ready(effect) ? effect : NULL;
 }
 
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
@@ -67,7 +70,7 @@ int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
     if (fx == NULL) {
       continue;
     }
-    const struct kp_rgb_effect_defaults *def = &selector->effect_defaults[i];
+    const struct kp_rgb_effect_defaults *def = &selector->members[i].defaults;
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
     data->color = def->color;
     data->color.b = KP_RGB_BRT_MAX;
@@ -148,7 +151,7 @@ int kp_rgb_selector_convert_locked(struct kp_rgb_selector *selector,
     if (argument > UINT16_MAX || argument >= selector->effect_count)
       return -EINVAL;
     const struct device *target = kp_rgb_selector_at(selector, argument);
-    return target == NULL ? -ENOENT : (device_is_ready(target) ? 0 : -ENODEV);
+    return target == NULL ? -ENOENT : 0;
   }
   if (effect == NULL || !device_is_ready(effect))
     return -ENODEV;
@@ -230,8 +233,6 @@ int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,
     const struct device *target = kp_rgb_selector_at(selector, argument);
     if (target == NULL)
       return -ENOENT;
-    if (!device_is_ready(target))
-      return -ENODEV;
     int err = kp_rgb_selector_select_locked(selector, (uint16_t)argument);
     if (err > 0)
       zmk_rgb_matrix_flush();

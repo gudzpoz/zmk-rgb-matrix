@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
+#include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
 #include <zmk/events/rgb_selector_selection_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"

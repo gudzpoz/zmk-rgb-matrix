@@ -20,6 +20,10 @@ OVERLAY = '''
             compatible = "test,rgb-default-effect"; #binding-cells = <0>;
             color = <0x008000>; duration = <0>;
         };
+        hole: disabled_member {
+            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            status = "disabled";
+        };
         default_explicit: explicit {
             compatible = "test,rgb-default-effect"; #binding-cells = <0>;
             color = <0x000080>; duration = <0xffffffff>;

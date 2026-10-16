@@ -10,9 +10,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
+#include <zmk/rgb_persist.h>
 
 #include "../rgb_matrix_internal.h"
 
@@ -27,12 +27,10 @@ struct kp_selector_config {
 struct kp_selector_data {
   struct kp_rgb_overlay_common_data common;
   struct kp_rgb_selector selector;
-  const struct device **members;
   struct kp_rgb_effect_instance *instances;
   bool *reset_pending;
   size_t live_slot;
   bool active;
-  bool prepared;
   bool ready;
   bool reset_requested;
 };
@@ -153,9 +151,6 @@ int kp_rgb_selector_overlay_select_locked(const struct device *dev,
   struct kp_rgb_selector *selector = kp_rgb_selector_overlay_state_locked(dev);
   if (selector == NULL)
     return -ENODEV;
-  const struct device *target = kp_rgb_selector_at(selector, slot);
-  if (target != NULL && !device_is_ready(target))
-    return -ENODEV;
   int changed = kp_rgb_selector_select_locked(selector, slot);
   if (changed > 0)
     zmk_rgb_matrix_flush();
@@ -177,44 +172,6 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
   return err;
 }
 
-static void kp_selector_refresh_members(struct kp_selector_data *data) {
-  for (size_t i = 0; i < data->selector.effect_count; i++) {
-    const struct device *effect = data->instances[i].effect;
-    data->members[i] =
-        effect != NULL && device_is_ready(effect) ? effect : NULL;
-  }
-}
-
-static void kp_selector_prepare_locked(struct kp_selector_data *data) {
-  if (data->prepared)
-    return;
-  kp_selector_refresh_members(data);
-  data->selector.effect_index = data->selector.initial_effect;
-  data->selector.active_fx = NULL;
-  data->prepared = true;
-}
-
-struct kp_rgb_selector *
-kp_rgb_selector_overlay_prepare_locked(const struct device *dev) {
-  if (dev == NULL || !device_is_ready(dev))
-    return NULL;
-  const struct kp_rgb_overlay_api *api = dev->api;
-  if (api == NULL || api->callbacks != &kp_selector_callbacks)
-    return NULL;
-  struct kp_selector_data *data = dev->data;
-  kp_selector_prepare_locked(data);
-  kp_selector_refresh_members(data);
-  return &data->selector;
-}
-static int kp_selector_prepare(const struct device *dev) {
-  if (!device_is_ready(dev))
-    return 0;
-  kp_rgb_matrix_lock();
-  kp_selector_prepare_locked(dev->data);
-  kp_rgb_matrix_unlock();
-  return 0;
-}
-
 static int kp_selector_start(const struct device *dev) {
   if (!device_is_ready(dev)) {
     LOG_ERR("RGB selector %s is not ready", dev->name);
@@ -231,7 +188,6 @@ static int kp_selector_start(const struct device *dev) {
     kp_rgb_matrix_unlock();
     return 0;
   }
-  kp_rgb_selector_overlay_prepare_locked(dev);
   if (data->selector.active_fx == NULL) {
     data->selector.effect_index = data->selector.initial_effect;
   }
@@ -251,9 +207,22 @@ static int kp_selector_start(const struct device *dev) {
   return err < 0 ? -ENODEV : 0;
 }
 
-#define KP_SELECTOR_DEFAULT(node_id)                                           \
-  {.color = KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),                \
-   .duration_ms = DT_PROP_OR(node_id, duration, 0)},
+#define KP_SELECTOR_ID(node_id) STRINGIFY(DT_NODE_FULL_NAME_TOKEN(node_id))
+
+#define KP_SELECTOR_MEMBER_ID_LENGTH(node_id)                                  \
+  BUILD_ASSERT(sizeof(KP_SELECTOR_ID(node_id)) <=                              \
+                   KP_RGB_PERSIST_MAX_ID_LENGTH,                               \
+               "RGB node name exceeds KP_RGB_PERSIST_MAX_ID_LENGTH");
+
+#define KP_SELECTOR_MEMBER(node_id)                                            \
+  COND_CODE_1(                                                                 \
+      DT_NODE_HAS_STATUS(node_id, okay),                                       \
+      ({.effect = DEVICE_DT_GET(node_id),                                      \
+        .id = KP_SELECTOR_ID(node_id),                                         \
+        .defaults = {.color =                                                  \
+                         KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),   \
+                     .duration_ms = DT_PROP_OR(node_id, duration, 0)}}, ),     \
+      ({0}, ))
 
 #define KP_SELECTOR_INSTANCE(node_id)                                          \
   COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay),                               \
@@ -261,6 +230,12 @@ static int kp_selector_start(const struct device *dev) {
               (KP_RGB_EFFECT_INSTANCE_INIT(NULL), ))
 
 #define KP_SELECTOR_DEFINE(inst)                                               \
+  BUILD_ASSERT(sizeof(KP_SELECTOR_ID(DT_DRV_INST(inst))) <=                    \
+                   KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH,                      \
+               "RGB selector token exceeds "                                   \
+               "KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH");                       \
+  DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst),                              \
+                               KP_SELECTOR_MEMBER_ID_LENGTH)                   \
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(DT_DRV_INST(inst)) > 0,                \
                "selector requires at least one enabled nested effect");        \
   BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT16_MAX,                  \
@@ -269,10 +244,8 @@ static int kp_selector_start(const struct device *dev) {
                    DT_PROP(DT_DRV_INST(inst), initial_effect) <= UINT16_MAX,   \
                "selector initial-effect must fit a local slot");               \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_selector_##inst);                      \
-  static const struct device                                                   \
-      *kp_selector_##inst##_effects[DT_CHILD_NUM(DT_DRV_INST(inst))];          \
-  static const struct kp_rgb_effect_defaults kp_selector_##inst##_defaults[] = \
-      {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_SELECTOR_DEFAULT)};              \
+  static const struct kp_rgb_selector_member kp_selector_##inst##_members[] =  \
+      {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_SELECTOR_MEMBER)};               \
   static struct kp_rgb_effect_instance kp_selector_##inst##_instances[] = {    \
       DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_SELECTOR_INSTANCE)};              \
   static bool                                                                  \
@@ -284,27 +257,35 @@ static int kp_selector_start(const struct device *dev) {
       .selector =                                                              \
           {                                                                    \
               .owner = DEVICE_DT_GET(DT_DRV_INST(inst)),                       \
-              .effects = kp_selector_##inst##_effects,                         \
-              .effect_defaults = kp_selector_##inst##_defaults,                \
-              .effect_count = DT_CHILD_NUM(DT_DRV_INST(inst)),                 \
+              .id = KP_SELECTOR_ID(DT_DRV_INST(inst)),                         \
+              .members = kp_selector_##inst##_members,                         \
+              .effect_count = ARRAY_SIZE(kp_selector_##inst##_members),        \
+              .effect_index = DT_PROP(DT_DRV_INST(inst), initial_effect),      \
               .initial_duration_ms =                                           \
                   DT_PROP(DT_DRV_INST(inst), initial_duration_ms),             \
               .initial_effect = DT_PROP(DT_DRV_INST(inst), initial_effect),    \
           },                                                                   \
-      .members = kp_selector_##inst##_effects,                                 \
       .instances = kp_selector_##inst##_instances,                             \
       .reset_pending = kp_selector_##inst##_reset_pending,                     \
       .live_slot = SIZE_MAX,                                                   \
   };                                                                           \
-  KP_RGB_OVERLAY_DEFINE(inst, &kp_selector_callbacks, true,                    \
-                        kp_selector_##inst);                                   \
-  static int kp_selector_##inst##_prepare(void) {                              \
-    return kp_selector_prepare(DEVICE_DT_GET(DT_DRV_INST(inst)));              \
-  }                                                                            \
-  SYS_INIT(kp_selector_##inst##_prepare, APPLICATION,                          \
-           CONFIG_APPLICATION_INIT_PRIORITY);
+  KP_RGB_OVERLAY_DEFINE(inst, &kp_selector_callbacks, true, kp_selector_##inst);
 
 DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_DEFINE)
+
+#define KP_SELECTOR_ENTRY(inst) &kp_selector_##inst##_data.selector,
+
+static struct kp_rgb_selector *const kp_selector_registry[] = {
+    DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_ENTRY)};
+
+size_t kp_rgb_selector_registry_count(void) {
+  return ARRAY_SIZE(kp_selector_registry);
+}
+
+struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index) {
+  return index < kp_rgb_selector_registry_count() ? kp_selector_registry[index]
+                                                 : NULL;
+}
 
 #define KP_SELECTOR_START(inst)                                                \
   do {                                                                         \
@@ -327,8 +308,6 @@ static void kp_selector_defaults_locked(const struct device *dev) {
     (void)kp_rgb_selector_overlay_reset_locked(dev);
     return;
   }
-  kp_selector_prepare_locked(data);
-  kp_selector_refresh_members(data);
   struct kp_rgb_selector defaults = data->selector;
   defaults.publish_changes = false;
   kp_rgb_selector_apply_defaults_locked(&defaults);
@@ -347,13 +326,14 @@ void kp_rgb_selector_overlays_defaults_locked(void) {
 
 #else
 
-int kp_rgb_selector_overlays_start(void) { return 0; }
+size_t kp_rgb_selector_registry_count(void) { return 0; }
 
-struct kp_rgb_selector *
-kp_rgb_selector_overlay_prepare_locked(const struct device *dev) {
-  ARG_UNUSED(dev);
+struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index) {
+  ARG_UNUSED(index);
   return NULL;
 }
+
+int kp_rgb_selector_overlays_start(void) { return 0; }
 
 void kp_rgb_selector_overlays_defaults_locked(void) {}
 

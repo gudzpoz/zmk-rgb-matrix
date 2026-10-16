@@ -12,6 +12,7 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zmk/events/rgb_selector_selection_changed.h>
+#include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>

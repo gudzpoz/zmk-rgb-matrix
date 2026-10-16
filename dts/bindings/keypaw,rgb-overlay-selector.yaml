@@ -6,8 +6,7 @@ description: |
   targets and blends it over earlier output at the configured opacity. Each
   selector owns separate effect devices and retains its selection while hidden,
   OFF or inhibited. Declare at least one enabled effect child; at least one
-  child must be ready before RGB control starts. ZMK behavior device names must
-  be globally unique and not contain any special characters.
+  child must be ready before RGB control starts.
 
 compatible: "keypaw,rgb-overlay-selector"
 

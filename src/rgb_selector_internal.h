@@ -18,10 +18,17 @@ struct kp_rgb_effect_defaults {
   uint32_t duration_ms; /* 0 -> initial_duration_ms */
 };
 
+/* Indexed by DTS child slot; disabled children retain a zeroed entry. */
+struct kp_rgb_selector_member {
+  const struct device *effect;
+  const char *id;
+  struct kp_rgb_effect_defaults defaults;
+};
+
 struct kp_rgb_selector {
   const struct device *owner;
-  const struct device *const *effects;
-  const struct kp_rgb_effect_defaults *effect_defaults;
+  const char *id;
+  const struct kp_rgb_selector_member *members;
   size_t effect_count;
   size_t effect_index;
   const struct device *active_fx;
@@ -32,7 +39,13 @@ struct kp_rgb_selector {
   struct kp_rgb_selector *notification_next;
 };
 
+/* Identity metadata is available before device/provider readiness. Mutations
+ * require the matrix lock. Registry access does not start selectors. */
+size_t kp_rgb_selector_registry_count(void);
+struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index);
+
 size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector);
+/* Returns NULL for out-of-range, disabled or currently unready slots. */
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot);
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
@@ -68,9 +81,6 @@ kp_rgb_selector_overlay_state_locked(const struct device *selector);
 int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
 void kp_rgb_selector_overlays_defaults_locked(void);
 
-/* Settings restoration may access prepared state before public readiness. */
-struct kp_rgb_selector *
-kp_rgb_selector_overlay_prepare_locked(const struct device *selector);
 /* Generated from one-way behavior-to-selector references. */
 const struct device *kp_rgb_selector_control(const struct device *selector);
 const struct device *kp_rgb_selector_alias(void);

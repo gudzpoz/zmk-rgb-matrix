@@ -16,7 +16,6 @@
 #include <zmk/rgb_persist.h>
 
 #include "rgb_matrix_internal.h"
-#include "rgb_persist_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -25,8 +24,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_RGB_PERSIST_KEY KP_RGB_PERSIST_SUBTREE "/state"
 
 struct kp_selector_load {
-  struct kp_rgb_persist_selector_record scoped;
-  bool scoped_pending;
+  struct kp_rgb_persist_selector_record selection;
+  bool selection_pending;
   bool dirty;
   uint32_t revision;
 };
@@ -71,10 +70,9 @@ static int kp_rgb_load_cb(const char *name, size_t len,
   }
 
   char path[SETTINGS_MAX_NAME_LEN + 1];
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
-    const struct kp_rgb_persist_selector_ids *ids =
-        kp_rgb_persist_selector_at(i, NULL);
-    kp_path(path, ids->id);
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+    kp_path(path, selector->id);
     if (strcmp(name, path + sizeof(KP_RGB_PERSIST_SUBTREE)) == 0) {
       struct kp_rgb_persist_selector_record bytes, value;
       int err = kp_read(len, sizeof(bytes), read_cb, cb_arg, &bytes);
@@ -83,8 +81,8 @@ static int kp_rgb_load_cb(const char *name, size_t len,
       if (err < 0)
         return err;
       kp_rgb_matrix_lock();
-      kp_selectors[i].scoped = value;
-      kp_selectors[i].scoped_pending = true;
+      kp_selectors[i].selection = value;
+      kp_selectors[i].selection_pending = true;
       kp_rgb_matrix_unlock();
       return 0;
     }
@@ -102,23 +100,18 @@ static void kp_dirty_global_locked(void) {
   kp_global_revision++;
 }
 
-static void kp_reset_load_locked(size_t index) {
-  kp_selectors[index].scoped_pending = false;
-}
-
 int kp_rgb_settings_commit(void) {
   kp_rgb_matrix_lock();
   /* Validate readiness before consuming any staged records. */
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
-    const struct device *owner;
-    const struct kp_rgb_persist_selector_ids *ids =
-        kp_rgb_persist_selector_at(i, &owner);
-    if (kp_rgb_selector_overlay_prepare_locked(owner) == NULL) {
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+    if (!device_is_ready(selector->owner)) {
       kp_rgb_matrix_unlock();
       return -ENODEV;
     }
-    for (size_t j = 0; j < ids->effect_count; j++) {
-      if (!device_is_ready(kp_rgb_persist_member_at(i, j))) {
+    for (size_t j = 0; j < selector->effect_count; j++) {
+      const struct device *effect = selector->members[j].effect;
+      if (effect != NULL && !device_is_ready(effect)) {
         kp_rgb_matrix_unlock();
         return -ENODEV;
       }
@@ -129,27 +122,23 @@ int kp_rgb_settings_commit(void) {
     kp_rgb_global.brightness = kp_global_load.brightness;
     kp_rgb_reconcile_power_locked();
   }
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
-    const struct device *owner;
-    const struct kp_rgb_persist_selector_ids *ids =
-        kp_rgb_persist_selector_at(i, &owner);
-    struct kp_rgb_selector *selector =
-        kp_rgb_selector_overlay_prepare_locked(owner);
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
     struct kp_selector_load *load = &kp_selectors[i];
-    if (load->scoped_pending) {
+    if (load->selection_pending) {
       size_t slot = selector->initial_effect;
       if (kp_rgb_selector_at(selector, slot) == NULL)
         slot = kp_rgb_selector_calc_index(selector, 0, 0);
-      for (size_t j = 0; j < ids->effect_count; j++) {
-        if (strcmp(load->scoped.selected_id, ids->effects[j].id) == 0) {
-          const struct device *fx = kp_rgb_persist_member_at(i, j);
-          slot = kp_rgb_effect_cfg(fx)->slot;
+      for (size_t j = 0; j < selector->effect_count; j++) {
+        const char *id = selector->members[j].id;
+        if (id != NULL && strcmp(load->selection.selected_id, id) == 0) {
+          slot = j;
           break;
         }
       }
       kp_rgb_selector_select_locked(selector, slot);
     }
-    load->scoped_pending = false;
+    load->selection_pending = false;
   }
   kp_global_pending = false;
   zmk_rgb_matrix_flush();
@@ -163,28 +152,20 @@ SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(kp_rgb_matrix, KP_RGB_PERSIST_SUBTREE,
                                           INT_MAX - 1);
 
 static int kp_save_selector(size_t index, uint32_t *revision) {
-  const struct device *owner;
-  const struct kp_rgb_persist_selector_ids *ids =
-      kp_rgb_persist_selector_at(index, &owner);
+  const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(index);
   struct kp_rgb_persist_selector_record selection;
   kp_rgb_matrix_lock();
-  struct kp_rgb_selector *selector =
-      kp_rgb_selector_overlay_prepare_locked(owner);
   *revision = kp_selectors[index].revision;
   int err = -ENODEV;
-  if (selector != NULL && selector->active_fx != NULL) {
-    for (size_t i = 0; i < ids->effect_count; i++) {
-      if (kp_rgb_persist_member_at(index, i) == selector->active_fx) {
-        err = kp_rgb_persist_encode_selector(ids->effects[i].id, &selection);
-        break;
-      }
-    }
+  if (device_is_ready(selector->owner) && selector->active_fx != NULL) {
+    err = kp_rgb_persist_encode_selector(
+        selector->members[selector->effect_index].id, &selection);
   }
   kp_rgb_matrix_unlock();
   if (err < 0)
     return err;
   char path[SETTINGS_MAX_NAME_LEN + 1];
-  kp_path(path, ids->id);
+  kp_path(path, selector->id);
   return settings_save_one(path, &selection, sizeof(selection));
 }
 
@@ -201,7 +182,7 @@ static int kp_save_global(void) {
 static void kp_rgb_save_work_handler(struct k_work *work) {
   ARG_UNUSED(work);
   int err = 0;
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
     kp_rgb_matrix_lock();
     bool dirty = kp_selectors[i].dirty;
     kp_rgb_matrix_unlock();
@@ -259,14 +240,13 @@ int kp_rgb_save_selector_state(const struct device *selector, bool reset) {
 #if IS_ENABLED(CONFIG_SETTINGS)
   bool found = false;
   kp_rgb_matrix_lock();
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
-    const struct device *owner;
-    kp_rgb_persist_selector_at(i, &owner);
-    if (owner != selector)
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+    if (state->owner != selector)
       continue;
     kp_dirty_selector_locked(i);
     if (reset)
-      kp_reset_load_locked(i);
+      kp_selectors[i].selection_pending = false;
     found = true;
     break;
   }
@@ -290,8 +270,8 @@ void kp_rgb_reset_state(void) {
   kp_rgb_request_runtime_reset_locked();
 #if IS_ENABLED(CONFIG_SETTINGS)
   kp_global_pending = false;
-  for (size_t i = 0; i < kp_rgb_persist_selector_count(); i++) {
-    kp_reset_load_locked(i);
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    kp_selectors[i].selection_pending = false;
     kp_dirty_selector_locked(i);
   }
   kp_dirty_global_locked();

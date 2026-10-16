@@ -25,7 +25,6 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   rgb_color.c
   # Persisted-record codec
   rgb_persist.c
-  rgb_persist_ids.c
 
   # Built-in stuff: zero cost when there's no DTS definitions
   conditions/layer.c

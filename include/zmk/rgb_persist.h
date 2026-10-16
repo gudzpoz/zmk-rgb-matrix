@@ -9,9 +9,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zephyr/settings/settings.h>
-
-#include <zmk/rgb_color.h>
 
 /* ID buffers include the terminating NUL. */
 #define KP_RGB_PERSIST_MAX_ID_LENGTH 32
@@ -36,16 +33,6 @@ struct kp_rgb_persist_selector_record {
 struct kp_rgb_persist_global_state {
   bool user_on;
   uint8_t brightness;
-};
-
-struct kp_rgb_persist_effect_id {
-  const char *id; /* NULL skips a disabled child. */
-};
-
-struct kp_rgb_persist_selector_ids {
-  const char *id;
-  const struct kp_rgb_persist_effect_id *effects;
-  size_t effect_count;
 };
 
 /* All codecs return 0 on success or -EINVAL for an invalid record. They leave

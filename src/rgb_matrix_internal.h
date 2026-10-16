@@ -17,7 +17,6 @@
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_persist.h>
 
 #include "rgb_selector_internal.h"
 

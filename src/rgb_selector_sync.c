@@ -43,7 +43,7 @@ int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
   while (*cursor < state->effect_count) {
     size_t slot = (*cursor)++;
     const struct device *effect = kp_rgb_selector_at(state, slot);
-    if (effect == NULL || !device_is_ready(effect))
+    if (effect == NULL)
       continue;
     if (slot > UINT16_MAX)
       return -EINVAL;
@@ -102,8 +102,6 @@ int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *selector,
   const struct device *effect = kp_rgb_selector_at(selector, slot);
   if (effect == NULL)
     return -ENOENT;
-  if (!device_is_ready(effect))
-    return -ENODEV;
   if (opcode == RGB_SELECTOR_PERIOD_CMD)
     return kp_rgb_set_period_locked(effect, argument);
   if ((argument >> 16) > KP_RGB_HUE_MAX ||
