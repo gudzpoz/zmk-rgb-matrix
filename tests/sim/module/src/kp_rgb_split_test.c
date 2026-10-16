@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include <stdlib.h>
+#include <zephyr/init.h>
 #include <zephyr/irq_offload.h>
 #include <zephyr/device.h>
 #include <string.h>
@@ -33,6 +34,21 @@ NATIVE_TASK(split_options, PRE_BOOT_1, 12);
 #if !DT_NODE_EXISTS(DT_NODELABEL(selector_a))
 #include "kp_rgb_singleton_split_test.inc"
 #else
+static int split_provider_init(void) {
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
+    if (!strcmp(split_case, "ready-control")) {
+        CHECK(!device_is_ready(DEV(rgbs_a)));
+        CHECK(device_init(DEV(rgbs_a)) == 0);
+    } else if (!strcmp(split_case, "ready-member")) {
+        CHECK(!device_is_ready(DEV(probe_a)) && !device_is_ready(DEV(probe_c)));
+        CHECK(device_init(DEV(probe_a)) == 0);
+        CHECK(device_init(DEV(probe_c)) == 0);
+    }
+    return 0;
+}
+SYS_INIT(split_provider_init, APPLICATION, 98);
+
 struct lane {
     unsigned phase, slot, selected, completed;
     uint32_t color, period, selected_color, selected_period;
@@ -591,12 +607,24 @@ static void snapshot_validation(void) {
     CHECK(kp_rgb_selector_snapshot_binding(&snapshot, 0, NULL) == -EINVAL);
 }
 static void readiness(void) {
+    if (!strncmp(split_case, "ready-", 6)) {
+        CHECK(device_is_ready(DEV(rgbs_a)) && device_is_ready(DEV(probe_a)));
+        CHECK(device_is_ready(DEV(probe_c)));
+        CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        connect(3); k_sleep(K_MSEC(2300));
+        for (unsigned s = 0; s < 2; s++) {
+            CHECK(lane(s, 0).completed == 1 && lane(s, 1).completed == 1);
+            CHECK(clock_count[s] && power_count[s] && brightness_count[s]);
+        }
+        apply(DEV(selector_a), RGB_RESET_CMD, 0);
+        k_sleep(K_MSEC(1000)); check_all_members(0);
+        printk("PASS split %s\n", split_case); exit(0);
+    }
     bool control = !strcmp(split_case, "late-control");
     bool member = !strcmp(split_case, "late-member");
     const struct device *late = control ? DEV(rgbs_a) : member ? DEV(probe_a) : DEV(rgb_matrix);
     CHECK(!device_is_ready(late));
     if (control || member) {
-        CHECK(zmk_rgb_matrix_start() == -ENODEV);
         CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
         CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
         struct kp_rgb_selector_snapshot snapshot; size_t cursor = 0;
@@ -621,24 +649,26 @@ static void readiness(void) {
     unsigned b_before[2] = {lane(0, 1).completed, lane(1, 1).completed};
     CHECK(device_init(late) == 0 && device_is_ready(late));
     if (member) CHECK(device_init(DEV(probe_c)) == 0 && device_is_ready(DEV(probe_c)));
-    CHECK(zmk_rgb_matrix_start() == 0);
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     k_sleep(K_MSEC(2300));
     for (unsigned s = 0; s < 2; s++) {
-        CHECK(lane(s, 0).completed == 1 && lane(s, 1).completed == b_before[s]);
-        CHECK(clock_count[s] && power_count[s] && brightness_count[s]);
+        CHECK(lane(s, 1).completed == b_before[s]);
+        if (control || member) CHECK(lane(s, 0).completed == 0);
+        else CHECK(lane(s, 0).completed == 1);
     }
-    apply(DEV(selector_a), RGB_RESET_CMD, 0);
-    k_sleep(K_MSEC(1000)); check_all_members(0);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) ==
+          (control || member ? NULL : DEV(probe_a)));
     printk("PASS split %s\n", split_case); exit(0);
 }
 static void test_thread(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+    for (unsigned i = 0; i < 100 &&
+         zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL; i++) k_sleep(K_MSEC(5));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     k_sleep(K_MSEC(100));
     snapshot_validation();
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
-    if (!strncmp(split_case, "late-", 5)) readiness();
+    if (!strncmp(split_case, "late-", 5) || !strncmp(split_case, "ready-", 6)) readiness();
     apply(DEV(selector_a), RGB_EFS_CMD, 1);
     parameters(DEV(selector_a), 1, 10, 1100);
     apply(DEV(selector_b), RGB_EFS_CMD, 0);
@@ -884,8 +914,10 @@ static void receiving_irq(const void *unused) {
 }
 static void receiving(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
-    k_sleep(K_MSEC(100));
+    for (unsigned i = 0; i < 100 &&
+         zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL; i++) k_sleep(K_MSEC(5));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    k_sleep(K_MSEC(100));
     struct kp_rgb_hsb a_color = kp_rgb_effect_data(DEV(probe_a))->color;
     struct kp_rgb_hsb b_color = kp_rgb_effect_data(DEV(probe_b))->color;
     uint32_t a_period = kp_rgb_effect_period(DEV(probe_a)), b_period = kp_rgb_effect_period(DEV(probe_b));

@@ -23,6 +23,8 @@ EXAMPLE = Path(os.environ.get("RGB_EXAMPLE_MODULE", MODULE.parent / "zmk-rgb-eff
 
 CASES = {
     "baseline": (True, ""),
+    "startup-priority-98": (True, ""),
+    "startup-priority-99": (False, ""),
     "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
     "period-zero": (True, '&preview_selector { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
     "period-wide": (True, '''
@@ -113,6 +115,7 @@ CASES = {
 
 
 DIAGNOSTICS = {
+    "startup-priority-99": r"RGB automatic control startup must follow matrix initialization",
     "no-controller": r"DT_HAS_KEYPAW_RGB_MATRIX_ENABLED.*\(=n\)",
     "two-controllers": r"exactly one enabled matrix node",
     "overlay-wrong-parent": r"overlay must be a child of the keypaw,rgb-matrix node",
@@ -164,6 +167,8 @@ def main():
             text = (SIM / "config" / filename).read_text()
             if filename.endswith(".conf") and name == "no-controller":
                 text += "\nCONFIG_KEYPAW_RGB_MATRIX=y\n"
+            if filename.endswith(".conf") and name.startswith("startup-priority-"):
+                text += f"\nCONFIG_SETTINGS=n\nCONFIG_APPLICATION_INIT_PRIORITY={name.rsplit('-', 1)[1]}\n"
             (config / filename).write_text(text)
         (config / "native_sim.overlay").write_text(
             f'#include "{SIM / "config/native_sim.overlay"}"\n' + fragment

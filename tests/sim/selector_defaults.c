@@ -110,6 +110,22 @@ static int before_startup(void) {
 }
 SYS_INIT(before_startup, APPLICATION, 80);
 
+static int prepare_deferred_effect(void) {
+  CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == NULL);
+  CHECK(zmk_rgb_selector_get_selected(DEV(default_late_selector)) == NULL);
+  CHECK(!device_is_ready(DEV(default_late)));
+  CHECK(device_init(DEV(default_late)) == 0);
+  kp_rgb_matrix_lock();
+  CHECK(kp_rgb_selector_at(find_selector("default_late_selector"), 0) == DEV(default_late));
+  kp_rgb_matrix_unlock();
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 100},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
+  return 0;
+}
+SYS_INIT(prepare_deferred_effect, APPLICATION, 98);
+
 #if IS_ENABLED(CONFIG_SETTINGS)
 int settings_backend_init(void) { return 0; }
 
@@ -136,26 +152,14 @@ static void defaults_test(void *a, void *b, void *c) {
 #if IS_ENABLED(CONFIG_SETTINGS)
   stage_obsolete_parameters();
 #endif
-  CHECK(zmk_rgb_matrix_start() == -ENODEV);
+  int64_t deadline = k_uptime_get() + 1000;
+  while (zmk_rgb_selector_get_selected(DEV(default_selector)) == NULL ||
+         zmk_rgb_selector_get_selected(DEV(default_late_selector)) == NULL) {
+    CHECK(k_uptime_get() < deadline);
+    k_sleep(K_MSEC(1));
+  }
   check_parameters(DEV(default_ready), early_color, 4321);
   check_hole_selection();
-  struct kp_rgb_selector *late_selector = find_selector("default_late_selector");
-  CHECK(late_selector != NULL);
-  CHECK(late_selector->members[0].effect == DEV(default_late));
-  CHECK(strcmp(late_selector->members[0].id, "late") == 0);
-  kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_at(late_selector, 0) == NULL);
-  kp_rgb_matrix_unlock();
-  CHECK(device_init(DEV(default_late)) == 0);
-  kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_at(late_selector, 0) == DEV(default_late));
-  kp_rgb_matrix_unlock();
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 100},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
-  CHECK(zmk_rgb_matrix_start() == 0);
-  CHECK(zmk_rgb_matrix_start() == 0);
 #if IS_ENABLED(CONFIG_SETTINGS)
   stage_obsolete_parameters();
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
@@ -172,7 +176,7 @@ static void defaults_test(void *a, void *b, void *c) {
   CHECK(zmk_rgb_selector_reset(DEV(default_late_selector)) == 0);
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 100},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  printk("PASS selector defaults shared metadata/disabled slots/live readiness/setters/reset/start retry\n");
+  printk("PASS selector defaults shared metadata/disabled slots/live readiness/setters/reset/automatic startup\n");
   exit(0);
 }
 K_THREAD_DEFINE(defaults_thread, 4096, defaults_test, NULL, NULL, NULL, 5, 0, 1);

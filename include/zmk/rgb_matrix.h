@@ -387,14 +387,6 @@ struct kp_rgb_condition_api {
   const struct device *const *(*dependencies)(const struct device *dev,
                                               size_t *count);
 };
-/* Start control once defaults, all settings, and all provider sources are ready.
- * Idempotent, thread-context only. Required when CONTROL_AUTO_START is disabled;
- * otherwise called by the late settings commit or APPLICATION startup hook.
- * Returns 0 when startup is accepted, not when asynchronous sampling or output
- * completes. Returns -EWOULDBLOCK in ISR context, -ENODEV when required devices
- * are not ready (retry after initialization).
- */
-int zmk_rgb_matrix_start(void);
 
 /* Any-context, non-blocking notification. NULL/unregistered devices are errors.
  * Notifications coalesce: intermediate source transitions need not be observed.

@@ -23,6 +23,7 @@ SCENARIOS = {
     "control-isr": "controls",
     "control-large-step": "large-step",
     "control-deferred": "deferred",
+    "control-unready": "deferred",
     "control-local-only": "local-only",
     "control-owner": "owner",
     "control-duration-defaults": "duration-defaults",
@@ -31,7 +32,7 @@ SCENARIOS = {
     "control-matrix-high": "matrix-high",
     "control-matrix-low": "matrix-low",
 }
-CONF = "\nCONFIG_KEYPAW_SIM_CONTROL_CONTRACTS=y\nCONFIG_TEST=y\nCONFIG_IRQ_OFFLOAD=y\nCONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"
+CONF = "\nCONFIG_KEYPAW_SIM_CONTROL_CONTRACTS=y\nCONFIG_TEST=y\nCONFIG_IRQ_OFFLOAD=y\n"
 
 
 def main():

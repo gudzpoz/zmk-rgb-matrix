@@ -543,23 +543,33 @@ static void selected_conditions(void) {
 }
 #endif
 
+#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
+static int prepare_deferred_control(void) {
+  CHECK(!device_is_ready(DEV(rgbs_a)));
+  CHECK(callback_count() == 0);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
+  CHECK(device_init(DEV(rgbs_a)) == 0);
+  CHECK(device_is_ready(DEV(rgbs_a)));
+  return 0;
+}
+SYS_INIT(prepare_deferred_control, APPLICATION, 98);
+#endif
+
 static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+  int64_t deadline = k_uptime_get() + 1000;
+  while (zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL ||
+         zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL) {
+    CHECK(k_uptime_get() < deadline);
+    k_sleep(K_MSEC(1));
+  }
 #if DT_NODE_EXISTS(DT_NODELABEL(selected_a))
   selected_conditions();
   return;
 #endif
 #if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
-  CHECK(!device_is_ready(DEV(rgbs_a)));
-  CHECK(kp_rgb_selector_overlays_start() == -ENODEV);
-  zmk_rgb_matrix_start();
-  k_sleep(K_MSEC(50));
-  CHECK(callback_count() == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-  CHECK(device_init(DEV(rgbs_a)) == 0);
-  CHECK(device_is_ready(DEV(rgbs_a)));
-  zmk_rgb_matrix_start();
-  printk("PASS canonical readiness deferred start\n");
+  printk("PASS canonical readiness automatic start\n");
 #endif
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();

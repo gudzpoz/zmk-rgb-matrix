@@ -252,6 +252,31 @@ int settings_backend_init(void) {
   return 0;
 }
 
+static int settings_provider_commit(void) {
+  static bool done;
+  if (done) return 0;
+  done = true;
+  CHECK(initial_load_done);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
+  CHECK(kp_rgb_global.brightness == 100);
+  if (strcmp(settings_case, "boundary-failure")) {
+#if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
+    CHECK(!device_is_ready(DEV(probe_b)));
+    CHECK(device_init(DEV(probe_b)) == 0);
+#endif
+#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
+    CHECK(!device_is_ready(DEV(rgbs_a)));
+    CHECK(device_init(DEV(rgbs_a)) == 0);
+#endif
+  }
+  printk("PASS scoped settings provider before restoration\n");
+  return 0;
+}
+SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(scoped_settings_provider, "test/rgb_provider",
+                                        NULL, NULL, settings_provider_commit, NULL,
+                                        INT_MAX - 2);
+
 static void check_defaults(void) {
   const struct device *effects[] = {DEV(probe_a), DEV(probe_b), DEV(probe_c), DEV(probe_d)};
   const unsigned hues[] = {120, 60, 240, 180};
@@ -277,6 +302,10 @@ static void check_restored(void) {
 static bool boot_checked;
 static int selection(const zmk_event_t *event) {
   ARG_UNUSED(event);
+  if (!strcmp(settings_case, "boundary-failure")) {
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    return ZMK_EV_EVENT_BUBBLE;
+  }
   if (!boot_checked) {
     check_restored();
     boot_checked = true;
@@ -823,34 +852,45 @@ static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
   ARG_UNUSED(c);
-  k_sleep(K_MSEC(100));
-#if !IS_ENABLED(CONFIG_KEYPAW_RGB_CONTROL_AUTO_START)
-  CHECK(initial_load_done);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-  #if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
-  CHECK(!device_is_ready(DEV(probe_b)));
-  CHECK(settings_load_subtree("keypaw/rgb_matrix") == -ENODEV);
-  bool on;
-  CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
-  CHECK(kp_rgb_global.brightness == 100);
-  zmk_rgb_matrix_start();
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-  CHECK(device_init(DEV(probe_b)) == 0);
-  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
-#else
-  CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
+  if (!strcmp(settings_case, "boundary-failure")) {
+    k_sleep(K_MSEC(100));
+    CHECK(initial_load_done && !boot_checked);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+#if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
+    CHECK(!device_is_ready(DEV(probe_b)));
+    CHECK(kp_rgb_global.brightness == 100);
+    CHECK(settings_load_subtree("keypaw/rgb_matrix") == -ENODEV);
+    CHECK(kp_rgb_global.brightness == 100);
+    CHECK(device_init(DEV(probe_b)) == 0);
 #endif
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
 #if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
-  CHECK(!device_is_ready(DEV(rgbs_a)));
-  zmk_rgb_matrix_start();
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-  CHECK(device_init(DEV(rgbs_a)) == 0);
+    CHECK(!device_is_ready(DEV(rgbs_a)));
+    CHECK(kp_rgb_global.brightness == 61);
+    CHECK(device_init(DEV(rgbs_a)) == 0);
 #endif
-  zmk_rgb_matrix_start();
-  k_sleep(K_MSEC(50));
-  printk("PASS scoped settings subtree/manual startup\n");
-#endif
+    k_sleep(K_MSEC(200));
+    CHECK(!boot_checked);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+    CHECK(kp_rgb_global.brightness == 61);
+    bool on;
+    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
+    kp_rgb_matrix_lock();
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+      const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+      if (selector->owner == DEV(selector_a)) CHECK(selector->active_fx == DEV(probe_c));
+      if (selector->owner == DEV(selector_b)) CHECK(selector->active_fx == DEV(probe_d));
+    }
+    kp_rgb_matrix_unlock();
+    check_defaults();
+    k_sleep(K_MSEC(200));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    CHECK(!boot_checked);
+    printk("PASS settings boundary-failure\n");
+    exit(0);
+  }
+  for (unsigned i = 0; i < 100 && !boot_checked; i++) k_sleep(K_MSEC(5));
+  CHECK(boot_checked);
   check_restored();
   if (strcmp(settings_case, "existing")) extended_case();
   obsolete_parameters();

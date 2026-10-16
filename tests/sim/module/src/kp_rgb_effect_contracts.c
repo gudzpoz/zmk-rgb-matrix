@@ -5,8 +5,16 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <zephyr/irq_offload.h>
+#include <zephyr/init.h>
 #include <zmk/rgb_matrix.h>
 #include "../../../../src/rgb_matrix_internal.h"
+
+static int effects_prepare(void) {
+    KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+    return 0;
+}
+BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY > 89);
+SYS_INIT(effects_prepare, APPLICATION, 89);
 
 #define CAP MAX(KP_LED_COUNT, 1)
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))

@@ -148,6 +148,14 @@ static void check_retry_delays(unsigned start) {
   require(third.timestamp - second.timestamp >= 200, "second retry backoff");
 }
 
+static int prepare_automatic_output(void) {
+  require(probe_count(keys) == 1 && probe_count(glow) == 1, "startup black before boundary");
+  check_frame(0, true);
+  fail_twice();
+  return 0;
+}
+SYS_INIT(prepare_automatic_output, APPLICATION, 98);
+
 static void composite_test(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
@@ -169,8 +177,6 @@ static void composite_test(void *a, void *b, void *c) {
   await_count(1);
   check_frame(0, true);
 
-  fail_twice();
-  zmk_rgb_matrix_start();
   await_count(4);
   for (unsigned i = 1; i < 4; i++) {
     check_frame(i, false);

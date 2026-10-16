@@ -70,8 +70,7 @@ def run_variant(root, settings):
     (config / "native_sim.keymap").write_text((SIM / "config/native_sim.keymap").read_text())
     (config / "native_sim.conf").write_text(
         (SIM / "config/native_sim.conf").read_text() +
-        "\nCONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"
-        "CONFIG_ASSERT=y\n"
+        "\nCONFIG_ASSERT=y\n"
         f"CONFIG_SETTINGS={'y' if settings else 'n'}\n" +
         ("CONFIG_SETTINGS_CUSTOM=y\n" if settings else ""))
     (config / "native_sim.overlay").write_text(

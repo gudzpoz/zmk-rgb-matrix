@@ -4,6 +4,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/irq_offload.h>
+#include <zephyr/init.h>
 #include <zmk/activity.h>
 #include <zmk/behavior.h>
 #include <zmk/events/position_state_changed.h>
@@ -270,10 +271,21 @@ static void setup(bool animation) {
     obs[3].color = (struct led_rgb){.r = 9};
     obs[4].color = (struct led_rgb){51, 25, 9};
     kp_rgb_matrix_unlock();
-    KP_CHECK(zmk_rgb_matrix_start() == 0);
     KP_CHECK(zmk_rgb_matrix_on() == 0);
+    KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
     if (KP_LED_COUNT) { wait_writes(2); settled(); }
 }
+static int engine_prepare(void) {
+    if (strncmp(kp_test_scenario, "boot-", 5) != 0) {
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+    } else {
+        obs[0].color = (struct led_rgb){.r = 17};
+    }
+    return 0;
+}
+BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY > 89);
+SYS_INIT(engine_prepare, APPLICATION, 89);
+
 static void idle(bool idle) {
     extern int set_state(enum zmk_activity_state state);
     KP_CHECK(set_state(idle ? ZMK_ACTIVITY_IDLE : ZMK_ACTIVITY_ACTIVE) == 0);
@@ -520,7 +532,7 @@ void kp_test_engine_run(void) {
     const char *name = kp_test_scenario;
     KP_CHECK(zmk_rgb_matrix_get_state(NULL) == -EINVAL);
     if (!strcmp(name, "unready")) {
-        KP_CHECK(zmk_rgb_matrix_start() == 0); zmk_rgb_matrix_flush(); settled();
+        zmk_rgb_matrix_flush(); settled();
         KP_CHECK(!atomic_get(&writes) && !paints(0)); kp_test_complete();
     }
     if (!KP_LED_COUNT) {
@@ -530,13 +542,11 @@ void kp_test_engine_run(void) {
         KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); sleep_until(k_uptime_get() + 160);
         KP_CHECK(!atomic_get(&writes) && !paints(0) && !events(0)); kp_test_complete();
     }
-    KP_CHECK(atomic_get(&writes) == 1); check_all(0, 0);
+    if (strncmp(name, "boot-", 5) != 0) KP_CHECK(atomic_get(&writes) == 1);
+    check_all(0, 0);
     if (!strncmp(name, "boot-", 5)) {
         bool off = !strcmp(name, "boot-off"), inhibited = !strcmp(name, "boot-inhibited");
-        set_color(0, (struct led_rgb){.r = 17});
-        if (off) KP_CHECK(zmk_rgb_matrix_off() == 0);
-        if (inhibited) KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
-        KP_CHECK(zmk_rgb_matrix_start() == 0); wait_writes(2); settled();
+        wait_writes(2); settled();
         KP_CHECK(transfers[0].result == -EIO && transfers[1].start >= transfers[0].finish + 99);
         check_all(1, off || inhibited ? 0 : 17); KP_CHECK(paints(0) == !(off || inhibited)); kp_test_complete();
     }

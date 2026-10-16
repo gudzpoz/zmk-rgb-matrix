@@ -133,6 +133,29 @@ def fixture_violations(text, path):
 
 
 class FixtureStructureTests(unittest.TestCase):
+    def test_retired_startup_controls_are_absent(self):
+        module = TESTS.parent
+        paths = set(sources())
+        for directory in (module / "src", module / "include", module / "examples"):
+            if directory.exists():
+                paths.update(path for path in directory.rglob("*") if path.is_file())
+        paths.update(module.glob("Kconfig*"))
+        for path in (TESTS / "sim").rglob("*"):
+            relative = path.relative_to(TESTS)
+            if (path.is_file() and path.suffix in {".conf", ".overlay", ".keymap", ".yaml", ".yml"}
+                    and not any(part in BUILD_DIRS or part.startswith(("build", "out"))
+                                for part in relative.parts[:-1])):
+                paths.add(path)
+        retired = re.compile(r"\b(?:zmk_rgb_matrix_start|CONFIG_KEYPAW_RGB_CONTROL_AUTO_START|KEYPAW_RGB_CONTROL_AUTO_START)\b")
+        failures = []
+        for path in sorted(paths):
+            if path == Path(__file__).resolve() or path.suffix == ".md":
+                continue
+            for line, text in enumerate(path.read_text().splitlines(), 1):
+                if retired.search(text):
+                    failures.append(f"{path.relative_to(module)}:{line}: {text.strip()}")
+        self.assertEqual(failures, [], "Startup must use the mandatory automatic boundary:\n" + "\n".join(failures))
+
     def test_only_small_host_helpers_remain(self):
         actual = {p.name for p in (TESTS / "unit").glob("test_*.py")}
         self.assertEqual(actual, HOST_TESTS,

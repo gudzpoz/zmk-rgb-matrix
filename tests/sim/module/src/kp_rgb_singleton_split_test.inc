@@ -362,7 +362,6 @@ static void singleton_unready(void) {
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 61; kp_rgb_matrix_unlock();
     singleton_connect(3); k_sleep(K_MSEC(1300)); CHECK(singleton_records() == 0);
     CHECK(device_init(DEV(rgb_matrix)) == 0 && device_is_ready(DEV(rgb_matrix)));
-    CHECK(zmk_rgb_matrix_start() == 0);
     singleton_masks(); singleton_global(RGB_BRT_SET_CMD, 61);
     singleton_wait_stream(8); k_sleep(K_MSEC(350)); singleton_remote(61, RGB_ON_CMD);
 }

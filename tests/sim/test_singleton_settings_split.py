@@ -33,7 +33,7 @@ CONFIGS = {
     "settings-disabled": "CONFIG_KEYPAW_SIM_SETTINGS_TEST=y\nCONFIG_SETTINGS=n\n",
     "split": SINGLETON_CONF,
     "split-zero": SINGLETON_CONF,
-    "split-unready": SINGLETON_CONF + "CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n",
+    "split-unready": SINGLETON_CONF,
 }
 PHASES = ("brightness", "power", "mask-0", "mask-1")
 SPLIT_SCENARIOS = (

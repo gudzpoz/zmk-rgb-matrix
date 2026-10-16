@@ -17,7 +17,7 @@ SCENARIOS = (
     'trigger-mutation', 'resume-held', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
     'startup-unready-selector', 'startup-normalized-names', 'startup-auto',
-    'startup-unrestored-settings', 'startup-settings-manual',
+    'startup-unrestored-settings', 'startup-settings-staged',
     'overlay-zero', 'trigger-no-table', 'trigger-actions', 'trigger-unregistered-root',
     'stale-source-refresh', 'held-source-refresh',
 )
@@ -85,7 +85,6 @@ FIXTURE = '''
 '''
 CONF = '''
 CONFIG_KEYPAW_SIM_CONDITION_CONTRACTS=y
-CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n
 CONFIG_KEYPAW_RGB_TRIGGERS=y
 CONFIG_TEST=y
 CONFIG_IRQ_OFFLOAD=y
@@ -97,10 +96,10 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 VARIANTS = {
     'startup-unready-selector': ('deferred', '&rgbs_a { compatible = "test,rgb-condition-contract-control", "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };', ''),
     'startup-normalized-names': ('normalized', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
-    'startup-auto': ('auto', '', 'CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y\n'),
+    'startup-auto': ('auto', '', ''),
     'startup-unrestored-settings': ('settings-auto', '',
-        'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\nCONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y\n'),
-    'startup-settings-manual': ('settings-manual', '',
+        'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
+    'startup-settings-staged': ('settings-staged', '',
         'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'overlay-zero': ('zero', '&rgb_matrix { /delete-property/ strip; mapping = <>; };', ''),
     'trigger-no-table': ('no-table', '/ { /delete-node/ cc_triggers; };', ''),
@@ -164,7 +163,7 @@ def main():
             fragment += '/ { chosen { zephyr,bt-hci = &cc_hci; }; cc_hci: cc_hci { compatible = "zephyr,bt-hci-userchan"; }; };'
         groups = {}
         for scenario in args.scenario or SCENARIOS:
-            variant = VARIANTS.get(scenario, ('manual', '', ''))
+            variant = VARIANTS.get(scenario, ('automatic', '', ''))
             groups.setdefault(variant, []).append(scenario)
         for (variant, addition, options), scenarios in groups.items():
             image = f'{role}-{variant}'

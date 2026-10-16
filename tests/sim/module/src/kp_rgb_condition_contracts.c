@@ -27,14 +27,12 @@ struct source_config { const struct device *selector, *effect; };
 K_SEM_DEFINE(sample_entered, 0, 1);
 K_SEM_DEFINE(sample_release, 0, 1);
 static atomic_t notifications, notifications_b, reenter, irq_calls;
-static int irq_start_result;
 static const struct device *irq_device;
 
 static void interrupt(const void *arg) {
     ARG_UNUSED(arg);
     KP_CHECK(k_is_in_isr());
     atomic_inc(&irq_calls);
-    irq_start_result = zmk_rgb_matrix_start();
     kp_rgb_condition_invalidate(irq_device);
 }
 static bool sample(const struct device *dev, int64_t now, int64_t *deadline) {
@@ -131,8 +129,10 @@ static void wait_calls(const struct device *dev, unsigned count) {
     KP_CHECK(calls(dev) >= count);
     drain();
 }
-static void start(void) {
-    KP_CHECK(zmk_rgb_matrix_start() == 0);
+static void wait_ready(void) {
+    int64_t until = k_uptime_get() + 1000;
+    while (!zmk_rgb_selector_get_selected(DEV(selector_b)) && k_uptime_get() < until) k_msleep(1);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) != NULL);
     drain();
 }
 static bool peripheral(void) {
@@ -207,7 +207,7 @@ static void pause(const struct device *dev) {
 }
 static void resume(void) { k_sem_give(&sample_release); drain(); }
 
-static void graph_cases(void) {
+static void graph_prepare(void) {
     const struct device *root = DEV(cc_root), *left = DEV(cc_left), *right = DEV(cc_right), *leaf = DEV(cc_leaf);
     if (kp_test_case("cycle")) { link(root, left); link(left, right); link(right, left); }
     else if (kp_test_case("missing")) link(root, DEVICE_GET(cc_missing));
@@ -234,7 +234,10 @@ static void graph_cases(void) {
     }
     atomic_set(&src(DEV(cc_central))->value, true);
     if (kp_test_case("short-circuit")) atomic_set(&src(root)->value, false);
-    start();
+}
+static void graph_cases(void) {
+    const struct device *root = DEV(cc_root), *left = DEV(cc_left), *right = DEV(cc_right), *leaf = DEV(cc_leaf);
+    wait_ready();
     bool good = kp_test_case("dag") || kp_test_case("short-circuit") || (kp_test_case("scope") && !peripheral());
     KP_CHECK(kp_rgb_condition_valid(root) == good);
     if (!good) {
@@ -265,14 +268,17 @@ static void graph_cases(void) {
     }
 }
 
-static void timing_cases(void) {
+static void timing_prepare(void) {
     const struct device *root = DEV(cc_root);
     if (kp_test_case("deadline") || kp_test_case("deadline-reset") || kp_test_case("same-value"))
         atomic_set(&src(root)->period, 100);
     if (kp_test_case("early-refresh")) kp_rgb_conditions_request_refresh(17);
     kp_rgb_condition_invalidate(root);
     KP_CHECK(calls(root) == 0);
-    start();
+}
+static void timing_cases(void) {
+    const struct device *root = DEV(cc_root);
+    wait_ready();
     KP_CHECK(calls(root) == 1);
     if (kp_test_case("deadline")) {
         k_msleep(30); KP_CHECK(calls(root) == 1);
@@ -302,7 +308,7 @@ static void timing_cases(void) {
     } else if (kp_test_case("isr")) {
         pause(root); irq_device = root;
         atomic_set(&src(root)->value, true); irq_offload(interrupt, NULL);
-        KP_CHECK(irq_calls == 1 && irq_start_result == -EWOULDBLOCK);
+        KP_CHECK(irq_calls == 1);
         resume(); KP_CHECK(calls(root) >= 3 && gate(DEV(ordinary)));
     } else if (kp_test_case("refresh-interrupted")) {
         pause(root); irq_device = root; irq_offload(interrupt, NULL);
@@ -313,7 +319,7 @@ static void timing_cases(void) {
         kp_rgb_conditions_request_refresh(21); drain();
         KP_CHECK(calls(root) == before + 1 && calls(DEV(cc_unused)) == 0);
     } else {
-        KP_CHECK(zmk_rgb_matrix_start() == 0); drain();
+        drain();
         KP_CHECK(calls(root) == 1);
         pause(root);
         for (unsigned n = 0; n < 100; n++) kp_rgb_condition_invalidate(root);
@@ -321,13 +327,15 @@ static void timing_cases(void) {
     }
 }
 
-static void trigger_cases(void) {
+static void trigger_prepare(void) {
     if (kp_test_case("trigger-startup")) {
         atomic_set(&src(DEV(cc_root))->value, true);
         atomic_set(&src(DEV(cc_left))->value, true);
         atomic_set(&src(DEV(cc_leaf))->value, true);
     }
-    start();
+}
+static void trigger_cases(void) {
+    wait_ready();
     if (peripheral()) {
         KP_CHECK(action_count == 0);
         set(DEV(cc_root), true); set(DEV(cc_right), true); drain();
@@ -375,7 +383,7 @@ static void trigger_cases(void) {
 }
 
 static void selection_cases(void) {
-    start(); expect_selection(true);
+    wait_ready(); expect_selection(true);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     unsigned event_samples = calls(DEV(cc_event));
     if (kp_test_case("scoped-listener")) {
@@ -443,9 +451,7 @@ static void selection_cases(void) {
 }
 
 static void overlay_cases(void) {
-    atomic_set(&src(DEV(cc_root))->value, true);
-    atomic_set(&src(DEV(cc_central))->value, true);
-    start();
+    wait_ready();
     KP_CHECK(gate(DEV(ordinary)));
     KP_CHECK(!gate(DEV(cc_transparent)) && !gate(DEV(cc_empty)));
     KP_CHECK(kp_rgb_overlay_target_count(DEV(cc_transparent)) == KP_LED_COUNT);
@@ -484,11 +490,35 @@ static void overlay_cases(void) {
 }
 
 static int auto_prepare(void) {
-    if (kp_test_scenario && kp_test_case("startup-auto")) {
+    const char *graphs[] = {"dag", "cycle", "missing", "metadata", "unready", "invalid-scope",
+        "scope", "undeclared", "sample-notification", "invalid-deadline", "short-circuit"};
+    const char *timings[] = {"startup", "deadline", "deadline-reset", "same-value", "isr",
+        "refresh", "refresh-interrupted", "early-refresh"};
+    for (size_t i = 0; i < ARRAY_SIZE(graphs); i++)
+        if (kp_test_case(graphs[i])) graph_prepare();
+    for (size_t i = 0; i < ARRAY_SIZE(timings); i++)
+        if (kp_test_case(timings[i])) timing_prepare();
+    trigger_prepare();
+    if (kp_test_case("startup-auto") || kp_test_case("overlay-gate") ||
+        kp_test_case("split-visibility") || kp_test_case("overlay-zero")) {
         atomic_set(&src(DEV(cc_root))->value, true);
+        atomic_set(&src(DEV(cc_central))->value, true);
         kp_rgb_condition_invalidate(DEV(cc_root));
-        KP_CHECK(calls(DEV(cc_root)) == 0);
     }
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_noreg))
+    atomic_set(&src(DEV(cc_noreg))->value, true);
+#endif
+#if IS_ENABLED(CONFIG_SETTINGS)
+    if (kp_test_case("startup-normalized-names") || kp_test_case("startup-settings-staged")) {
+        struct kp_rgb_persist_selector_record record;
+        const char *member = kp_test_case("startup-normalized-names") ?
+            KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)) : KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c));
+        KP_CHECK(kp_rgb_persist_encode_selector(member, &record) == 0);
+        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+    }
+#endif
+    KP_CHECK(calls(DEV(cc_root)) == 0);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     return 0;
 }
 SYS_INIT(auto_prepare, APPLICATION, 98);
@@ -496,13 +526,15 @@ SYS_INIT(auto_prepare, APPLICATION, 98);
 #if IS_ENABLED(CONFIG_SETTINGS)
 static unsigned provider_commits;
 static int settings_provider_commit(void) {
-    if (!kp_test_case("startup-unrestored-settings")) return 0;
+    if (!kp_test_case("startup-unrestored-settings") && !kp_test_case("startup-settings-staged")) return 0;
+    if (provider_commits) return 0;
     KP_CHECK(calls(DEV(cc_root)) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    provider_commits++;
+    if (kp_test_case("startup-settings-staged")) return 0;
     struct kp_rgb_persist_selector_record record;
     KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
     KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
-    provider_commits++;
     return 0;
 }
 SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_source",
@@ -512,57 +544,38 @@ SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_sourc
 static void special_cases(void) {
     if (kp_test_case("startup-unready-selector")) {
         KP_CHECK(!device_is_ready(DEV(rgbs_a)));
-        KP_CHECK(zmk_rgb_matrix_start() == -ENODEV);
         drain(); KP_CHECK(calls(DEV(cc_root)) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
         KP_CHECK(device_init(DEV(rgbs_a)) == 0);
-        start(); KP_CHECK(calls(DEV(cc_root)) == 1);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-        KP_CHECK(zmk_rgb_matrix_start() == 0); drain(); KP_CHECK(calls(DEV(cc_root)) == 1);
-    } else if (kp_test_case("startup-normalized-names")) {
-#if IS_ENABLED(CONFIG_SETTINGS)
+        k_msleep(100); drain();
         KP_CHECK(calls(DEV(cc_root)) == 0);
-        struct kp_rgb_persist_selector_record record;
-        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)), &record) == 0);
-        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
-        KP_CHECK(zmk_rgb_matrix_start() == 0);
-        drain();
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    } else if (kp_test_case("startup-normalized-names")) {
+        wait_ready();
         KP_CHECK(device_is_ready(DEV(selector_a)) && device_is_ready(DEV(probe_a)));
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_selected_a)));
         expect_selection(true);
-#else
-        KP_CHECK(false);
-#endif
     } else if (kp_test_case("startup-auto")) {
         wait_calls(DEV(cc_root), 1);
         KP_CHECK(gate(DEV(ordinary)) && calls(DEV(cc_root)) == 1);
-        KP_CHECK(zmk_rgb_matrix_start() == 0); drain(); KP_CHECK(calls(DEV(cc_root)) == 1);
-    } else if (kp_test_case("startup-unrestored-settings")) {
+    } else if (kp_test_case("startup-unrestored-settings") || kp_test_case("startup-settings-staged")) {
 #if IS_ENABLED(CONFIG_SETTINGS)
-        wait_calls(DEV(cc_root), 1);
+        wait_ready();
         KP_CHECK(provider_commits == 1);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
         expect_selection(false);
-        KP_CHECK(calls(DEV(cc_event)) == 1);
-#else
-        KP_CHECK(false);
-#endif
-    } else if (kp_test_case("startup-settings-manual")) {
-#if IS_ENABLED(CONFIG_SETTINGS)
-        KP_CHECK(calls(DEV(cc_root)) == 0);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        struct kp_rgb_persist_selector_record record;
-        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
-        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
-        KP_CHECK(calls(DEV(cc_root)) == 0);
-        start(); expect_selection(false);
-        KP_CHECK(calls(DEV(cc_event)) == 1);
+        KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1);
+        KP_CHECK(settings_commit() == 0);
+        KP_CHECK(settings_commit() == 0);
+        drain();
+        KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
 #else
         KP_CHECK(false);
 #endif
     } else if (kp_test_case("overlay-zero")) {
-        atomic_set(&src(DEV(cc_root))->value, true); start();
+        wait_ready();
         KP_CHECK(KP_LED_COUNT == 0);
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)));
         KP_CHECK(kp_rgb_overlay_target_count(DEV(cc_transparent)) == 0);
@@ -578,8 +591,7 @@ static void special_cases(void) {
     } else if (kp_test_case("trigger-unregistered-root")) {
 #if DT_NODE_EXISTS(DT_NODELABEL(cc_noreg))
         KP_CHECK(device_is_ready(DEV(cc_noreg)));
-        atomic_set(&src(DEV(cc_noreg))->value, true);
-        start();
+        wait_ready();
         KP_CHECK(calls(DEV(cc_noreg)) == 0 && !kp_rgb_condition_valid(DEV(cc_noreg)));
         if (!peripheral()) KP_CHECK(action_count == 1 && actions[0].code == 30);
         unsigned before = action_count;
@@ -596,7 +608,7 @@ static void special_cases(void) {
 #endif
     } else if (kp_test_case("trigger-actions")) {
 #if DT_NODE_EXISTS(DT_NODELABEL(cc_latchgate))
-        start();
+        wait_ready();
         KP_CHECK(!gate(DEV(cc_latchgate)));
         set(DEV(cc_root), true); drain();
         bool on;
@@ -613,7 +625,7 @@ static void special_cases(void) {
 #endif
     } else {
         KP_CHECK(kp_test_case("trigger-no-table"));
-        start(); set(DEV(cc_root), true); drain();
+        wait_ready(); set(DEV(cc_root), true); drain();
         KP_CHECK(action_count == 0 && release_count == 0 && gate(DEV(ordinary)));
         KP_CHECK(calls(DEV(cc_left)) == 0 && calls(DEV(cc_right)) == 0);
     }
@@ -636,7 +648,7 @@ DEVICE_DT_DEFINE(DT_NODELABEL(cc_strip), NULL, NULL, NULL, NULL, POST_KERNEL,
                  CONFIG_LED_STRIP_INIT_PRIORITY, &strip_api);
 
 static void stale_source_refresh(bool held) {
-    start();
+    wait_ready();
     KP_CHECK(atomic_get(&strip_colors) > 0);
     zmk_rgb_matrix_set_inhibited(true); drain();
     KP_CHECK(atomic_get(&strip_blacks) > 0 && atomic_get(&strip_pixel_one) == 0);
@@ -674,7 +686,7 @@ static void stale_source_refresh(bool held) {
     drain();
     KP_CHECK(atomic_get(&strip_colors) == before + 1);
     KP_CHECK(gate(DEV(ordinary)) && atomic_get(&strip_pixel_one) == 0xffffff);
-    KP_CHECK(irq_start_result == -EWOULDBLOCK);
+    KP_CHECK(irq_calls == 1);
 }
 #endif
 
@@ -687,7 +699,7 @@ void kp_test_conditions_run(void) {
 #endif
     } else if (kp_test_case("startup-unready-selector") || kp_test_case("startup-normalized-names") ||
         kp_test_case("startup-auto") || kp_test_case("startup-unrestored-settings") ||
-        kp_test_case("startup-settings-manual") ||
+        kp_test_case("startup-settings-staged") ||
         kp_test_case("overlay-zero") || kp_test_case("trigger-no-table") ||
         kp_test_case("trigger-actions") || kp_test_case("trigger-unregistered-root")) special_cases();
     else if (kp_test_case("dag") || kp_test_case("cycle") || kp_test_case("missing") ||
@@ -702,7 +714,7 @@ void kp_test_conditions_run(void) {
         kp_test_case("self-feedback") || kp_test_case("multi-feedback")) trigger_cases();
     else if (kp_test_case("overlay-gate") || kp_test_case("split-visibility")) overlay_cases();
     else if (kp_test_case("unused-scope")) {
-        start(); KP_CHECK(calls(DEV(cc_unused)) == 0);
+        wait_ready(); KP_CHECK(calls(DEV(cc_unused)) == 0);
         KP_CHECK(calls(DEV(cc_central)) == (peripheral() ? 0 : 1));
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)));
     } else if (kp_test_case("initial-shared") || kp_test_case("scoped-listener") ||

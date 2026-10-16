@@ -48,17 +48,6 @@ config KEYPAW_RGB_WORKQUEUE_PRIORITY
       Priority of the module's work queue thread. The default matches ZMK's
       low-priority work queue so RGB work never preempts typing.
 
-config KEYPAW_RGB_CONTROL_AUTO_START
-    bool "Start RGB control automatically after source/settings initialization"
-    default y
-    help
-      With settings enabled, start from a commit callback at priority INT_MAX,
-      after all source commits at lower priorities and all settings keys load.
-      Without settings, start at APPLICATION priority 99; the matrix application
-      init priority must be lower. Providers must be ready at this boundary.
-      Disable this if sources become ready later or settings are loaded in
-      subtrees; call zmk_rgb_matrix_start() explicitly after full restoration.
-
 config KEYPAW_RGB_MATRIX_TICK_MS
     int "Animation tick period (ms)"
     default 32

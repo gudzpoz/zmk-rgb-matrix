@@ -253,19 +253,17 @@ def main():
     result = build(root, "late-control", '''&rgbs_a {
         compatible = "test,rgb-selector-late-control", "keypaw,behavior-rgb-selector";
         zephyr,deferred-init;
-        };''', runtime=True,
-                   extra_conf="CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n")
+        };''', runtime=True)
     assert result.returncode == 0, result.stdout[-12000:]
     command = [str(root / "late-control/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
     print("COMMAND", " ".join(command), flush=True)
     run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
                      stderr=subprocess.STDOUT, log_path=root / "late-control.log")
     assert run.returncode == 0, run.stdout[-12000:]
-    assert "PASS canonical readiness deferred start" in run.stdout, run.stdout
+    assert "PASS canonical readiness automatic start" in run.stdout, run.stdout
     assert "PASS selector runtime" in run.stdout, run.stdout
-    errors = [line for line in run.stdout.splitlines() if "<err>" in line]
-    assert errors and all("canonical control is not ready" in line for line in errors), errors
-    print("PASS canonical readiness deferred start", flush=True)
+    assert "<err>" not in run.stdout, run.stdout
+    print("PASS canonical readiness automatic start", flush=True)
 
     stage42(root)
 
