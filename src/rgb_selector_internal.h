@@ -83,7 +83,6 @@ void kp_rgb_selector_overlays_defaults_locked(void);
 
 /* Generated from one-way behavior-to-selector references. */
 const struct device *kp_rgb_selector_control(const struct device *selector);
-const struct device *kp_rgb_selector_alias(void);
 
 struct zmk_behavior_binding;
 bool kp_rgb_selector_command(uint32_t command);

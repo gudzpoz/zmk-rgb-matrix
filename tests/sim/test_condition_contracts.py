@@ -42,7 +42,7 @@ FIXTURE = '''
         selected-selector = <&selector_b>; selected-effect = <&probe_b>; };
 };
 &ordinary { condition = <&cc_root>; local; };
-&rgb_overlays {
+&rgb_matrix {
     cc_shared: cc_shared { compatible = "keypaw,rgb-overlay"; condition = <&cc_selected_a>;
         local; leds = <4>; ccwh1 { compatible = "keypaw,rgb-matrix-solid";
         #binding-cells = <0>; color = <0xffffff>; }; };
@@ -121,10 +121,10 @@ VARIANTS = {
 ''', ''),
     'trigger-actions': ('actions', '''
 &{/cc_triggers/primary} {
-    on-enter = <&kprgb RGB_OFF &ovl_tog &rgbs_a RGB_EFS_CMD 2>;
-    on-exit = <&kprgb RGB_ON &ovl_tog &rgbs_a RGB_EFS_CMD 1>;
+    on-enter = <&rgb_matrix RGB_OFF &ovl_tog &rgbs_a RGB_EFS_CMD 2>;
+    on-exit = <&rgb_matrix RGB_ON &ovl_tog &rgbs_a RGB_EFS_CMD 1>;
 };
-&rgb_overlays { cc_latchgate: cc_latchgate {
+&rgb_matrix { cc_latchgate: cc_latchgate {
     compatible = "keypaw,rgb-overlay"; local; condition = <&fixture_latch>; leds = <10>;
     ccwh9 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
 }; };
@@ -171,7 +171,7 @@ def main():
             selectors = SELECTOR_FIXTURE
             if variant == 'normalized':
                 selectors = (selectors
-                    .replace('&rgb_overlays {', '&rgb_overlays { #address-cells = <1>; #size-cells = <0>;')
+                    .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
                     .replace('compatible = "keypaw,rgb-overlay-selector";',
                              'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
                     .replace('compatible = "keypaw,rgb-matrix-solid";',

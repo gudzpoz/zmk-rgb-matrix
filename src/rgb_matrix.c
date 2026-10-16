@@ -750,6 +750,80 @@ int zmk_rgb_matrix_get_user_state(bool *user_on) {
   return 0;
 }
 
+int kp_rgb_apply_defaults(void) {
+  kp_rgb_matrix_lock();
+  kp_rgb_global.user_on = kp_rgb_global.initial_on;
+  kp_rgb_global.brightness =
+      (uint8_t)CLAMP(kp_rgb_global.initial_brightness, 0, KP_RGB_BRT_MAX);
+  kp_rgb_reconcile_power_locked();
+  zmk_rgb_matrix_flush();
+  kp_rgb_matrix_unlock();
+  return 0;
+}
+
+static bool kp_rgb_parameter_target_ready(const struct device *fx) {
+  return fx != NULL && device_is_ready(fx);
+}
+
+int kp_rgb_set_color_locked(const struct device *fx,
+                           const struct kp_rgb_hsb *color) {
+  if (!kp_rgb_parameter_target_ready(fx)) {
+    return -ENODEV;
+  }
+  if (color == NULL || color->h > KP_RGB_HUE_MAX || color->s > KP_RGB_SAT_MAX ||
+      color->b > KP_RGB_BRT_MAX) {
+    return -EINVAL;
+  }
+  struct kp_rgb_hsb next = *color;
+  next.h %= KP_RGB_HUE_MAX;
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+  if (data->color.h != next.h || data->color.s != next.s ||
+      data->color.b != KP_RGB_BRT_MAX) {
+    data->color.h = next.h;
+    data->color.s = next.s;
+    data->color.b = KP_RGB_BRT_MAX;
+    zmk_rgb_matrix_flush();
+  }
+  return 0;
+}
+
+int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
+  if (!kp_rgb_parameter_target_ready(fx)) {
+    return -ENODEV;
+  }
+  if (period_ms < CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS ||
+      period_ms > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS) {
+    return -EINVAL;
+  }
+  struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+  if (data->duration_ms != period_ms) {
+    data->duration_ms = (uint16_t)period_ms;
+    zmk_rgb_matrix_flush();
+  }
+  return 0;
+}
+
+int zmk_rgb_matrix_set_color(const struct device *fx,
+                            const struct kp_rgb_hsb *color) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_color_locked(fx, color);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
+int zmk_rgb_matrix_set_period(const struct device *fx, uint32_t period_ms) {
+  if (k_is_in_isr()) {
+    return -EWOULDBLOCK;
+  }
+  kp_rgb_matrix_lock();
+  int ret = kp_rgb_set_period_locked(fx, period_ms);
+  kp_rgb_matrix_unlock();
+  return ret;
+}
+
 static int kp_rgb_matrix_layout_init(void) {
   const struct zmk_physical_layout *const *layouts;
   size_t layout_count = zmk_physical_layouts_get_list(&layouts);

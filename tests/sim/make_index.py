@@ -268,7 +268,7 @@ def main():
     if repo:
         lede += f' <a href="{repo}">Source and documentation on GitHub</a>.'
     lede += (
-        " Each node is meant to be copied into your own <code>&amp;kprgb</code> registry."
+        " Each node is meant to be copied into your own <code>&amp;preview_selector</code> registry."
         " Follow <em>fixture node</em> on an effect for a complete registry."
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)

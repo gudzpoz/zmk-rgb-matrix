@@ -12,7 +12,7 @@ from native_process import run_logged
 from native_build import build
 
 SCENE = '''
-&rgb_overlays {
+&rgb_matrix {
     /delete-node/ preview_selector;
     /delete-node/ fixture_overlay;
     /delete-node/ fixture_battery;
@@ -26,9 +26,6 @@ SCENE = '''
     };
 };
 / { behaviors { /delete-node/ rgbs; }; };
-&kprgb {
-    /delete-property/ selector;
-};
 &rgb_matrix {
     initial-on;
     initial-brightness = <50>; max-brightness = <75>; idle-brightness = <25>;
@@ -36,8 +33,7 @@ SCENE = '''
 &kscan { events = <>; };
 '''
 
-NO_CONTROL = '''
-&kprgb { status = "disabled"; };
+API_ONLY = '''
 / { status_triggers {
     compatible = "keypaw,rgb-trigger-table";
     status_edge {
@@ -51,30 +47,24 @@ NO_CONTROL = '''
 def main():
     root = Path(tempfile.mkdtemp(prefix="rgb-fixed-scene-"))
     print(f"ARTIFACTS {root}", flush=True)
-    result = build(root, "split-no-endpoint", NO_CONTROL, runtime=True, selectors=SCENE,
-                   extra_conf="CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\n"
-                              "CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n")
-    assert result.returncode != 0
-    assert "non-local split overlays require the global RGB endpoint" in result.stdout, result.stdout[-16000:]
-    print("PASS non-local split overlay rejects missing global endpoint", flush=True)
     for name, extra in (("status", ""), ("zero", '''
 &rgb_matrix { /delete-property/ strip; mapping = <>; };
-'''), ("no-control", NO_CONTROL),
-                        ("no-control-split-local", NO_CONTROL + '&status_panel { local; };'),
-                        ("no-control-zero", NO_CONTROL + '''
+'''), ("api-only", API_ONLY),
+                        ("api-only-split-local", API_ONLY + '&status_panel { local; };'),
+                        ("api-only-zero", API_ONLY + '''
 &rgb_matrix { /delete-property/ strip; mapping = <>; };
 ''')):
         result = build(root, name, extra, runtime=True, selectors=SCENE,
                        extra_conf="CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\n"
                                   "CONFIG_KEYPAW_SIM_FIXED_SCENE_TEST=y\n" +
-                                  ("CONFIG_KEYPAW_RGB_TRIGGERS=y\n" if name.startswith("no-control") else "") +
+                                  ("CONFIG_KEYPAW_RGB_TRIGGERS=y\n" if name.startswith("api-only") else "") +
                                   ("CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n" if "split" in name else ""))
         assert result.returncode == 0, result.stdout[-16000:]
-        if name.startswith("no-control"):
+        if name.startswith("api-only"):
             config = (root / name / "build/zephyr/.config").read_text()
             if "split" not in name:
                 assert "CONFIG_KEYPAW_RGB_TRIGGERS=y" in config, config
-            assert "CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX=y" not in config, config
+            assert "CONFIG_KEYPAW_RGB_MATRIX=y" in config, config
         capture = root / f"{name}.bin"
         command = [str(root / name / "build/zephyr/zmk.exe"),
                    f"--capture={capture}", "--stop_at=2", "-no-rt"]
@@ -83,7 +73,7 @@ def main():
         assert run.returncode == 0 and "PASS fixed scene" in run.stdout, run.stdout
         assert "<err>" not in run.stdout, run.stdout
         data = capture.read_bytes()
-        if name in ("zero", "no-control-zero"):
+        if name in ("zero", "api-only-zero"):
             assert data == b"", data
             assert "LEDs=0" in run.stdout, run.stdout
             print("PASS fixed scene zero: no submissions/live OFF/inhibited gates", flush=True)
@@ -94,7 +84,7 @@ def main():
         assert (len(data) - offset) % stride == 0
         frames = [(struct.unpack_from("<I", data, pos)[0], data[pos + 4:pos + stride])
                   for pos in range(offset, len(data), stride)]
-        if name in ("status", "no-control", "no-control-split-local"):
+        if name in ("status", "api-only", "api-only-split-local"):
             phases = dict((phase, int(time)) for phase, time in
                           re.findall(r"fixed scene phase (\w+) at (\d+)", run.stdout))
             assert set(phases) == {"empty", "status", "off", "inhibited", "resumed", "empty_again"}, phases

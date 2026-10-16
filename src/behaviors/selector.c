@@ -245,7 +245,7 @@ static const struct behavior_driver_api kp_selector_api = {
   };                                                                           \
   BEHAVIOR_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL,                      \
                      &kp_control_##inst##_cfg, POST_KERNEL,                    \
-                     CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &kp_selector_api);
+                     KP_RGB_DEVICE_INIT_PRIORITY, &kp_selector_api);
 
 DT_INST_FOREACH_STATUS_OKAY(KP_CONTROL_DEFINE)
 

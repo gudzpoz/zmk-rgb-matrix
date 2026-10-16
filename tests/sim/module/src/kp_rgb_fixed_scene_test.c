@@ -7,6 +7,9 @@
 #include <zmk/rgb_matrix.h>
 #include "rgb_matrix_internal.h"
 
+BUILD_ASSERT(KP_RGB_DEVICE_INIT_PRIORITY == 99);
+BUILD_ASSERT(KP_RGB_OVERLAY_COUNT == DT_CHILD_NUM(DT_NODELABEL(rgb_matrix)));
+
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 #define CHECK(expr) do { if (!(expr)) { printk("FAIL fixed scene line %u\n", __LINE__); exit(2); } } while (0)
 
@@ -33,8 +36,8 @@ static void scenario(void *a, void *b, void *c) {
   k_sleep(K_MSEC(100));
   bool on;
   CHECK(zmk_rgb_matrix_get_state(&on) == 0 && on);
-  CHECK(zmk_rgb_matrix_select_effect(0) == -ENODEV);
-  CHECK(zmk_rgb_matrix_cycle_effect(1) == -ENODEV);
+  CHECK(device_is_ready(DEV(rgb_matrix)));
+  CHECK(!strcmp(DEV(rgb_matrix)->name, "rgb"));
   const struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(status_color))->color;
   CHECK(kp_rgb_effect_cfg(DEV(status_color))->owner == NULL);
   CHECK(((const struct kp_rgb_effect_api *)DEV(status_color)->api)

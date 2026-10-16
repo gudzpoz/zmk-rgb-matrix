@@ -19,15 +19,15 @@
 
         smoke_caps: smoke_caps {
             condition = <&fixture_caps>;
-            on-enter = <&kprgb RGB_EFS_CMD 0>,
-                       <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
-            on-exit = <&kprgb RGB_EFS_CMD 0>,
-                      <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+            on-enter = <&rgbs RGB_EFS_CMD 0>,
+                       <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
+            on-exit = <&rgbs RGB_EFS_CMD 0>,
+                      <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
 
         smoke_default: smoke_default {
-            on-enter = <&kprgb RGB_EFS_CMD 0>,
-                       <&kprgb RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+            on-enter = <&rgbs RGB_EFS_CMD 0>,
+                       <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
     };
 };
@@ -39,7 +39,7 @@
 
 /* The preview fixture_overlay names no targets, so it paints nothing. This one
  * is `all-leds` at full opacity, so holding layer 1 covers every LED. */
-&rgb_overlays {
+&rgb_matrix {
     smoke_layer: smoke_layer {
         compatible = "keypaw,rgb-overlay";
         condition = <&fixture_layer>;

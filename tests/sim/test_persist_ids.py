@@ -66,10 +66,9 @@ def main():
             assert re.search(diagnostic, errors), result.stdout[-16000:]
             print(f"PASS compile-time {target} bound settings-{suffix}", flush=True)
 
-    # Same selector token under different parents is buildable and does not emit
-    # a persistence-specific startup error. Behavior endpoints/effect names differ.
+    # Selectors may no longer use a second parent, even when settings are off.
     collision = SELECTOR_IDS + '''
-/ { second_parent { compatible = "keypaw,rgb-overlays";
+/ { second_parent {
     collision_selector: selector-a {
     compatible = "keypaw,rgb-overlay-selector"; leds = <0 1>;
     condition = <&preview_visible>; initial-effect = <0>;
@@ -84,9 +83,9 @@ def main():
         name = f"cross-parent-token-collision-settings-{settings}"
         result = build(root, name, "", selectors=collision,
                        extra_conf=f"CONFIG_SETTINGS={settings}\n")
-        assert result.returncode == 0, result.stdout[-16000:]
-        run_image(root, name)
-        print(f"PASS cross-parent selector token collision settings-{settings}", flush=True)
+        assert result.returncode != 0, result.stdout[-16000:]
+        assert "overlay must be a child of the keypaw,rgb-matrix node" in result.stdout, result.stdout[-16000:]
+        print(f"PASS cross-parent selector rejected settings-{settings}", flush=True)
 
 
 if __name__ == "__main__":

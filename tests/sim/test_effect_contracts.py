@@ -78,7 +78,7 @@ def fragment(zero=False, example=True):
     result = "/ { effects_private {\n" + "\n".join(nodes) + "\n}; };\n"
     result += """
 &kscan { events = <>; };
-&rgb_overlays {
+&rgb_matrix {
     effects_owner: effects_owner {
         compatible = "keypaw,rgb-overlay"; leds = <1 3>; opacity = <37>;
         effects_owned: effects_owned { compatible = "test,rgb-effects-probe"; #binding-cells = <0>; };

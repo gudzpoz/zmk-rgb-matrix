@@ -15,7 +15,7 @@ WORKSPACE = Path(os.environ.get("ZMK_WS", REPO / "zmk"))
 LOCAL_WEST = REPO / ".venv/bin/west"
 WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west")
 SELECTORS = '''
-&rgb_overlays {
+&rgb_matrix {
     /delete-node/ fixture_overlay;
     /delete-node/ fixture_battery;
     /delete-node/ fixture_batt_sub;
@@ -63,7 +63,6 @@ SELECTORS = '''
         };
     };
 };
-&kprgb { selector = <&selector_a>; };
 &rgb_conditions {
     preview_visible: preview_visible {
         compatible = "keypaw,rgb-condition-effect-selected";

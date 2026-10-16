@@ -17,15 +17,13 @@ SCENARIOS = {
     "control-peripheral": "peripheral",
     "control-conversion": "controls",
     "control-validation": "controls",
-    "control-alias": "controls",
+    "control-global-commands": "controls",
     "control-reset": "controls",
     "control-publication": "controls",
     "control-isr": "controls",
-    "control-no-alias": "no-alias",
     "control-large-step": "large-step",
     "control-deferred": "deferred",
     "control-local-only": "local-only",
-    "control-local-no-alias": "local-no-alias",
     "control-owner": "owner",
     "control-duration-defaults": "duration-defaults",
     "control-matrix-default": "matrix-default",
@@ -50,9 +48,7 @@ def main():
     fixture = (SIM / "config/control_contracts.overlay").read_text()
     for image in dict.fromkeys(SCENARIOS[s] for s in selected):
         fragment, selectors, conf = fixture, None, CONF
-        if image == "no-alias":
-            fragment += "&kprgb { /delete-property/ selector; };\n"
-        elif image == "large-step":
+        if image == "large-step":
             conf += "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=100000\n"
         elif image == "deferred":
             fragment += "&rgbs_a { compatible = \"test,rgb-control-late\", \"keypaw,behavior-rgb-selector\"; zephyr,deferred-init; };\n"
@@ -63,7 +59,7 @@ def main():
             fragment += "&preview_selector { local; }; &selector_a { local; }; &selector_b { local; };\n"
         elif image == "owner":
             fragment += "&selector_a { opacity = <50>; }; &selector_b { opacity = <50>; };\n"
-        elif image in ("local-only", "local-no-alias"):
+        elif image == "local-only":
             fragment += '''/ { chosen { zephyr,bt-hci = &control_hci; };
 control_hci: control_hci { compatible = "zephyr,bt-hci-userchan"; }; };
 '''
@@ -84,15 +80,16 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS=25
 CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=30
 CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
 '''
-            if image == "local-no-alias":
-                fragment += "&kprgb { /delete-property/ selector; };\n"
         elif image.startswith("matrix-"):
             selectors = ""
             fragment = '''&kscan { events = <>; };
-&rgb_overlays { status = "disabled"; };
-&preview_selector { status = "disabled"; };
-&rgbs { status = "disabled"; };
-&kprgb { status = "disabled"; };
+&rgb_matrix {
+    /delete-node/ preview_selector;
+    /delete-node/ fixture_overlay;
+    /delete-node/ fixture_battery;
+    /delete-node/ fixture_batt_sub;
+};
+/ { behaviors { /delete-node/ rgbs; }; };
 '''
             fragment += {
                 "matrix-default": "&rgb_matrix { /delete-property/ initial-on; /delete-property/ initial-brightness; /delete-property/ max-brightness; /delete-property/ idle-brightness; };",

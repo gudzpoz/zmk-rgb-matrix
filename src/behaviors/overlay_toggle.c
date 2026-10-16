@@ -98,11 +98,10 @@ static int kp_ovl_toggle_released(struct zmk_behavior_binding *binding,
   BUILD_ASSERT(sizeof(DEVICE_DT_NAME(DT_DRV_INST(inst))) <= 9,                 \
                "keypaw,behavior-rgb-overlay-toggle: node name must fit the "   \
                "9-byte split behavior_dev field (<= 8 characters)");           \
-  BUILD_ASSERT(                                                                \
-      DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                         \
-                         keypaw_rgb_condition_latch),                          \
-      "keypaw,behavior-rgb-overlay-toggle must be a child of a "               \
-      "keypaw,rgb-condition-latch");                                           \
+  BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)),                \
+                                  keypaw_rgb_condition_latch),                 \
+               "keypaw,behavior-rgb-overlay-toggle must be a child of a "      \
+               "keypaw,rgb-condition-latch");                                  \
   static const struct kp_ovl_toggle_config kp_ovl_toggle_##inst##_cfg = {      \
       .condition = DEVICE_DT_GET(DT_PARENT(DT_DRV_INST(inst))),                \
   };                                                                           \
@@ -111,16 +110,14 @@ static int kp_ovl_toggle_released(struct zmk_behavior_binding *binding,
                   kp_ovl_toggle_##inst##_metadata = {.sets_len = 0};))         \
   static const struct behavior_driver_api kp_ovl_toggle_##inst##_api = {       \
       .locality = BEHAVIOR_LOCALITY_GLOBAL,                                    \
-      .binding_convert_central_state_dependent_params =                        \
-          kp_ovl_toggle_convert,                                               \
+      .binding_convert_central_state_dependent_params = kp_ovl_toggle_convert, \
       .binding_pressed = kp_ovl_toggle_pressed,                                \
       .binding_released = kp_ovl_toggle_released,                              \
       IF_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA,                                 \
-                 (.parameter_metadata = &kp_ovl_toggle_##inst##_metadata,))};  \
+                 (.parameter_metadata = &kp_ovl_toggle_##inst##_metadata, ))}; \
   BEHAVIOR_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL,                      \
                      &kp_ovl_toggle_##inst##_cfg, POST_KERNEL,                 \
-                     CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                      \
-                     &kp_ovl_toggle_##inst##_api)
+                     KP_RGB_DEVICE_INIT_PRIORITY, &kp_ovl_toggle_##inst##_api)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_TOGGLE_DEFINE)
 

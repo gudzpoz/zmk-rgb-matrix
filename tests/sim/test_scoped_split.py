@@ -36,8 +36,8 @@ CONFIGS = {
         "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };''', CONF + "CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"),
     "late-member": ('''&probe_a { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };
         &probe_c { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };''', CONF + "CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=n\n"),
-    "late-global": ('''&kprgb { compatible = "test,rgb-split-late-global",
-        "keypaw,behavior-rgb-matrix"; zephyr,deferred-init; };''', CONF),
+    "late-global": ('''&rgb_matrix { compatible = "test,rgb-split-late-global",
+        "keypaw,rgb-matrix"; zephyr,deferred-init; };''', CONF),
 }
 for name in ("receiving", "receiving-zero"):
     CONFIGS[name] = (ZERO if name.endswith("-zero") else "",

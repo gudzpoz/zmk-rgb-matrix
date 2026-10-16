@@ -31,11 +31,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
 #define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
 
-BUILD_ASSERT(DT_HAS_COMPAT_STATUS_OKAY(keypaw_behavior_rgb_matrix),
-             "RGB split synchronization requires an enabled global RGB matrix behavior");
-
-static const struct device *const kp_rgb_sync_endpoint =
-    DEVICE_DT_GET(DT_INST(0, keypaw_behavior_rgb_matrix));
+static const struct device *const kp_rgb_sync_endpoint = DEVICE_DT_GET(KP_RGB_NODE);
 
 enum kp_rgb_sync_phase {
   KP_RGB_SYNC_BRIGHTNESS,

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 description: Deferred real global behavior for native endpoint-readiness contracts.
 compatible: "test,rgb-global-late-control"
-include: "keypaw,behavior-rgb-matrix.yaml"
+include: "keypaw,rgb-matrix.yaml"
 properties:
   zephyr,deferred-init:
     type: boolean

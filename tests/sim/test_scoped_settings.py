@@ -13,7 +13,7 @@ from native_build import SELECTORS, build
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
              .replace(' animate;', ''))
 NORMALIZED_SELECTORS = (SELECTORS
-    .replace('&rgb_overlays {', '&rgb_overlays { #address-cells = <1>; #size-cells = <0>;')
+    .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
     .replace('compatible = "keypaw,rgb-overlay-selector";',
              'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
     .replace('compatible = "keypaw,rgb-matrix-solid";',
@@ -25,7 +25,7 @@ NORMALIZED_SELECTORS = (SELECTORS
     .replace('probe_c: a_motion {', 'probe_c: a-motion@3 { reg = <3>;')
     .replace('probe_d: b_alt {', 'probe_d: b-alt@4 { reg = <4>;'))
 REORDERED = '''
-&rgb_overlays {
+&rgb_matrix {
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector"; initial-effect = <1>;
@@ -55,7 +55,6 @@ REORDERED = '''
     rgbs_a: rgbs_a { compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>; selector = <&selector_a>; };
     rgbs_b: rgbs_b { compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>; selector = <&selector_b>; };
 }; };
-&kprgb { selector = <&selector_a>; };
 &rgb_conditions {
     preview_visible: preview_visible { compatible = "keypaw,rgb-condition-effect-selected";
         selector = <&preview_selector>; effect = <&fx_solid>; };

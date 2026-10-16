@@ -12,7 +12,7 @@ from native_build import MODULE, SIM, WEST, WORKSPACE
 
 OVERLAY = '''
 &kscan { events = <>; };
-&rgb_overlays {
+&rgb_matrix {
     default_selector: default_selector {
         compatible = "keypaw,rgb-overlay-selector";
         initial-duration-ms = <2345>;

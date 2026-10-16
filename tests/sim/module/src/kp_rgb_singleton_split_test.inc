@@ -92,12 +92,12 @@ static struct singleton_send singleton_record(unsigned n) {
 }
 static void singleton_global(uint32_t command, uint32_t value) {
     struct zmk_behavior_binding binding = {
-        .behavior_dev = DEV(kprgb)->name, .param1 = command, .param2 = value};
+        .behavior_dev = DEV(rgb_matrix)->name, .param1 = command, .param2 = value};
     CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
 }
 static void singleton_ordinary(uint32_t command, uint32_t value) {
     struct zmk_behavior_binding binding = {
-        .behavior_dev = DEV(kprgb)->name, .param1 = command, .param2 = value};
+        .behavior_dev = DEV(rgb_matrix)->name, .param1 = command, .param2 = value};
     struct zmk_behavior_binding_event event = {
         .position = 42, .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
         .timestamp = k_uptime_get()};
@@ -111,7 +111,7 @@ static int singleton_send_command(uint8_t source, struct zmk_split_transport_cen
     if (source >= 2 || !(atomic_get(&singleton_connected) & BIT(source))) return -ENOTCONN;
     CHECK(cmd.type == ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR);
     singleton_unlocked();
-    CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(kprgb)->name));
+    CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(rgb_matrix)->name));
     bool ordinary = singleton_frontend_active();
     CHECK(cmd.data.invoke_behavior.state == 1);
     CHECK(ordinary || cmd.data.invoke_behavior.event_source == source);
@@ -358,10 +358,10 @@ static void singleton_negative_query(void) {
     k_sleep(K_MSEC(250)); singleton_remote(61, RGB_ON_CMD);
 }
 static void singleton_unready(void) {
-    CHECK(!device_is_ready(DEV(kprgb)));
+    CHECK(!device_is_ready(DEV(rgb_matrix)));
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 61; kp_rgb_matrix_unlock();
     singleton_connect(3); k_sleep(K_MSEC(1300)); CHECK(singleton_records() == 0);
-    CHECK(device_init(DEV(kprgb)) == 0 && device_is_ready(DEV(kprgb)));
+    CHECK(device_init(DEV(rgb_matrix)) == 0 && device_is_ready(DEV(rgb_matrix)));
     CHECK(zmk_rgb_matrix_start() == 0);
     singleton_masks(); singleton_global(RGB_BRT_SET_CMD, 61);
     singleton_wait_stream(8); k_sleep(K_MSEC(350)); singleton_remote(61, RGB_ON_CMD);

@@ -55,7 +55,7 @@ static unsigned power_count[2], brightness_count[2], overlay_count[2];
 static uint32_t power[2], brightness[2];
 static bool global_race;
 static void global_apply(uint32_t command, uint32_t argument) {
-    struct zmk_behavior_binding binding = {.behavior_dev = DEV(kprgb)->name,
+    struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
         .param1 = command, .param2 = argument};
     CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
 }
@@ -156,7 +156,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
             lane->phase = 0;
         }
     } else if (accepted) {
-        CHECK(!strcmp(endpoint, DEV(kprgb)->name));
+        CHECK(!strcmp(endpoint, DEV(rgb_matrix)->name));
         if (command == RGB_OFF_CMD || command == RGB_ON_CMD) {
             power[source] = command;
             power_count[source]++;
@@ -593,7 +593,7 @@ static void snapshot_validation(void) {
 static void readiness(void) {
     bool control = !strcmp(split_case, "late-control");
     bool member = !strcmp(split_case, "late-member");
-    const struct device *late = control ? DEV(rgbs_a) : member ? DEV(probe_a) : DEV(kprgb);
+    const struct device *late = control ? DEV(rgbs_a) : member ? DEV(probe_a) : DEV(rgb_matrix);
     CHECK(!device_is_ready(late));
     if (control || member) {
         CHECK(zmk_rgb_matrix_start() == -ENODEV);
@@ -934,8 +934,8 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == b_color.h &&
           kp_rgb_effect_data(DEV(probe_b))->color.s == b_color.s && kp_rgb_effect_data(DEV(probe_b))->color.b == b_color.b);
     CHECK(kp_rgb_effect_period(DEV(probe_a)) == a_period && kp_rgb_effect_period(DEV(probe_b)) == b_period);
-    CHECK(receive(DEV(kprgb), RGB_BRT_SET_CMD, 37) == 0 && kp_rgb_global.brightness == 37);
-    CHECK(receive(DEV(kprgb), RGB_OFF_CMD, 0) == 0);
+    CHECK(receive(DEV(rgb_matrix), RGB_BRT_SET_CMD, 37) == 0 && kp_rgb_global.brightness == 37);
+    CHECK(receive(DEV(rgb_matrix), RGB_OFF_CMD, 0) == 0);
     bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
     const int32_t offsets[] = {0, 1500, -2000};
     for (size_t i = 0; i < ARRAY_SIZE(offsets); i++) {
@@ -944,7 +944,7 @@ static void receiving(void *a, void *b, void *c) {
     }
     const uint32_t central[] = {123456, 10, UINT32_MAX - 15};
     for (size_t i = 0; i < ARRAY_SIZE(central); i++) {
-        CHECK(receive(DEV(kprgb), RGB_CLOCK_CMD, central[i]) == 0);
+        CHECK(receive(DEV(rgb_matrix), RGB_CLOCK_CMD, central[i]) == 0);
         CHECK(kp_rgb_clock_ms() == central[i]);
         uint32_t before = (uint32_t)k_uptime_get();
         k_sleep(K_MSEC(17));
@@ -953,7 +953,7 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(receive(DEV(rgbs_a), RGB_RESET_CMD, 0) == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
-    CHECK(receive(DEV(kprgb), RGB_RESET_CMD, 0) == 0);
+    CHECK(receive(DEV(rgb_matrix), RGB_RESET_CMD, 0) == 0);
     CHECK(kp_rgb_global.brightness == 100);
     k_sleep(K_MSEC(200)); CHECK(peripheral_reports == 0);
     printk("PASS split receiving\n"); exit(0);

@@ -54,8 +54,8 @@
 #error "the preview harness needs a keypaw,rgb-matrix node (see tests/sim/config)"
 #endif
 
-#if !DT_NODE_EXISTS(DT_NODELABEL(kprgb))
-#error "the preview harness needs a &kprgb node (see tests/sim/config/native_sim.overlay)"
+#if !DT_NODE_EXISTS(DT_NODELABEL(rgb_matrix))
+#error "the preview harness needs a &rgb_matrix node (see tests/sim/config/native_sim.overlay)"
 #endif
 
 #define KP_SIM_LED_COUNT DT_INST_PROP(0, chain_length)

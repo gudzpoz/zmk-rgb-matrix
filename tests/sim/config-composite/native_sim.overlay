@@ -49,8 +49,9 @@
         chain-length = <5>;
     };
 
-    rgb_matrix: rgb-matrix {
+    rgb_matrix: rgb {
         compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
         strip = <&rgb_output>;
         physical-layout = <&layout_ortho_4x12_all1u>;
         mapping = <11 4 27 9 36>;
@@ -58,10 +59,6 @@
         initial-brightness = <100>;
         max-brightness = <100>;
         idle-brightness = <100>;
-    };
-
-    rgb_overlays {
-        compatible = "keypaw,rgb-overlays";
         composite_selector: composite_selector {
             compatible = "keypaw,rgb-overlay-selector";
             all-leds;
@@ -73,11 +70,6 @@
         };
     };
     behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            selector = <&composite_selector>;
-        };
         rgbs: rgbs {
             compatible = "keypaw,behavior-rgb-selector";
             #binding-cells = <2>;

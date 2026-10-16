@@ -10,15 +10,14 @@ from native_build import build, run
 from native_protocol import SOLID_SELECTORS, CONF
 
 SINGLETON = SOLID_SELECTORS + '''
-&rgb_overlays { /delete-node/ selector_a; /delete-node/ selector_b; };
+&rgb_matrix { /delete-node/ selector_a; /delete-node/ selector_b; };
 / { behaviors { /delete-node/ rgbs_a; /delete-node/ rgbs_b; }; };
-&kprgb { /delete-property/ selector; };
 '''
 MASKS = (0x1234, 0xabcd)
 MASK_SCENE = '''
 &rgb_conditions { singleton_closed: singleton_closed { compatible = "keypaw,rgb-condition-latch"; }; };
 &ordinary { condition = <&singleton_closed>; };
-&rgb_overlays {
+&rgb_matrix {
 ''' + "\n".join(f'''
     singleton_mask_{index}: singleton_mask_{index} {{
         compatible = "keypaw,rgb-overlay";
@@ -87,8 +86,8 @@ def main():
         if name == "split-zero":
             fragment += '&rgb_matrix { /delete-property/ strip; mapping = <>; }; &ordinary { /delete-property/ leds; };'
         elif name == "split-unready":
-            fragment += '''&kprgb {
-                compatible = "test,rgb-global-late-control", "keypaw,behavior-rgb-matrix";
+            fragment += '''&rgb_matrix {
+                compatible = "test,rgb-global-late-control", "keypaw,rgb-matrix";
                 zephyr,deferred-init;
             };'''
         if not args.no_build:

@@ -33,10 +33,9 @@ def main():
     print(f"ARTIFACTS {root}", flush=True)
     variants = (
         ("readme", scene + indicators, bindings),
-        ("readme-alias", scene + indicators + '\n&kprgb { selector = <&zone>; };\n',
-         bindings.replace("&rgbs RGB_EFF", "&kprgb RGB_EFF")),
-        ("guide", scene + indicators + selectors + '/ {\n' + condition + '};\n'
-         '&caps { condition = <&selected_a>; };\n', guide_bindings),
+        ("readme-api-only", scene + indicators, "bindings = <&none>;"),
+        ("guide", scene + indicators + selectors + condition
+         + '&caps { condition = <&selected_a>; };\n', guide_bindings),
     )
     for name, overlay, keys in variants:
         config = root / name / "config"

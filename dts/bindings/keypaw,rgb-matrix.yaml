@@ -9,14 +9,20 @@ description: |
   sits under. That is what lets effects use real geometry instead of treating
   the strip as an unnamed line.
 
+  This singleton is also the global two-parameter behavior for power, master
+  brightness and reset. Its effective device name must be at most eight
+  characters and match on both split halves.
+
+  Direct children are overlays in composition order. Their child indices,
+  including disabled children, address gate bits on the split link. Keep the
+  same child order on both halves. Conditions, triggers and selector controls
+  belong outside this node; effects belong under their overlay owners.
+
 compatible: "keypaw,rgb-matrix"
 
+include: two_param.yaml
+
 properties:
-  label:
-    type: string
-    required: false
-    deprecated: true
-    description: Ignored; declared only because Zephyr 4.1 rejects undeclared properties.
 
   strip:
     type: phandle

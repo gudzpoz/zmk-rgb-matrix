@@ -7,7 +7,7 @@
  * Deliberately standalone: a stock upstream 4x12 grid layout plus a 48-LED
  * strip, so the previews do not depend on the keypaw48 shield or any of the
  * real hardware bring-up. Effects belong to the preview_selector overlay;
- * kprgb explicitly aliases its canonical rgbs control.
+ * rgbs is the canonical control for that selector.
  *
  * The strip is a keypaw,led-strip-capture device rather than a real WS2812: the
  * capture driver records every frame the engine paints, which is what the GIF
@@ -54,8 +54,9 @@
         color-mapping = <LED_COLOR_ID_RED LED_COLOR_ID_GREEN LED_COLOR_ID_BLUE>;
     };
 
-    rgb_matrix: rgb-matrix {
+    rgb_matrix: rgb {
         compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
         strip = <&led_strip_capture>;
         physical-layout = <&layout_ortho_4x12_all1u>;
         initial-on;
@@ -71,62 +72,6 @@
            24 25 26 27 28 29 30 31 32 33 34 35
            36 37 38 39 40 41 42 43 44 45 46 47
         >;
-    };
-
-    /* Conditions are reusable predicates consumed by overlays and triggers.
-     * The fixture instantiates one of each built-in kind so their sources are
-     * compiled and the DT-to-config mapping is exercised; nothing consumes them
-     * yet (the compositor overlay and generic trigger come next), so they are
-     * inert here. */
-    rgb_conditions: rgb_conditions {
-        compatible = "keypaw,rgb-conditions";
-
-        fixture_caps: fixture_caps {
-            compatible = "keypaw,rgb-condition-caps-lock";
-        };
-
-        fixture_layer: fixture_layer {
-            compatible = "keypaw,rgb-condition-layer";
-            layer = <1>;
-        };
-
-        fixture_always: fixture_always {
-            compatible = "keypaw,rgb-condition-always";
-        };
-
-        /* A stateful latch with its nested toggle behavior. Nothing presses
-         * ovl_tog here (the harness has no behavior-injection option), so the
-         * latch stays off and no preview pixel changes; this exercises the
-         * driver, binding, Kconfig and DT path at compile/link time. The
-         * behavior name must be <=8 characters. */
-        fixture_latch: fixture_latch {
-            compatible = "keypaw,rgb-condition-latch";
-
-            ovl_tog: ovl_tog {
-                compatible = "keypaw,behavior-rgb-overlay-toggle";
-                #binding-cells = <0>;
-            };
-        };
-
-        /* Combinators over the conditions above, to compile their operand-list
-         * plumbing. `conditions` is a plain phandles list, so sibling
-         * references are a DAG and need no #*-cells. */
-        fixture_and: fixture_and {
-            compatible = "keypaw,rgb-condition-and";
-            conditions = <&fixture_always &fixture_layer>;
-        };
-
-        fixture_or: fixture_or {
-            compatible = "keypaw,rgb-condition-or";
-            conditions = <&fixture_caps &fixture_latch>;
-        };
-    };
-
-    /* Container of all overlays.
-     * Overlays are tested and rendered in declaration order. */
-    rgb_overlays: rgb_overlays {
-        compatible = "keypaw,rgb-overlays";
-
         preview_selector: preview_selector {
             compatible = "keypaw,rgb-overlay-selector";
             all-leds;
@@ -562,12 +507,57 @@
         };
     };
 
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            selector = <&preview_selector>;
+    /* Conditions are reusable predicates consumed by overlays and triggers.
+     * The fixture instantiates one of each built-in kind so their sources are
+     * compiled and the DT-to-config mapping is exercised; nothing consumes them
+     * yet (the compositor overlay and generic trigger come next), so they are
+     * inert here. */
+    rgb_conditions: rgb_conditions {
+        compatible = "keypaw,rgb-conditions";
+
+        fixture_caps: fixture_caps {
+            compatible = "keypaw,rgb-condition-caps-lock";
         };
+
+        fixture_layer: fixture_layer {
+            compatible = "keypaw,rgb-condition-layer";
+            layer = <1>;
+        };
+
+        fixture_always: fixture_always {
+            compatible = "keypaw,rgb-condition-always";
+        };
+
+        /* A stateful latch with its nested toggle behavior. Nothing presses
+         * ovl_tog here (the harness has no behavior-injection option), so the
+         * latch stays off and no preview pixel changes; this exercises the
+         * driver, binding, Kconfig and DT path at compile/link time. The
+         * behavior name must be <=8 characters. */
+        fixture_latch: fixture_latch {
+            compatible = "keypaw,rgb-condition-latch";
+
+            ovl_tog: ovl_tog {
+                compatible = "keypaw,behavior-rgb-overlay-toggle";
+                #binding-cells = <0>;
+            };
+        };
+
+        /* Combinators over the conditions above, to compile their operand-list
+         * plumbing. `conditions` is a plain phandles list, so sibling
+         * references are a DAG and need no #*-cells. */
+        fixture_and: fixture_and {
+            compatible = "keypaw,rgb-condition-and";
+            conditions = <&fixture_always &fixture_layer>;
+        };
+
+        fixture_or: fixture_or {
+            compatible = "keypaw,rgb-condition-or";
+            conditions = <&fixture_caps &fixture_latch>;
+        };
+    };
+
+
+    behaviors {
         rgbs: rgbs {
             compatible = "keypaw,behavior-rgb-selector";
             #binding-cells = <2>;

@@ -7,7 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define DT_DRV_COMPAT keypaw_behavior_rgb_matrix
+#define DT_DRV_COMPAT keypaw_rgb_matrix
 
 #include <drivers/behavior.h>
 #include <zephyr/device.h>
@@ -23,24 +23,7 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
-             "RGB matrix requires exactly one enabled controller");
-
-#define KP_CONTROLLER DT_INST(0, keypaw_behavior_rgb_matrix)
-
-BUILD_ASSERT(DT_CHILD_NUM(KP_CONTROLLER) == 0,
-             "RGB global control cannot own effects; move children to a selector overlay");
-BUILD_ASSERT(!DT_NODE_HAS_PROP(KP_CONTROLLER, initial_on) &&
-                 !DT_NODE_HAS_PROP(KP_CONTROLLER, initial_brightness) &&
-                 !DT_NODE_HAS_PROP(KP_CONTROLLER, max_brightness) &&
-                 !DT_NODE_HAS_PROP(KP_CONTROLLER, idle_brightness) &&
-                 !DT_NODE_HAS_PROP(KP_CONTROLLER, initial_effect) &&
-                 !DT_NODE_HAS_PROP(KP_CONTROLLER, initial_duration_ms),
-             "RGB global control defaults moved to the matrix and selector nodes");
-
-BUILD_ASSERT(!DT_NODE_HAS_PROP(KP_CONTROLLER, leds),
-             "RGB controller always owns the whole strip; remove leds");
-BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_CONTROLLER)) <= 9,
+BUILD_ASSERT(sizeof(DEVICE_DT_NAME(KP_RGB_NODE)) <= 9,
              "RGB controller name must fit the split behavior_dev field");
 
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -54,66 +37,19 @@ static const struct behavior_parameter_value_metadata no_arg_values[] = {
     {.display_name = "Turn Off",
      .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
      .value = RGB_OFF_CMD},
-    {.display_name = "Hue Up",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_HUI_CMD},
-    {.display_name = "Hue Down",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_HUD_CMD},
-    {.display_name = "Saturation Up",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_SAI_CMD},
-    {.display_name = "Saturation Down",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_SAD_CMD},
     {.display_name = "Brightness Up",
      .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
      .value = RGB_BRI_CMD},
     {.display_name = "Brightness Down",
      .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
      .value = RGB_BRD_CMD},
-    {.display_name = "Duration Up",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_SPI_CMD},
-    {.display_name = "Duration Down",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_SPD_CMD},
-    {.display_name = "Next Effect",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_EFF_CMD},
-    {.display_name = "Previous Effect",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_EFR_CMD},
     {.display_name = "Reset Settings",
      .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
      .value = RGB_RESET_CMD},
 };
-static const struct behavior_parameter_metadata_set no_args_set = {
-    .param1_values = no_arg_values,
-    .param1_values_len = ARRAY_SIZE(no_arg_values),
-};
-static const struct behavior_parameter_value_metadata absolute_commands[] = {
-    {.display_name = "Select Effect",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_EFS_CMD},
-    {.display_name = "Hue/Saturation",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_COLOR_HSB_CMD},
-    {.display_name = "Duration Up/Set",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
-     .value = RGB_SPI_CMD},
-};
-static const struct behavior_parameter_value_metadata absolute_values[] = {
-    {.display_name = "Argument",
-     .type = BEHAVIOR_PARAMETER_VALUE_TYPE_RANGE,
-     .range = {.min = 0, .max = UINT32_MAX}},
-};
 static const struct behavior_parameter_metadata_set sets[] = {
-    no_args_set,
-    {.param1_values = absolute_commands,
-     .param1_values_len = ARRAY_SIZE(absolute_commands),
-     .param2_values = absolute_values,
-     .param2_values_len = ARRAY_SIZE(absolute_values)},
+    {.param1_values = no_arg_values,
+     .param1_values_len = ARRAY_SIZE(no_arg_values)},
 };
 static const struct behavior_parameter_metadata metadata = {
     .sets_len = ARRAY_SIZE(sets),
@@ -143,10 +79,6 @@ static int on_keymap_binding_convert_central_state_dependent_params(
   ARG_UNUSED(event);
   if (k_is_in_isr())
     return -EWOULDBLOCK;
-  const struct device *alias = kp_rgb_selector_alias();
-  if (kp_rgb_selector_command(binding->param1) && alias != NULL) {
-    return kp_rgb_selector_binding_convert(alias, binding);
-  }
   kp_rgb_matrix_lock();
   int ret = 0;
   switch (binding->param1) {
@@ -159,9 +91,15 @@ static int on_keymap_binding_convert_central_state_dependent_params(
         kp_rgb_calc_brt_locked(binding->param1 == RGB_BRI_CMD ? 1 : -1);
     binding->param1 = RGB_BRT_SET_CMD;
     break;
+  case RGB_ON_CMD:
+  case RGB_OFF_CMD:
+  case RGB_BRT_SET_CMD:
+  case RGB_RESET_CMD:
+  case RGB_OVL_STATE_CMD:
+  case RGB_CLOCK_CMD:
+    break;
   default:
-    if (kp_rgb_selector_command(binding->param1))
-      ret = -ENODEV;
+    ret = -ENOTSUP;
     break;
   }
   kp_rgb_matrix_unlock();
@@ -175,10 +113,6 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     return -EWOULDBLOCK;
   uint32_t command = binding->param1;
   uint32_t argument = binding->param2;
-  const struct device *alias = kp_rgb_selector_alias();
-  if (kp_rgb_selector_command(command) && alias != NULL) {
-    return kp_rgb_selector_binding_apply(alias, command, argument);
-  }
   int ret;
   switch (command) {
   case RGB_TOG_CMD:
@@ -223,7 +157,7 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     kp_rgb_set_clock_offset((int32_t)(argument - (uint32_t)k_uptime_get()));
     return 0;
   default:
-    return kp_rgb_selector_command(command) ? -ENODEV : -ENOTSUP;
+    return -ENOTSUP;
   }
   if (ret < 0)
     return ret;
@@ -252,6 +186,6 @@ static const struct behavior_driver_api behavior_rgb_matrix_driver_api = {
 #endif
 };
 
-BEHAVIOR_DT_DEFINE(KP_CONTROLLER, NULL, NULL, NULL, NULL,
-                   POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,
+BEHAVIOR_DT_DEFINE(KP_RGB_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
+                   KP_RGB_DEVICE_INIT_PRIORITY,
                    &behavior_rgb_matrix_driver_api);

@@ -33,20 +33,18 @@ CONTROL_CASES = {
         compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
         selector = <&ordinary>; }; }; };''',
                            r"RGB selector control must reference a selector overlay"),
-    "disabled-control-target": ('''&rgb_overlays { disabled_selector: disabled_selector {
+    "disabled-control-target": ('''&rgb_matrix { disabled_selector: disabled_selector {
         compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
         child { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
         }; }; / { behaviors { badctl {
         compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
         selector = <&disabled_selector>; }; }; };''',
                                r"RGB selector control must reference an enabled selector"),
-    "wrong-kind-alias": ('&kprgb { selector = <&ordinary>; };',
-                         r"RGB matrix selector alias must reference a selector overlay"),
-    "disabled-alias": ('&selector_a { status = "disabled"; }; &rgbs_a { status = "disabled"; };',
-                       r"RGB matrix selector alias must reference an enabled selector"),
+    "removed-global-alias": ('&rgb_matrix { selector = <&ordinary>; };',
+                             r"['\"]selector['\"].*not declared"),
     "oversized-control": ('&rgbs_a { label = "control_name_too_long"; };',
                           r"RGB selector control name must fit the 9-byte split behavior_dev field"),
-    "oversized-global": ('&kprgb { label = "global_name_too_long"; };',
+    "oversized-global": ('&rgb_matrix { label = "global_name_too_long"; };',
                          r"RGB controller name must fit the split behavior_dev field"),
 }
 
@@ -71,7 +69,7 @@ SELECTED_CONDITIONS = '''
 '''
 SELECTED_GATES = '''
 &ordinary { condition = <&selected_a>; local; };
-&rgb_overlays {
+&rgb_matrix {
     shared_gate: shared_gate {
         compatible = "keypaw,rgb-overlay"; local;
         condition = <&selected_a>; leds = <4>;
@@ -251,15 +249,6 @@ def main():
     print("PASS selector lifecycle/input/retained selection/clock restart")
     check_capture(capture, run.stdout)
 
-    result = build(root, "absent-alias", '&kprgb { /delete-property/ selector; };', runtime=True)
-    assert result.returncode == 0, result.stdout[-12000:]
-    command = [str(root / "absent-alias/build/zephyr/zmk.exe"), "--stop_at=1", "-no-rt"]
-    print("COMMAND", " ".join(command), flush=True)
-    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                     stderr=subprocess.STDOUT, log_path=root / "absent-alias.log")
-    assert run.returncode == 0 and "PASS absent public selector alias" in run.stdout, run.stdout
-    assert "<err>" not in run.stdout, run.stdout
-    print("PASS absent public selector alias", flush=True)
 
     result = build(root, "late-control", '''&rgbs_a {
         compatible = "test,rgb-selector-late-control", "keypaw,behavior-rgb-selector";

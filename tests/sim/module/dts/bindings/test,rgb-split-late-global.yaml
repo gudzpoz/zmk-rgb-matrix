@@ -3,7 +3,7 @@
 
 description: Deferred real global RGB control for split endpoint readiness
 compatible: "test,rgb-split-late-global"
-include: "keypaw,behavior-rgb-matrix.yaml"
+include: "keypaw,rgb-matrix.yaml"
 properties:
   zephyr,deferred-init:
     type: boolean

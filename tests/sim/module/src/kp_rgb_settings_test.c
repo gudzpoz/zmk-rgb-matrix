@@ -419,7 +419,7 @@ static void runtime_parameters(void) {
   for (size_t i = 0; i < ARRAY_SIZE(commands); i++) {
     uint32_t argument = commands[i] == RGB_COLOR_HSB_CMD ? RGB_COLOR_HSB_VAL(211, 37, 100) : 0;
     invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
-    invoke(DEV(kprgb), commands[i], argument, DEV(rgbs_a));
+    invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
     k_sleep(K_MSEC(60));
     CHECK(saves == before);
   }

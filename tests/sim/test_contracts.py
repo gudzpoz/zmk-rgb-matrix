@@ -28,8 +28,7 @@ SCENARIOS = (
 FRAGMENT = r'''
 &preview_selector { status = "disabled"; };
 &rgbs { status = "disabled"; };
-&kprgb { /delete-property/ selector; };
-&rgb_overlays {
+&rgb_matrix {
     fixture_overlay { status = "disabled"; };
     fixture_battery { status = "disabled"; };
     fixture_batt_sub { status = "disabled"; };
@@ -124,7 +123,7 @@ def main():
         if variant == 'empty': fragment += '\n&engine_bottom { status = "disabled"; }; &engine_mid { status = "disabled"; }; &engine_top { status = "disabled"; }; &engine_cover { status = "disabled"; };\n'
         if variant == 'no-active': fragment += '\n&engine_bottom { condition = <&engine_mid_latch>; };\n'
         if variant.startswith('composition-'):
-            fragment += '\n&rgb_overlays {\n' + (SECOND + FIRST if variant.endswith('ba') else FIRST + SECOND) + FILTER + '\n};\n'
+            fragment += '\n&rgb_matrix {\n' + (SECOND + FIRST if variant.endswith('ba') else FIRST + SECOND) + FILTER + '\n};\n'
             scenarios = (variant, 'filters') if variant.endswith('ab') else (variant,)
         if args.scenario:
             if args.scenario not in scenarios:

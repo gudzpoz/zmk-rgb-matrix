@@ -92,8 +92,7 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
 static const struct device *kp_overlay_registry[KP_OVERLAY_SLOTS];
 static uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
 
-#if IS_ENABLED(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX) && IS_ENABLED(CONFIG_ZMK_SPLIT) && \
-    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
 /* What every peripheral was last told; dispatch() sends only differing words. A
  * mirror rather than a changed-word list means a change also survives a tick
@@ -208,8 +207,7 @@ bool kp_rgb_overlay_refresh(void) {
 }
 
 void kp_rgb_overlay_dispatch(void) {
-#if IS_ENABLED(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX) && IS_ENABLED(CONFIG_ZMK_SPLIT) && \
-    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   struct zmk_behavior_binding_event event = {.timestamp = k_uptime_get()};
   for (uint16_t w = 0; w < KP_RGB_OVERLAY_WORDS; w++) {
     uint16_t bits = kp_rgb_overlay_get_word(w);
@@ -218,7 +216,7 @@ void kp_rgb_overlay_dispatch(void) {
     }
 
     struct zmk_behavior_binding binding = {
-        .behavior_dev = DEVICE_DT_NAME(DT_INST(0, keypaw_behavior_rgb_matrix)),
+        .behavior_dev = DEVICE_DT_NAME(KP_RGB_NODE),
         .param1 = RGB_OVL_STATE_CMD,
         .param2 = RGB_OVL_STATE_VAL(w, bits),
     };

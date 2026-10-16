@@ -18,7 +18,7 @@ LOCAL_WEST = REPO / ".venv/bin/west"
 WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west")
 
 PAIR = '''
-&rgb_overlays { fixture_pair: fixture_pair {
+&rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     condition = <&fixture_always>;
     all-leds;

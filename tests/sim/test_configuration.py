@@ -6,6 +6,7 @@
 Requires the same workspace/toolchain as run-smoke.sh. Every case has a pristine
 build directory; positive controls distinguish rejection from a broken toolchain.
 """
+import argparse
 import os
 import re
 from pathlib import Path
@@ -43,7 +44,7 @@ CASES = {
     #binding-cells = <0>; duration = <321>; }; }; };
 '''),
     "two-child-overlay": (True, '''
-&rgb_overlays { fixture_pair: fixture_pair {
+&rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     condition = <&fixture_always>;
     all-leds;
@@ -54,7 +55,7 @@ CASES = {
 }; };
 '''),
     "two-child-private-parameters": (True, '''
-&rgb_overlays { fixture_pair: fixture_pair {
+&rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     all-leds;
     first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
@@ -63,22 +64,30 @@ CASES = {
         duration = <2300>; };
 }; };
 '''),
-    "no-controller": (True, '&kprgb { status = "disabled"; };'),
+    "no-controller": (False, '&rgb_matrix { status = "disabled"; };'),
     "two-controllers": (False, '''
-/ { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";
-    #binding-cells = <2>;
-}; }; };
+/ { extra_rgb { compatible = "keypaw,rgb-matrix"; #binding-cells = <2>;
+    physical-layout = <&layout_ortho_4x12_all1u>; mapping = <>; }; };
 '''),
-    "controller-leds": (False, "&kprgb { leds = <0 1>; };"),
-    "flat-controller-child": (False, '''&kprgb { flat_effect {
+    "empty-scene": (True, '''&rgb_matrix {
+    /delete-node/ preview_selector; /delete-node/ fixture_overlay;
+    /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
+}; / { behaviors { /delete-node/ rgbs; }; };'''),
+    "overlay-wrong-parent": (False, '''/ { wrong_parent { bad_overlay {
+    compatible = "keypaw,rgb-overlay-battery"; all-leds;
+}; }; };'''),
+    "missing-binding-cells": (False, '&rgb_matrix { /delete-property/ #binding-cells; };'),
+    "removed-global-alias": (False, '&rgb_matrix { selector = <&preview_selector>; };'),
+    "controller-leds": (False, "&rgb_matrix { leds = <0 1>; };"),
+    "flat-controller-child": (False, '''&rgb_matrix { flat_effect {
         compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
     }; };'''),
     "removed-overlays": (False, '&fx_solid { overlays = <&fixture_overlay>; };'),
     "removed-no-overlays": (False, '&fx_solid { no-overlays; };'),
     "removed-private-overlays": (False, '&fixture_overlay { fx_fixture { overlays = <&fixture_battery>; }; };'),
     "removed-private-no-overlays": (False, '&fixture_overlay { fx_fixture { no-overlays; }; };'),
-    "removed-global-default": (False, '&kprgb { initial-brightness = <42>; };'),
-    "removed-flat-default": (False, '&kprgb { initial-effect = <0>; };'),
+    "matrix-global-default": (True, '&rgb_matrix { initial-brightness = <42>; };'),
+    "removed-flat-default": (False, '&rgb_matrix { initial-effect = <0>; };'),
     "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
     "missing-child": (False, "&fixture_overlay { /delete-node/ fx_fixture; };"),
@@ -104,14 +113,17 @@ CASES = {
 
 
 DIAGNOSTICS = {
-    "two-controllers": r"exactly one enabled controller",
+    "no-controller": r"DT_HAS_KEYPAW_RGB_MATRIX_ENABLED.*\(=n\)",
+    "two-controllers": r"exactly one enabled matrix node",
+    "overlay-wrong-parent": r"overlay must be a child of the keypaw,rgb-matrix node",
+    "missing-binding-cells": r"#binding-cells.*required|required.*#binding-cells",
+    "removed-global-alias": r"['\"]selector['\"].*not declared",
     "controller-leds": r"whole strip|['\"]leds['\"].*not declared",
-    "flat-controller-child": r"global control cannot own effects",
+    "flat-controller-child": r"matrix children must be overlays, not effects",
     "removed-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
     "removed-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
     "removed-private-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
     "removed-private-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
-    "removed-global-default": r"['\"]initial-brightness['\"].*not declared|defaults moved",
     "removed-flat-default": r"['\"]initial-effect['\"].*not declared|defaults moved",
     "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
     "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
@@ -132,37 +144,49 @@ for effect in ("rain", "starlight"):
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix="rgb-config-") as directory:
-        root = Path(directory)
-        for name, (valid, fragment) in CASES.items():
-            if name == "external-effect" and not EXAMPLE.is_dir():
-                print(f"SKIP external-effect: {EXAMPLE} is not available", flush=True)
-                continue
-            modules = [str(MODULE), str(SIM / "module")]
-            if name == "external-effect":
-                modules.append(str(EXAMPLE))
-            config = root / name / "config"
-            config.mkdir(parents=True)
-            for filename in ("native_sim.conf", "native_sim.keymap"):
-                (config / filename).write_text((SIM / "config" / filename).read_text())
-            (config / "native_sim.overlay").write_text(
-                f'#include "{SIM / "config/native_sim.overlay"}"\n' + fragment
-            )
-            command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
-                       "-b", "native_sim//zmk_test_mock", "-p", "--",
-                       f"-DZMK_CONFIG={config}",
-                       f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
-            result = subprocess.run(command, cwd=WORKSPACE, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
-            if (result.returncode == 0) != valid:
-                raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
-                                     + result.stdout[-12000:])
-            if name.startswith("period-"):
-                assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
-            if not valid:
-                output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
-                assert re.search(DIAGNOSTICS[name], output), output[-12000:]
-            print(f"PASS {name}", flush=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", choices=CASES, action="append")
+    parser.add_argument("--build-dir", type=Path)
+    args = parser.parse_args()
+    root = (args.build_dir or Path(tempfile.mkdtemp(prefix="rgb-config-"))).resolve()
+    print(f"ARTIFACTS {root}", flush=True)
+    for name in args.case or CASES:
+        valid, fragment = CASES[name]
+        if name == "external-effect" and not EXAMPLE.is_dir():
+            print(f"SKIP external-effect: {EXAMPLE} is not available", flush=True)
+            continue
+        modules = [str(MODULE), str(SIM / "module")]
+        if name == "external-effect":
+            modules.append(str(EXAMPLE))
+        config = root / name / "config"
+        config.mkdir(parents=True, exist_ok=True)
+        for filename in ("native_sim.conf", "native_sim.keymap"):
+            text = (SIM / "config" / filename).read_text()
+            if filename.endswith(".conf") and name == "no-controller":
+                text += "\nCONFIG_KEYPAW_RGB_MATRIX=y\n"
+            (config / filename).write_text(text)
+        (config / "native_sim.overlay").write_text(
+            f'#include "{SIM / "config/native_sim.overlay"}"\n' + fragment
+        )
+        command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
+                   "-b", "native_sim//zmk_test_mock", "-p", "--",
+                   f"-DZMK_CONFIG={config}",
+                   f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
+        result = subprocess.run(command, cwd=WORKSPACE, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+        (root / f"{name}.log").write_text(result.stdout)
+        if (result.returncode == 0) != valid:
+            raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
+                                 + result.stdout[-12000:])
+        if valid:
+            generated = (root / name / "build/zephyr/.config").read_text()
+            assert "CONFIG_CHECK_INIT_PRIORITIES=y" in generated
+        if name.startswith("period-"):
+            assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
+        if not valid:
+            output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+            assert re.search(DIAGNOSTICS[name], output), output[-12000:]
+        print(f"PASS {name}", flush=True)
 
 
 if __name__ == "__main__":

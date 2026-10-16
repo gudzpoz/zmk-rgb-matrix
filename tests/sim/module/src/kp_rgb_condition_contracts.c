@@ -88,7 +88,7 @@ static const struct device *const *dependencies(const struct device *dev, size_t
         return DT_INST_PROP(inst, unready) ? -ENODEV : 0; \
     } \
     DEVICE_DT_INST_DEFINE(inst, init_##inst, NULL, &source_##inst, &config_##inst, \
-        POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &api_##inst);
+        POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, &api_##inst);
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 /* Deliberately a real device without condition registration. */
@@ -96,7 +96,7 @@ static const struct kp_rgb_condition_api missing_api = {
     .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample,
 };
 DEVICE_DEFINE(cc_missing, "cc_missing", NULL, NULL, NULL, NULL,
-              POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &missing_api);
+              POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, &missing_api);
 
 static struct source *src(const struct device *dev) { return dev->data; }
 static unsigned calls(const struct device *dev) { return atomic_get(&src(dev)->calls); }
@@ -172,7 +172,7 @@ static const struct behavior_driver_api action_api = {
     .binding_released = released, .parameter_metadata = &action_metadata,
 };
 BEHAVIOR_DT_DEFINE(DT_NODELABEL(ccact), NULL, NULL, NULL, NULL, POST_KERNEL,
-                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &action_api);
+                   KP_RGB_DEVICE_INIT_PRIORITY, &action_api);
 
 static int listener(const zmk_event_t *eh) {
     const struct zmk_rgb_selector_selection_changed *ev = as_zmk_rgb_selector_selection_changed(eh);

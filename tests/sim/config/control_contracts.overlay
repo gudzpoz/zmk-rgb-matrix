@@ -2,7 +2,7 @@
 &probe_b { compatible = "test,rgb-control-probe"; axis = "vertical"; };
 &probe_c { compatible = "test,rgb-control-probe"; axis = "horizontal"; /delete-property/ animate; };
 &probe_d { compatible = "test,rgb-control-probe"; };
-&rgb_overlays {
+&rgb_matrix {
     control_private: control_private {
         compatible = "keypaw,rgb-overlay"; leds = <4>;
         control_late: control_late {
