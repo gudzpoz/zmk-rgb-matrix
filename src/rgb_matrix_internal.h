@@ -35,12 +35,6 @@ struct kp_rgb_global {
 
 extern struct kp_rgb_global kp_rgb_global;
 
-struct kp_rgb_scene_runtime {
-  struct kp_rgb_callback_state state;
-  bool wanted;
-  bool reset_pending;
-};
-
 void kp_rgb_callbacks_set_active(const struct device *dev,
                                 const struct kp_rgb_effect_callbacks *callbacks,
                                 struct kp_rgb_callback_state *state,

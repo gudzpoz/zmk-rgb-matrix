@@ -399,6 +399,69 @@ static void held_refresh(bool resume) {
     wait_writes(n + 1); settled(); KP_CHECK(paints(0) == p + 1 && events(0) == e + 1);
     if (resume) KP_CHECK(obs[0].elapsed == 0);
 }
+static void lifecycle_batch(void) {
+    enum { PROVIDERS = 4 };
+    uint16_t gates[PROVIDERS] = {0};
+    const struct device *const *registry = kp_rgb_overlay_list();
+    unsigned registered = 0, holes = 0;
+    for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+        if (!registry[i]) { holes++; continue; }
+        unsigned s = slot(registry[i]);
+        const struct kp_rgb_overlay_common_data *data = registry[i]->data;
+        KP_CHECK(s < PROVIDERS && i < 16 && !gates[s] && data->index == i);
+        gates[s] = BIT(i);
+        registered++;
+    }
+    KP_CHECK(registered == PROVIDERS && holes > 0);
+
+    kp_rgb_matrix_lock();
+    obs[2].animate = false;
+    KP_CHECK(kp_rgb_overlay_set_word(0, gates[0] | gates[1] | gates[2]));
+    kp_rgb_matrix_unlock();
+    settled();
+
+    unsigned resets[PROVIDERS];
+    kp_rgb_matrix_lock();
+    for (unsigned s = 0; s < PROVIDERS; s++) resets[s] = atomic_get(&obs[s].resets);
+    order_len = 0; order[0] = 0;
+    KP_CHECK(kp_rgb_overlay_set_word(0, gates[3]));
+    kp_rgb_request_runtime_reset_locked();
+    position(true, 456);
+    kp_rgb_matrix_unlock();
+    settled();
+    KP_CHECK(strcmp(order, "D0D1D2R0R1R2R3A3E3P3") == 0);
+    for (unsigned s = 0; s < PROVIDERS; s++) {
+        KP_CHECK(atomic_get(&obs[s].resets) == resets[s] + 1);
+    }
+    KP_CHECK(obs[3].timestamp == 456 && obs[3].elapsed == 0);
+
+    kp_rgb_matrix_lock();
+    order_len = 0; order[0] = 0;
+    KP_CHECK(kp_rgb_overlay_set_word(0, gates[0] | gates[1] | gates[2]));
+    kp_rgb_request_runtime_reset_locked();
+    position(true, 789);
+    kp_rgb_matrix_unlock();
+    settled();
+    KP_CHECK(strcmp(order, "D3R0R1R2R3A0A1A2E0E1E2P0P1P2") == 0);
+    for (unsigned s = 0; s < PROVIDERS; s++) {
+        KP_CHECK(atomic_get(&obs[s].resets) == resets[s] + 2);
+        if (s < 3) KP_CHECK(obs[s].timestamp == 789 && obs[s].elapsed == 0);
+    }
+
+    unsigned writes_before = atomic_get(&writes);
+    KP_CHECK(zmk_rgb_matrix_off() == 0);
+    wait_writes(writes_before + 1); settled();
+    kp_rgb_matrix_lock();
+    order_len = 0; order[0] = 0;
+    kp_rgb_request_runtime_reset_locked();
+    position(true, 999);
+    kp_rgb_matrix_unlock();
+    settled();
+    KP_CHECK(strcmp(order, "R0R1R2R3") == 0);
+    KP_CHECK(zmk_rgb_matrix_on() == 0);
+    wait_writes(writes_before + 2); settled();
+    KP_CHECK(obs[0].elapsed == 0);
+}
 
 static void stale_generation(void) {
     unsigned p = paints(0), e = events(0);
@@ -581,6 +644,7 @@ void kp_test_engine_run(void) {
              !strcmp(name, "cover") || !strcmp(name, "brightness") || !strcmp(name, "child-change") ||
              !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) prefix(name);
     else if (!strcmp(name, "lifecycle")) lifecycle();
+    else if (!strcmp(name, "lifecycle-batch")) lifecycle_batch();
     else if (!strcmp(name, "periodic") || !strcmp(name, "rollover") || !strcmp(name, "idempotent") || !strcmp(name, "animating-bottom")) {
         if (!strcmp(name, "idempotent")) {
             KP_CHECK(zmk_rgb_matrix_on() == 0 && zmk_rgb_matrix_set_inhibited(false) == 0);

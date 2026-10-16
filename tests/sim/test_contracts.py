@@ -21,6 +21,7 @@ SCENARIOS = (
     'resume-participation',
     'static-bottom', 'multi-prefix', 'invalidate', 'animating-bottom', 'cover',
     'brightness', 'idle', 'child-change', 'gate-change', 'registry-holes',
+    'lifecycle-batch',
     'status-only', 'no-active', 'empty-registry', 'lifecycle',
     'output-serialization', 'render-serialization',
     'composition-ab', 'composition-ba', 'filters',

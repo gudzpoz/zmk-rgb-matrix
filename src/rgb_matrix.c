@@ -156,13 +156,13 @@ static atomic_t kp_rgb_clock_offset_ms;
  * machinery still runs. */
 static inline bool kp_rgb_has_leds(void) { return KP_LED_COUNT > 0; }
 
+struct kp_rgb_scene_runtime {
+  struct kp_rgb_callback_state state;
+  bool wanted;
+  bool reset_pending;
+};
 
 static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[MAX(1, KP_RGB_OVERLAY_COUNT)];
-
-static struct kp_rgb_scene_runtime *kp_rgb_overlay_scene(const struct device *dev) {
-  const struct kp_rgb_overlay_common_data *data = dev->data;
-  return &kp_rgb_overlay_scenes[data->index];
-}
 
 static bool kp_rgb_logical_on_locked(void) {
   return kp_rgb_global.user_on &&
@@ -304,76 +304,13 @@ static bool kp_rgb_pending_available(void);
 static uint32_t kp_rgb_pending_take_dropped(void);
 static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev);
 
-typedef void (*scene_visitor)(const struct device *dev,
-                              const struct kp_rgb_effect_callbacks *callbacks,
-                              struct kp_rgb_scene_runtime *runtime,
-                              int64_t now_ms);
-
-static void kp_rgb_each_scene(scene_visitor visit, int64_t now_ms) {
+void kp_rgb_request_runtime_reset_locked(void) {
   const struct device *const *overlays = kp_rgb_overlay_list();
   for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
-    const struct device *dev = overlays[i];
-    if (dev == NULL) continue;
-    const struct kp_rgb_overlay_api *api = dev->api;
-    visit(dev, api->callbacks, &kp_rgb_overlay_scenes[i], now_ms);
+    if (overlays[i] == NULL) continue;
+    kp_rgb_overlay_scenes[i].reset_pending = true;
   }
-}
-
-static void kp_rgb_restart_clock(const struct device *dev,
-                                 const struct kp_rgb_effect_callbacks *callbacks,
-                                 struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  ARG_UNUSED(dev);
-  ARG_UNUSED(callbacks);
-  ARG_UNUSED(now_ms);
-  runtime->state.animating = false;
-}
-
-static void kp_rgb_clear_wanted(const struct device *dev,
-                                const struct kp_rgb_effect_callbacks *callbacks,
-                                struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  ARG_UNUSED(dev);
-  ARG_UNUSED(callbacks);
-  ARG_UNUSED(now_ms);
-  runtime->wanted = false;
-}
-
-static void kp_rgb_mark_reset(const struct device *dev,
-                              const struct kp_rgb_effect_callbacks *callbacks,
-                              struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  ARG_UNUSED(dev);
-  ARG_UNUSED(callbacks);
-  ARG_UNUSED(now_ms);
-  runtime->reset_pending = true;
-}
-
-void kp_rgb_request_runtime_reset_locked(void) {
-  kp_rgb_each_scene(kp_rgb_mark_reset, 0);
   zmk_rgb_matrix_flush();
-}
-
-static void kp_rgb_deactivate_scene(const struct device *dev,
-                                    const struct kp_rgb_effect_callbacks *callbacks,
-                                    struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  if (runtime->state.active && !runtime->wanted) {
-    kp_rgb_callbacks_set_active(dev, callbacks, &runtime->state, false, now_ms);
-  }
-}
-
-static void kp_rgb_reset_scene(const struct device *dev,
-                               const struct kp_rgb_effect_callbacks *callbacks,
-                               struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  if (runtime->reset_pending || (!runtime->state.initialized && runtime->wanted)) {
-    kp_rgb_callbacks_reset(dev, callbacks, &runtime->state, now_ms);
-    runtime->reset_pending = false;
-  }
-}
-
-static void kp_rgb_activate_scene(const struct device *dev,
-                                  const struct kp_rgb_effect_callbacks *callbacks,
-                                  struct kp_rgb_scene_runtime *runtime, int64_t now_ms) {
-  if (runtime->wanted) {
-    kp_rgb_callbacks_set_active(dev, callbacks, &runtime->state, true, now_ms);
-  }
 }
 
 static size_t kp_last_covering_overlay(const struct device *const *overlays,
@@ -391,31 +328,47 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
   return last;
 }
 
-static inline void kp_rgb_try_cache_prefix(const struct kp_rgb_frame *local,
-                                           bool animating,
-                                           size_t *prefix_count) {
-  if (!animating) {
-    memcpy(kp_rgb_prefix, local->pixels, sizeof(kp_rgb_prefix));
-    (*prefix_count)++;
-  }
-}
-
 static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   const struct device *const *overlays = kp_rgb_overlay_list();
   size_t overlay_count = kp_rgb_overlay_count();
   size_t first = allowed ? kp_last_covering_overlay(overlays, overlay_count) : SIZE_MAX;
-  kp_rgb_each_scene(kp_rgb_clear_wanted, now_ms);
+  for (size_t i = 0; i < overlay_count; i++) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL) continue;
+    kp_rgb_overlay_scenes[i].wanted =
+        allowed && (first == SIZE_MAX || i >= first) && kp_rgb_overlay_gate(dev);
+  }
 
-  if (allowed) {
-    for (size_t i = first == SIZE_MAX ? 0 : first; i < overlay_count; i++) {
-      if (overlays[i] == NULL || !kp_rgb_overlay_gate(overlays[i])) continue;
-      kp_rgb_overlay_scene(overlays[i])->wanted = true;
+  for (size_t i = 0; i < overlay_count; i++) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL) continue;
+    const struct kp_rgb_overlay_api *api = dev->api;
+    struct kp_rgb_scene_runtime *runtime = &kp_rgb_overlay_scenes[i];
+    if (runtime->state.active && !runtime->wanted) {
+      kp_rgb_callbacks_set_active(dev, api->callbacks, &runtime->state, false, now_ms);
     }
   }
 
-  kp_rgb_each_scene(kp_rgb_deactivate_scene, now_ms);
-  kp_rgb_each_scene(kp_rgb_reset_scene, now_ms);
-  kp_rgb_each_scene(kp_rgb_activate_scene, now_ms);
+  for (size_t i = 0; i < overlay_count; i++) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL) continue;
+    const struct kp_rgb_overlay_api *api = dev->api;
+    struct kp_rgb_scene_runtime *runtime = &kp_rgb_overlay_scenes[i];
+    if (runtime->reset_pending || (!runtime->state.initialized && runtime->wanted)) {
+      kp_rgb_callbacks_reset(dev, api->callbacks, &runtime->state, now_ms);
+      runtime->reset_pending = false;
+    }
+  }
+
+  for (size_t i = 0; i < overlay_count; i++) {
+    const struct device *dev = overlays[i];
+    if (dev == NULL) continue;
+    const struct kp_rgb_overlay_api *api = dev->api;
+    struct kp_rgb_scene_runtime *runtime = &kp_rgb_overlay_scenes[i];
+    if (runtime->wanted) {
+      kp_rgb_callbacks_set_active(dev, api->callbacks, &runtime->state, true, now_ms);
+    }
+  }
 
   struct kp_rgb_key_event event;
   bool input_changed = false;
@@ -459,9 +412,10 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
 
       const struct kp_rgb_overlay_api *ovl = dev->api;
       kp_rgb_scene_animating |= kp_rgb_callbacks_render(
-          dev, ovl->callbacks, &kp_rgb_overlay_scene(dev)->state, &frame);
-      if (!reuse) {
-        kp_rgb_try_cache_prefix(&frame, kp_rgb_scene_animating, &prefix_count);
+          dev, ovl->callbacks, &kp_rgb_overlay_scenes[i].state, &frame);
+      if (!reuse && !kp_rgb_scene_animating) {
+        memcpy(kp_rgb_prefix, frame.pixels, sizeof(kp_rgb_prefix));
+        prefix_count++;
       }
     }
     if (!reuse) {
@@ -592,7 +546,7 @@ static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
     if (dev == NULL || !kp_rgb_overlay_gate(dev)) continue;
     const struct kp_rgb_overlay_api *ovl = dev->api;
     changed |= kp_rgb_callbacks_on_event(dev, ovl->callbacks,
-                                         &kp_rgb_overlay_scene(dev)->state, ev);
+                                         &kp_rgb_overlay_scenes[i].state, ev);
   }
   return changed;
 }
@@ -614,8 +568,12 @@ void kp_rgb_reconcile_power_locked(void) {
   if (allowed) {
     kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
     kp_rgb_output_urgent_black = false;
-    kp_rgb_each_scene(kp_rgb_restart_clock, 0);
-    kp_rgb_each_scene(kp_rgb_mark_reset, 0);
+    const struct device *const *overlays = kp_rgb_overlay_list();
+    for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+      if (overlays[i] == NULL) continue;
+      kp_rgb_overlay_scenes[i].state.animating = false;
+      kp_rgb_overlay_scenes[i].reset_pending = true;
+    }
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_dirty = true;
     kp_rgb_control_refresh_locked();
