@@ -114,7 +114,7 @@ static struct kp_rgb_coord coords[CAP];
 static size_t all[CAP], reverse_targets[CAP];
 static struct kp_rgb_frame frame;
 static const struct kp_rgb_effect_callbacks *callbacks(const struct device *dev) {
-    return ((const struct kp_rgb_effect_api *)dev->api)->callbacks;
+    return dev->api;
 }
 static const struct kp_rgb_effect_callbacks *overlay_callbacks(const struct device *dev) {
     return ((const struct kp_rgb_overlay_api *)dev->api)->callbacks;

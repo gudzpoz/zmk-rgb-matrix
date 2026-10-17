@@ -21,9 +21,9 @@ PAIR = '''
 &rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+    first { compatible = "keypaw,rgb-matrix-reactive";
         color = <0x20ff40>; duration = <650>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
+    second { compatible = "keypaw,rgb-matrix-rainbow";
         duration = <1800>; };
 }; };
 '''

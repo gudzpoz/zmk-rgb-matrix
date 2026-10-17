@@ -4,4 +4,4 @@
 description: Full-spectrum hue-cycle RGB matrix effect (CYCLE_ALL). Every LED
   shares the same global hue phase.
 compatible: "keypaw,rgb-matrix-spectrum"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"

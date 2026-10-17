@@ -28,7 +28,7 @@ def fragment(zero=False, example=True):
 
     def effect(name, kind, properties=""):
         nodes.append(f'{name}: {name} {{ compatible = "keypaw,rgb-matrix-{kind}"; '
-                     f'#binding-cells = <0>; color = <0x00ffff>; duration = <1000>; {properties} }};')
+                     f'color = <0x00ffff>; duration = <1000>; {properties} }};')
 
     # Cross products match the old fixture's ordinal arithmetic, not a subset of previews.
     for palette in ("rainbow", "solid"):
@@ -63,12 +63,13 @@ def fragment(zero=False, example=True):
     effect("effects_heat_no_spread", "heatmap", 'spread = <0>; decrease-delay-ms = <25>; increase-step = <32>;')
     effect("effects_digital", "digital-rain")
     if example:
-        effect("effects_example", "example", 'tail-length = <200>;')
+        # Required by the separately owned example's unmigrated binding.
+        effect("effects_example", "example", '#binding-cells = <0>; tail-length = <200>;')
     nodes += [
-        'effects_probe_a: effects_probe_a { compatible = "test,rgb-effects-probe"; #binding-cells = <0>; };',
-        'effects_probe_b: effects_probe_b { compatible = "test,rgb-effects-probe"; #binding-cells = <0>; };',
-        'effects_optional: effects_optional { compatible = "test,rgb-effects-probe"; #binding-cells = <0>; optional-callbacks; };',
-        'effects_fallback: effects_fallback { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0x07111f>; duration = <0>; };',
+        'effects_probe_a: effects_probe_a { compatible = "test,rgb-effects-probe"; };',
+        'effects_probe_b: effects_probe_b { compatible = "test,rgb-effects-probe"; };',
+        'effects_optional: effects_optional { compatible = "test,rgb-effects-probe"; optional-callbacks; };',
+        'effects_fallback: effects_fallback { compatible = "keypaw,rgb-matrix-solid"; color = <0x07111f>; duration = <0>; };',
     ]
     for compatible in ("first", "second"):
         for index, mode in enumerate(("pulse", "idle", "sweep")):
@@ -80,18 +81,18 @@ def fragment(zero=False, example=True):
 &rgb_matrix {
     effects_owner: effects_owner {
         compatible = "keypaw,rgb-overlay"; leds = <1 3>; opacity = <37>;
-        effects_owned: effects_owned { compatible = "test,rgb-effects-probe"; #binding-cells = <0>; };
+        effects_owned: effects_owned { compatible = "test,rgb-effects-probe"; };
     };
     effects_optional_owner: effects_optional_owner {
         compatible = "keypaw,rgb-overlay"; leds = <1 3>; opacity = <100>;
         effects_optional_child: effects_optional_child {
-            compatible = "test,rgb-effects-probe"; #binding-cells = <0>; optional-callbacks;
+            compatible = "test,rgb-effects-probe"; optional-callbacks;
         };
     };
     effects_real_owner: effects_real_owner {
         compatible = "keypaw,rgb-overlay"; leds = <1 3>; opacity = <100>;
         effects_owned_reactive: effects_owned_reactive {
-            compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+            compatible = "keypaw,rgb-matrix-reactive";
             color = <0xffffff>; duration = <1000>; background-brightness = <0>; multi;
         };
     };

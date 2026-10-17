@@ -5,6 +5,7 @@
 
 #define DT_DRV_COMPAT keypaw_rgb_matrix_selector_probe
 
+#include <drivers/behavior.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -309,13 +310,12 @@ static void controls(void) {
   }
   CHECK(reset_found);
   CHECK(metadata.sets[1].param2_values[0].range.max == UINT16_MAX);
-  CHECK(behavior_get_parameter_metadata(DEV(probe_a), &metadata) == 0);
-  CHECK(metadata.sets_len == 0);
   enum behavior_locality locality;
   CHECK(behavior_get_locality(DEV(rgbs_a), &locality) == 0);
   CHECK(locality == BEHAVIOR_LOCALITY_GLOBAL);
-  const struct behavior_driver_api *private_api = DEV(private_white)->api;
-  CHECK(private_api->binding_convert_central_state_dependent_params == NULL);
+  CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(private_white)));
+  CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
+  CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
   CHECK(kp_rgb_selector_control(DEV(selector_a)) == DEV(rgbs_a));
   CHECK(kp_rgb_selector_control(DEV(selector_b)) == DEV(rgbs_b));
   select_slot(DEV(selector_a), 0, -ENOENT);
@@ -332,16 +332,17 @@ static void controls(void) {
   CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
           &invalid, (struct zmk_behavior_binding_event){0}) == -EINVAL);
   CHECK(before == callback_count());
-  converted(DEV(fx_solid_v), 0, 0, DEV(rgbs), RGB_EFS_CMD, 1);
-  invoke(DEV(fx_solid_v), 0, 0);
+  converted(DEV(rgbs), RGB_EFS_CMD, 1, DEV(rgbs), RGB_EFS_CMD, 1);
+  invoke(DEV(rgbs), RGB_EFS_CMD, 1);
   CHECK(preview_slot() == 1);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
-  invoke(DEV(fx_solid), 0, 0);
+  invoke(DEV(rgbs), RGB_EFS_CMD, 0);
   CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
   scoped_snapshot_roundtrip();
   converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 2);
-  converted(DEV(probe_d), 0, 0, DEV(rgbs_b), RGB_EFS_CMD, 1);
+  converted(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot,
+            DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
   converted(DEV(rgbs_a), RGB_HUI_CMD, 0, DEV(rgbs_a),
             KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
             RGB_COLOR_HSB_VAL((120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360, 100, 100));
@@ -368,8 +369,8 @@ static void controls(void) {
 }
 
 static void reset_controls(void) {
-  invoke(DEV(probe_c), 0, 0);
-  invoke(DEV(probe_d), 0, 0);
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_c))->slot);
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
   invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
   invoke(DEV(rgbs_b), RGB_SPI_CMD, 3000);
   invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 100));
@@ -610,8 +611,8 @@ static void scenario(void *a, void *b, void *c) {
 
   CHECK(preview_select(1) == 0);
   k_sleep(K_MSEC(100));
-  invoke(DEV(probe_a), 0, 0);
-  invoke(DEV(probe_d), 0, 0);
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot);
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
   mark("hidden");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(!DATA(probe_a)->active && !DATA(probe_d)->active); kp_rgb_matrix_unlock();

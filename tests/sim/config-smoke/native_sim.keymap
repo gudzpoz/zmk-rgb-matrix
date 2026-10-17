@@ -19,7 +19,7 @@
         default_layer {
             bindings = <
                 &rgb_matrix RGB_OFF &none &none &none &none &none &none &none &none &none &none &none
-                &rgb_matrix RGB_ON &fx_reactive &none &none &none &none &none &none &none &none &none &none
+                &rgb_matrix RGB_ON &rgbs RGB_EFS_CMD 25 &none &none &none &none &none &none &none &none &none &none
                 &kp A &none &none &none &none &none &none &none &none &none &none &none
                 &mo 1 &none &none &none &none &none &none &none &none &none &none &none
             >;

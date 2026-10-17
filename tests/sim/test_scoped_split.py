@@ -24,7 +24,7 @@ SCENARIOS += tuple(f"global-reset-{kind}-{phase}" for kind in ("success", "faile
                    for phase in ("color", "period", "selection"))
 SCENARIOS += ("identical", "dirty-hook", "dirty-timing", "no-transport", "negative-query")
 THREE = '''&selector_a { probe_e: a_third { compatible = "keypaw,rgb-matrix-solid";
-    #binding-cells = <0>; color = <0xff0000>; duration = <1700>; }; };'''
+    color = <0xff0000>; duration = <1700>; }; };'''
 CONFIGS = {
     "transport": ("", CONF), "transport-zero": (ZERO, CONF),
     "transport-dirty-timing": ("", CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),

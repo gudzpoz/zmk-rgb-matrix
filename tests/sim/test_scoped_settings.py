@@ -30,25 +30,25 @@ REORDERED = '''
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector"; initial-effect = <1>;
         initial-duration-ms = <0xffffffff>; leds = <2 3>; condition = <&preview_visible>;
-        probe_d: b_alt { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        probe_d: b_alt { compatible = "keypaw,rgb-matrix-solid";
             color = <0x00ffff>; duration = <0>; };
-        probe_b: b_static { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        probe_b: b_static { compatible = "keypaw,rgb-matrix-solid";
             color = <0xffff00>; };
     };
     selector_a: selector_a {
         compatible = "keypaw,rgb-overlay-selector"; initial-effect = <3>;
         leds = <0 1>; condition = <&preview_visible>;
-        optout: optout { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        optout: optout { compatible = "keypaw,rgb-matrix-solid";
             color = <0xff0000>; };
-        probe_c: a_motion { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        probe_c: a_motion { compatible = "keypaw,rgb-matrix-solid";
             color = <0x0000ff>; };
-        disabled { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; status = "disabled"; };
-        probe_a: a_static { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        disabled { compatible = "keypaw,rgb-matrix-solid"; status = "disabled"; };
+        probe_a: a_static { compatible = "keypaw,rgb-matrix-solid";
             color = <0x00ff00>; };
     };
     ordinary: ordinary { compatible = "keypaw,rgb-overlay"; leds = <1>;
         condition = <&preview_visible>;
-        private_white: white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
+        private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
     };
 };
 / { behaviors {

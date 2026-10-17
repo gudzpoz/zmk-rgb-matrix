@@ -7,7 +7,7 @@ description: |
   ALPHAS_MODS (just assign different colours to alpha vs modifier keys) and any
   other fixed per-key art.
 compatible: "keypaw,rgb-matrix-static"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   led-colors:

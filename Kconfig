@@ -37,7 +37,7 @@ config KEYPAW_RGB_WORKQUEUE_STACK_SIZE
       Stack for the module's dedicated low-priority work queue, which runs all
       engine work: render passes, condition and trigger evaluation, split sync
       and the settings reset. Size it for the deepest chain, not just rendering:
-      a fired trigger invokes an effect behavior, which on the split central
+      a fired trigger invokes a selector control, which on the split central
       reaches the BLE transport. Keep it above the observed high-water mark with
       margin.
 

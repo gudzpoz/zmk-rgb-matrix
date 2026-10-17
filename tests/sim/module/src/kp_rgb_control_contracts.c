@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 #define DT_DRV_COMPAT test_rgb_control_probe
+#include <drivers/behavior.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <zephyr/irq_offload.h>
@@ -359,18 +360,15 @@ static void conversion(void) {
     converted(RGB_EFF_CMD, RGB_EFS_CMD, 2);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
     converted(RGB_EFR_CMD, RGB_EFS_CMD, 2);
-    struct zmk_behavior_binding b = binding(DEV(probe_d), UINT32_MAX, UINT32_MAX);
-    KP_CHECK(convert(&b) == 0 && b.param1 == RGB_EFS_CMD && b.param2 == 1);
-    KP_CHECK(strcmp(b.behavior_dev, DEV(rgbs_b)->name) == 0);
-    const struct behavior_driver_api *api = DEV(private_white)->api;
-    KP_CHECK(api->binding_convert_central_state_dependent_params == NULL);
-    b = binding(DEV(private_white), 99, 99);
-    KP_CHECK(kp_rgb_effect_convert_central_state_dependent_params(&b, (struct zmk_behavior_binding_event){0}) == -ENODEV);
-    KP_CHECK(b.param1 == 99 && b.param2 == 99);
+    KP_CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(private_white)));
+    KP_CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
+    KP_CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
+    KP_CHECK(zmk_behavior_get_binding(DEV(rgbs_a)->name) == DEV(rgbs_a));
     KP_CHECK(kp_rgb_selector_control(DEV(selector_a)) == DEV(rgbs_a));
     KP_CHECK(kp_rgb_selector_control(DEV(selector_b)) == DEV(rgbs_b));
     enum behavior_locality locality;
     KP_CHECK(behavior_get_locality(DEV(rgbs_a), &locality) == 0 && locality == BEHAVIOR_LOCALITY_GLOBAL);
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
     struct behavior_parameter_metadata metadata;
     KP_CHECK(behavior_get_parameter_metadata(DEV(rgbs_a), &metadata) == 0 && metadata.sets_len == 4);
     KP_CHECK(metadata.sets[1].param2_values[0].range.max == UINT16_MAX);
@@ -378,6 +376,7 @@ static void conversion(void) {
         uint32_t cmd = metadata.sets[i].param1_values[j].value;
         KP_CHECK(cmd != RGB_TOG_CMD && cmd != RGB_BRI_CMD && cmd != RGB_OFF_CMD);
     }
+#endif
     kp_rgb_matrix_unlock();
 }
 static void validation(void) {
@@ -416,6 +415,7 @@ static void global_commands(void) {
     enum behavior_locality locality;
     KP_CHECK(behavior_get_locality(DEV(rgb_matrix), &locality) == 0);
     KP_CHECK(locality == BEHAVIOR_LOCALITY_GLOBAL);
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
     struct behavior_parameter_metadata metadata;
     KP_CHECK(behavior_get_parameter_metadata(DEV(rgb_matrix), &metadata) == 0);
     const uint32_t advertised[] = {RGB_TOG_CMD, RGB_ON_CMD, RGB_OFF_CMD,
@@ -432,6 +432,7 @@ static void global_commands(void) {
         }
     }
     KP_CHECK(seen == BIT(ARRAY_SIZE(advertised)) - 1);
+#endif
     const uint32_t commands[] = {
         RGB_HUI_CMD, RGB_HUD_CMD, RGB_SAI_CMD, RGB_SAD_CMD, RGB_SPI_CMD, RGB_SPD_CMD,
         RGB_EFS_CMD, RGB_EFF_CMD, RGB_EFR_CMD, RGB_COLOR_HSB_CMD,
@@ -622,7 +623,6 @@ static void isr(const void *arg) {
     KP_CHECK(kp_rgb_selector_binding_convert(NULL, &b) == -EWOULDBLOCK);
     KP_CHECK(convert(&b) == -EWOULDBLOCK);
     KP_CHECK(invoke(DEV(rgbs_a), RGB_HUI_CMD, 0) == -EWOULDBLOCK);
-    b = binding(DEV(probe_a), 0, 0); KP_CHECK(convert(&b) == -EWOULDBLOCK);
     b = binding(DEV(rgb_matrix), RGB_BRI_CMD, 0); KP_CHECK(convert(&b) == -EWOULDBLOCK);
     KP_CHECK(invoke(DEV(rgb_matrix), RGB_BRI_CMD, 0) == -EWOULDBLOCK);
 }
@@ -633,8 +633,6 @@ static void deferred_prepare(void) {
     KP_CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 4321) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-    struct zmk_behavior_binding b = binding(DEV(probe_a), 0, 0);
-    KP_CHECK(convert(&b) == -ENODEV);
     if (kp_test_case("control-deferred")) KP_CHECK(device_init(DEV(rgbs_a)) == 0);
 }
 static int control_prepare(void) {

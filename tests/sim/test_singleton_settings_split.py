@@ -23,7 +23,7 @@ MASK_SCENE = '''
         compatible = "keypaw,rgb-overlay";
         all-leds;
         {"" if MASKS[index // 16] & (1 << (index % 16)) else "condition = <&singleton_closed>;"}
-        mask_fx_{index} {{ compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }};
+        mask_fx_{index} {{ compatible = "keypaw,rgb-matrix-solid"; }};
     }};
 ''' for index in range(1, 32)) + "};\n"
 SINGLETON_CONF = CONF + "CONFIG_KEYPAW_SIM_SINGLETON_SPLIT_TEST=y\n"

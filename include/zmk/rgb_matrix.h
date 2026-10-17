@@ -16,12 +16,6 @@
 
 #include <zmk/rgb_color.h>
 
-#include <drivers/behavior.h>
-#include <zmk/behavior.h>
-#include <zmk/event_manager.h>
-#include <zmk/events/position_state_changed.h>
-#include <zmk/keymap.h>
-
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util_macro.h>
 
@@ -213,23 +207,10 @@ bool kp_rgb_effect_instance_render(struct kp_rgb_effect_instance *instance,
  * rendering any child, including helpers whose render callback will be skipped. */
 void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instance);
 
-struct kp_rgb_effect_api {
-  const struct behavior_driver_api behavior;
-  const struct kp_rgb_effect_callbacks *callbacks;
-};
-
-BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
-             "kp_rgb_effect_api.behavior must be first: the effect api is "
-             "reached as a struct behavior_driver_api *");
-
 /* Call from owner callbacks for independently owned effects. Supply black targets,
  * NULL scratch and the intended timing. This dispatches render unchanged: it does
  * not clear pixels, manage clocks or check engine activity. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
-
-int kp_rgb_effect_convert_central_state_dependent_params(
-    struct zmk_behavior_binding *binding,
-    struct zmk_behavior_binding_event event);
 
 #define KP_RGB_EFFECT_COMMON_CONFIG(inst)                                      \
   .common = {                                                                  \
@@ -295,11 +276,11 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                    !DT_NODE_HAS_PROP(node_id, no_overlays),                    \
                "effect overlays/no-overlays properties have been removed");
 
-#define KP_RGB_EFFECT_CONVERT_HOOK(node_id)                                    \
-  COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
-              (kp_rgb_effect_convert_central_state_dependent_params), (NULL))
-
-/* Initializes parameters before the effect becomes ready. An enabled selector's
+/* Registers an ordinary device. callbacks_expr must point to a lifetime-long,
+ * immutable struct kp_rgb_effect_callbacks table, exposed directly as dev->api.
+ * Select effects through their selector control, not as keymap behaviors.
+ *
+ * Initializes parameters before the effect becomes ready. An enabled selector's
  * children use their DTS color at maximum brightness and their nonzero duration,
  * or the parent's initial-duration-ms when zero; periods are clamped to the
  * configured bounds. Private effects retain COMMON_DATA color and zero-duration
@@ -338,25 +319,9 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                  : kp_rgb_effect_period(dev);))                                \
     return 0;                                                                  \
   }                                                                            \
-  IF_ENABLED(                                                                  \
-      CONFIG_ZMK_BEHAVIOR_METADATA,                                            \
-      (static const struct behavior_parameter_metadata cfg_inst##_metadata = { \
-           .sets_len = 0,                                                      \
-       };))                                                                    \
-  static const struct kp_rgb_effect_api cfg_inst##_api = {                     \
-      .behavior = {.locality = BEHAVIOR_LOCALITY_GLOBAL,                       \
-                   .binding_convert_central_state_dependent_params =           \
-                       KP_RGB_EFFECT_CONVERT_HOOK(node_id),                    \
-                   .binding_pressed = NULL,                                    \
-                   .binding_released = NULL,                                   \
-                   IF_ENABLED(                                                 \
-                       CONFIG_ZMK_BEHAVIOR_METADATA,                           \
-                       (.parameter_metadata = &cfg_inst##_metadata, ))},       \
-      .callbacks = callbacks_expr,                                             \
-  };                                                                           \
-  BEHAVIOR_DT_DEFINE(node_id, cfg_inst##_init, NULL, &cfg_inst##_data,         \
-                     &cfg_inst##_cfg, POST_KERNEL,                             \
-                     KP_RGB_DEVICE_INIT_PRIORITY, &cfg_inst##_api)
+  DEVICE_DT_DEFINE(node_id, cfg_inst##_init, NULL, &cfg_inst##_data,           \
+                   &cfg_inst##_cfg, POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY,  \
+                   callbacks_expr)
 
 /* Conditions are sampled on the control worker, never by a renderer. A variable
  * source must invalidate after a synchronized update; there is no polling fallback.

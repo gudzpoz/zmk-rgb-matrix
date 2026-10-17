@@ -1,6 +1,6 @@
 description: Native control contract effect
 compatible: "test,rgb-control-probe"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 properties:
   axis:
     type: string

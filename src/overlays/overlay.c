@@ -32,20 +32,20 @@ static const struct device *kp_ovl_effect(const struct device *dev) {
 
 static void kp_ovl_reset(const struct device *dev, int64_t now_ms) {
   const struct device *effect = kp_ovl_effect(dev);
-  const struct kp_rgb_effect_api *api = effect->api;
-  if (api->callbacks->reset != NULL) api->callbacks->reset(effect, now_ms);
+  const struct kp_rgb_effect_callbacks *callbacks = effect->api;
+  if (callbacks->reset != NULL) callbacks->reset(effect, now_ms);
 }
 
 static void kp_ovl_set_active(const struct device *dev, bool active, int64_t now_ms) {
   const struct device *effect = kp_ovl_effect(dev);
-  const struct kp_rgb_effect_api *api = effect->api;
-  if (api->callbacks->set_active != NULL) api->callbacks->set_active(effect, active, now_ms);
+  const struct kp_rgb_effect_callbacks *callbacks = effect->api;
+  if (callbacks->set_active != NULL) callbacks->set_active(effect, active, now_ms);
 }
 
 static bool kp_ovl_on_event(const struct device *dev, const struct kp_rgb_key_event *event) {
   const struct device *effect = kp_ovl_effect(dev);
-  const struct kp_rgb_effect_api *api = effect->api;
-  return api->callbacks->on_event != NULL && api->callbacks->on_event(effect, event);
+  const struct kp_rgb_effect_callbacks *callbacks = effect->api;
+  return callbacks->on_event != NULL && callbacks->on_event(effect, event);
 }
 
 static bool kp_ovl_render(const struct device *dev, const struct kp_rgb_frame *frame) {

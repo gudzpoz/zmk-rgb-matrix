@@ -73,7 +73,7 @@ def main():
     compatible = "keypaw,rgb-overlay-selector"; leds = <0 1>;
     condition = <&preview_visible>; initial-effect = <0>;
     collision_effect: collision_effect { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; };
+        };
 }; }; behaviors { colctl {
     compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
     selector = <&collision_selector>;

@@ -473,8 +473,7 @@ static void runtime_parameters(void) {
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
   struct record before_b = *find(SELECTOR_B_PATH "state");
   struct record before_global = *find(ROOT "state");
-  /* A direct effect binding is selection, not a parameter command. */
-  invoke(DEV(probe_a), 0, 0, DEV(rgbs_a));
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot, DEV(rgbs_a));
   k_sleep(K_MSEC(100));
   CHECK(saves == before + 1);
   durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
@@ -484,7 +483,7 @@ static void runtime_parameters(void) {
   CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
   CHECK(find(before_b.name)->len == before_b.len);
   CHECK(!memcmp(find(before_b.name)->bytes, before_b.bytes, before_b.len));
-  invoke(DEV(probe_b), 0, 0, DEV(rgbs_b));
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_b))->slot, DEV(rgbs_b));
   k_sleep(K_MSEC(100)); CHECK(saves == before + 2);
   CHECK(!strcmp(journal[1].path, SELECTOR_B_PATH "state"));
   durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);

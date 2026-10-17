@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <drivers/behavior.h>
+#include <errno.h>
 #include <dt-bindings/keypaw/rgb_matrix.h>
 #include <zephyr/sys/util.h>
+#include <zmk/behavior.h>
 #include <zmk/rgb_matrix.h>
 
-#include "rgb_matrix_internal.h"
+#include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
 
 size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector) {
@@ -262,30 +263,4 @@ int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,
   return err < 0 ? err
                  : kp_rgb_selector_dispatch_locked(selector, binding.param1,
                                                    binding.param2);
-}
-
-int kp_rgb_effect_convert_central_state_dependent_params(
-    struct zmk_behavior_binding *binding,
-    struct zmk_behavior_binding_event event) {
-  ARG_UNUSED(event);
-  if (k_is_in_isr())
-    return -EWOULDBLOCK;
-  const struct device *fx = zmk_behavior_get_binding(binding->behavior_dev);
-  if (fx == NULL || !device_is_ready(fx))
-    return -ENODEV;
-  kp_rgb_matrix_lock();
-  const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(fx);
-  struct kp_rgb_selector *selector =
-      cfg == NULL ? NULL : kp_rgb_selector_overlay_state_locked(cfg->owner);
-  const struct device *control =
-      cfg == NULL ? NULL : kp_rgb_selector_control(cfg->owner);
-  int slot = selector == NULL ? -ENOENT : kp_rgb_selector_member_slot(selector, fx);
-  int err = slot < 0 || control == NULL || !device_is_ready(control) ? -ENODEV : 0;
-  if (err == 0) {
-    binding->behavior_dev = control->name;
-    binding->param1 = RGB_EFS_CMD;
-    binding->param2 = (uint32_t)slot;
-  }
-  kp_rgb_matrix_unlock();
-  return err;
 }

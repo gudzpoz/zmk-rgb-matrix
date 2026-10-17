@@ -37,21 +37,22 @@ CASES = {
 &fx_solid { duration = <0xffffffff>; };
 &fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
 '''),
+    # The separately owned example binding still requires this property.
     "external-effect": (True, '''
 &preview_selector { external_example { compatible = "keypaw,rgb-matrix-example";
     #binding-cells = <0>; }; };
 '''),
     "arbitrary-effect-parent": (True, '''
 / { arbitrary_effect_parent { nested_effect { compatible = "keypaw,rgb-matrix-rainbow";
-    #binding-cells = <0>; duration = <321>; }; }; };
+    duration = <321>; }; }; };
 '''),
     "two-child-overlay": (True, '''
 &rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+    first { compatible = "keypaw,rgb-matrix-reactive";
         color = <0x20ff40>; duration = <700>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
+    second { compatible = "keypaw,rgb-matrix-rainbow";
         duration = <1800>; };
 }; };
 '''),
@@ -59,9 +60,9 @@ CASES = {
 &rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
     all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
+    first { compatible = "keypaw,rgb-matrix-reactive";
         color = <0xa040ff>; duration = <900>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
+    second { compatible = "keypaw,rgb-matrix-rainbow";
         duration = <2300>; };
 }; };
 '''),
@@ -81,7 +82,7 @@ CASES = {
     "removed-global-alias": (False, '&rgb_matrix { selector = <&preview_selector>; };'),
     "controller-leds": (False, "&rgb_matrix { leds = <0 1>; };"),
     "flat-controller-child": (False, '''&rgb_matrix { flat_effect {
-        compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        compatible = "keypaw,rgb-matrix-solid";
     }; };'''),
     "removed-overlays": (False, '&fx_solid { overlays = <&fixture_overlay>; };'),
     "removed-no-overlays": (False, '&fx_solid { no-overlays; };'),
@@ -94,11 +95,11 @@ CASES = {
     "missing-child": (False, "&fixture_overlay { /delete-node/ fx_fixture; };"),
     "two-enabled-children": (False, '''
 &fixture_overlay { second { compatible = "keypaw,rgb-matrix-solid";
-    #binding-cells = <0>; }; };
+    }; };
 '''),
     "disabled-sibling": (True, '''
 &fixture_overlay { disabled { compatible = "keypaw,rgb-matrix-solid";
-    #binding-cells = <0>; status = "disabled"; }; };
+    status = "disabled"; }; };
 '''),
     "shared-selection-gate": (True, '''
 &rgb_conditions { selected_preview: selected_preview {
@@ -111,10 +112,14 @@ CASES = {
     "removed-heatmap-slim": (False, '&fx_heatmap_no_spread { slim; };'),
     "heatmap-spread-zero": (True, '''
 &preview_selector { heatmap_zero { compatible = "keypaw,rgb-matrix-heatmap";
-    #binding-cells = <0>; spread = <0>; }; };
+    spread = <0>; }; };
 '''),
     "removed-selector-persist-id": (False, '&preview_selector { persist-id = "preview"; };'),
     "removed-effect-persist-id": (False, '&fx_solid { persist-id = "solid"; };'),
+    # Zephyr permits undeclared #-properties; this does not register a behavior.
+    "inert-effect-binding-cells": (True, '&fx_solid { #binding-cells = <0>; };'),
+    "removed-effect-display-name": (False, '&fx_solid { display-name = "Solid"; };'),
+    "direct-effect-keymap-binding": (False, ""),
 }
 
 
@@ -139,6 +144,8 @@ DIAGNOSTICS = {
     "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
     "removed-heatmap-slim": r"['\"]slim['\"].*not declared|unknown property.*slim",
     "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
+    "removed-effect-display-name": r"['\"]display-name['\"].*not declared|properties have been removed",
+    "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
 for effect in ("rain", "starlight"):
@@ -146,7 +153,7 @@ for effect in ("rain", "starlight"):
         name = f"{effect}-interval-{interval}"
         CASES[name] = (1 <= interval <= 65535, f'''
 &preview_selector {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
-    #binding-cells = <0>; step-interval-ms = <({interval})>; }}; }};
+    step-interval-ms = <({interval})>; }}; }};
 ''')
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
 
@@ -170,6 +177,8 @@ def main():
         config.mkdir(parents=True, exist_ok=True)
         for filename in ("native_sim.conf", "native_sim.keymap"):
             text = (SIM / "config" / filename).read_text()
+            if filename.endswith(".keymap") and name == "direct-effect-keymap-binding":
+                text = text.replace("                &none", "                &fx_reactive", 1)
             if filename.endswith(".conf") and name == "no-controller":
                 text += "\nCONFIG_KEYPAW_RGB_MATRIX=y\n"
             if filename.endswith(".conf") and name.startswith("startup-priority-"):

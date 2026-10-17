@@ -5,7 +5,7 @@ description: Reactive keypress-fade RGB matrix effect, extended with spread shap
   a gradient palette and a complement palette (SOLID_REACTIVE_* / *_CROSS /
   *_NEXUS / SPLASH / COMPLEMENT families).
 compatible: "keypaw,rgb-matrix-reactive"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   background-brightness:

@@ -48,7 +48,6 @@
 
         smoke_solid: smoke_solid {
             compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>;
             color = <0x00FF00>;
         };
     };

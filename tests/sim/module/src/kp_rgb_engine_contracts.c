@@ -6,6 +6,7 @@
 #include <zephyr/irq_offload.h>
 #include <zephyr/init.h>
 #include <zmk/activity.h>
+#include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>

@@ -5,7 +5,7 @@ description: |
   Per-key heat map of recent keypresses, decaying over time. Port of QMK's
   TYPING_HEATMAP.
 compatible: "keypaw,rgb-matrix-heatmap"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   decrease-delay-ms:

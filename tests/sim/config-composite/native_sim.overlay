@@ -64,7 +64,6 @@
             all-leds;
             fx_static: fx-static {
                 compatible = "keypaw,rgb-matrix-static";
-                #binding-cells = <0>;
                 led-colors = <0x102030 0x405060 0x708090 0xa0b0c0 0xd0e0f0>;
             };
         };

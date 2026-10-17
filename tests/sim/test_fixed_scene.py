@@ -22,7 +22,7 @@ SCENE = '''
         all-leds;
         condition = <&fixture_latch>;
         status_color: status_color { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; color = <0x804020>; };
+            color = <0x804020>; };
     };
 };
 / { behaviors { /delete-node/ rgbs; }; };

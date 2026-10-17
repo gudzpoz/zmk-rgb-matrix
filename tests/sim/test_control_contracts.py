@@ -16,6 +16,7 @@ SCENARIOS = {
     "control-noop": "controls",
     "control-peripheral": "peripheral",
     "control-conversion": "controls",
+    "control-conversion-metadata-off": "controls-metadata-off",
     "control-validation": "controls",
     "control-global-commands": "controls",
     "control-reset": "controls",
@@ -49,7 +50,10 @@ def main():
     fixture = (SIM / "config/control_contracts.overlay").read_text()
     for image in dict.fromkeys(SCENARIOS[s] for s in selected):
         fragment, selectors, conf = fixture, None, CONF
-        if image == "large-step":
+        if image == "controls-metadata-off":
+            conf += "CONFIG_ZMK_BEHAVIOR_METADATA=n\n"
+            fragment += "&probe_a { #binding-cells = <0>; };\n"
+        elif image == "large-step":
             conf += "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=100000\n"
         elif image == "deferred":
             fragment += "&rgbs_a { compatible = \"test,rgb-control-late\", \"keypaw,behavior-rgb-selector\"; zephyr,deferred-init; };\n"
@@ -103,7 +107,7 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
         for scenario in selected:
             if SCENARIOS[scenario] == image:
                 for _ in range(args.repeat):
-                    run(root, image, scenario)
+                    run(root, image, "control-conversion" if scenario == "control-conversion-metadata-off" else scenario)
                 print(f"PASS {scenario} x{args.repeat}", flush=True)
 
 

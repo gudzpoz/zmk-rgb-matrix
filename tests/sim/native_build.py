@@ -25,11 +25,11 @@ SELECTORS = '''
         condition = <&preview_visible>;
         initial-effect = <0>;
         disabled { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; status = "disabled"; };
+            status = "disabled"; };
         probe_a: a_static { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x00ff00>; };
+            color = <0x00ff00>; };
         probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x0000ff>; animate; };
+            color = <0x0000ff>; animate; };
     };
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector";
@@ -38,15 +38,15 @@ SELECTORS = '''
         initial-effect = <99>;
         initial-duration-ms = <0xffffffff>;
         probe_b: b_static { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0xffff00>; };
+            color = <0xffff00>; };
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-selector-probe";
-            #binding-cells = <0>; color = <0x00ffff>; duration = <0>; };
+            color = <0x00ffff>; duration = <0>; };
     };
     ordinary: ordinary {
         compatible = "keypaw,rgb-overlay";
         leds = <1>;
         condition = <&preview_visible>;
-        private_white: white { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; color = <0xffffff>; };
+        private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
     };
 };
 / {
@@ -80,7 +80,9 @@ def build(root, name, fragment, runtime=False, selectors=None, extra_conf=""):
     for filename in ("native_sim.conf", "native_sim.keymap"):
         (config / filename).write_text((SIM / "config" / filename).read_text())
     with (config / "native_sim.conf").open("a") as output:
-        output.write("\nCONFIG_ASSERT=y\nCONFIG_ZMK_BEHAVIOR_METADATA=y\n")
+        output.write("\nCONFIG_ASSERT=y\n")
+        if "CONFIG_ZMK_BEHAVIOR_METADATA=" not in extra_conf:
+            output.write("CONFIG_ZMK_BEHAVIOR_METADATA=y\n")
         if runtime:
             output.write("CONFIG_KEYPAW_SIM_SELECTOR_TEST=y\n")
         output.write(extra_conf)

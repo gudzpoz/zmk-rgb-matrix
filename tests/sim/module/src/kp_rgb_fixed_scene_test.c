@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include <stdlib.h>
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zmk/behavior.h>
 #include <zmk/rgb_matrix.h>
@@ -40,8 +41,6 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(!strcmp(DEV(rgb_matrix)->name, "rgb"));
   const struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(status_color))->color;
   CHECK(kp_rgb_effect_cfg(DEV(status_color))->owner == NULL);
-  CHECK(((const struct kp_rgb_effect_api *)DEV(status_color)->api)
-            ->behavior.binding_convert_central_state_dependent_params == NULL);
   CHECK(zmk_rgb_matrix_set_color(DEV(status_color), &color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(status_color), 1000) == 0);
   kp_rgb_matrix_lock();

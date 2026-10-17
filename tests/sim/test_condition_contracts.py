@@ -45,30 +45,30 @@ FIXTURE = '''
 &rgb_matrix {
     cc_shared: cc_shared { compatible = "keypaw,rgb-overlay"; condition = <&cc_selected_a>;
         local; leds = <4>; ccwh1 { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; color = <0xffffff>; }; };
+        color = <0xffffff>; }; };
     cc_shared2: cc_shared2 { compatible = "keypaw,rgb-overlay"; condition = <&cc_selected_a>;
         local; leds = <5>; ccwh2 { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; color = <0xffffff>; }; };
+        color = <0xffffff>; }; };
     cc_opposite: cc_opposite { compatible = "keypaw,rgb-overlay"; condition = <&cc_selected_c>;
         local; leds = <6>; ccwh3 { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; color = <0xffffff>; }; };
+        color = <0xffffff>; }; };
     cc_event_gate: cc_event_gate { compatible = "keypaw,rgb-overlay"; condition = <&cc_event>;
         local; leds = <7>; ccwh4 { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; color = <0xffffff>; }; };
+        color = <0xffffff>; }; };
     cc_event_b_gate: cc_event_b_gate { compatible = "keypaw,rgb-overlay";
         condition = <&cc_event_b>; local; leds = <11>;
-        ccwh10 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
+        ccwh10 { compatible = "keypaw,rgb-matrix-solid"; }; };
     cc_remote: cc_remote { compatible = "keypaw,rgb-overlay"; condition = <&cc_central>;
         leds = <8>; ccwh5 { compatible = "keypaw,rgb-matrix-solid";
-        #binding-cells = <0>; color = <0xffffff>; }; };
+        color = <0xffffff>; }; };
     cc_transparent: cc_transparent { compatible = "keypaw,rgb-overlay";
         condition = <&cc_root>; local; all-leds; opacity = <0>;
-        ccwh6 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
+        ccwh6 { compatible = "keypaw,rgb-matrix-solid"; }; };
     cc_half: cc_half { compatible = "keypaw,rgb-overlay";
         condition = <&cc_root>; local; all-leds; opacity = <50>;
-        ccwh8 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
+        ccwh8 { compatible = "keypaw,rgb-matrix-solid"; }; };
     cc_empty: cc_empty { compatible = "keypaw,rgb-overlay"; local;
-        ccwh7 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
+        ccwh7 { compatible = "keypaw,rgb-matrix-solid"; }; };
 };
 / { behaviors { ccact: ccact { compatible = "test,rgb-condition-contract-action";
         #binding-cells = <2>; }; };
@@ -125,7 +125,7 @@ VARIANTS = {
 };
 &rgb_matrix { cc_latchgate: cc_latchgate {
     compatible = "keypaw,rgb-overlay"; local; condition = <&fixture_latch>; leds = <10>;
-    ccwh9 { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
+    ccwh9 { compatible = "keypaw,rgb-matrix-solid"; };
 }; };
 ''', ''),
 }

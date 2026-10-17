@@ -1,6 +1,7 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
+include: [base.yaml]
 properties:
   color:
     type: int

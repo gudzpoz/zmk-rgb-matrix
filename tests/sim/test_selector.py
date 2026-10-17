@@ -35,7 +35,7 @@ CONTROL_CASES = {
                            r"RGB selector control must reference a selector overlay"),
     "disabled-control-target": ('''&rgb_matrix { disabled_selector: disabled_selector {
         compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
-        child { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
+        child { compatible = "keypaw,rgb-matrix-solid"; };
         }; }; / { behaviors { badctl {
         compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
         selector = <&disabled_selector>; }; }; };''',
@@ -74,25 +74,25 @@ SELECTED_GATES = '''
         compatible = "keypaw,rgb-overlay"; local;
         condition = <&selected_a>; leds = <4>;
         white_s { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; color = <0xffffff>; };
+            color = <0xffffff>; };
     };
     central_gate: central_gate {
         compatible = "keypaw,rgb-overlay";
         condition = <&selected_a>; leds = <5>;
         white_c { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; color = <0xffffff>; };
+            color = <0xffffff>; };
     };
     opposite_gate: opposite_gate {
         compatible = "keypaw,rgb-overlay"; local;
         condition = <&selected_c>; leds = <7>;
         cyan { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; color = <0x00ffff>; };
+            color = <0x00ffff>; };
     };
     event_gate: event_gate {
         compatible = "keypaw,rgb-overlay"; local;
         condition = <&event_selected>; leds = <6>;
         white_e { compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>; color = <0xffffff>; };
+            color = <0xffffff>; };
     };
 };
 '''
@@ -110,7 +110,7 @@ SELECTED_CASES = {
     "wrong-effect": ('&selected_a { effect = <&fixture_latch>; };',
                      r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
     "disabled-effect": ('''&selector_a { disabled_probe: disabled_probe {
-        compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;
+        compatible = "keypaw,rgb-matrix-solid";
         status = "disabled"; }; };
         &selected_a { effect = <&disabled_probe>; };''',
                         r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),

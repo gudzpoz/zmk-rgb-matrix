@@ -17,15 +17,15 @@ OVERLAY = '''
         compatible = "keypaw,rgb-overlay-selector";
         initial-duration-ms = <2345>;
         default_ready: ready {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             color = <0x008000>; duration = <0>;
         };
         hole: disabled_member {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             status = "disabled";
         };
         default_explicit: explicit {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             color = <0x000080>; duration = <0xffffffff>;
         };
     };
@@ -33,14 +33,14 @@ OVERLAY = '''
         compatible = "keypaw,rgb-overlay-selector";
         initial-duration-ms = <0>;
         default_late: late {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             color = <0x808000>; zephyr,deferred-init;
         };
     };
     default_private_owner: default_private_owner {
         compatible = "keypaw,rgb-overlay";
         default_private: private {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             color = <0x800000>; duration = <0>;
         };
     };
@@ -48,7 +48,7 @@ OVERLAY = '''
         compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
         initial-duration-ms = <2345>;
         default_disabled_child: child {
-            compatible = "test,rgb-default-effect"; #binding-cells = <0>;
+            compatible = "test,rgb-default-effect";
             color = <0x800000>; duration = <0>;
         };
     };
@@ -82,7 +82,7 @@ def run_variant(root, settings):
     (plugin / "dts/bindings").mkdir(parents=True)
     (plugin / "dts/bindings/test,rgb-default-effect.yaml").write_text(
         'description: Defaults test effect\ncompatible: "test,rgb-default-effect"\n'
-        'include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]\n'
+        'include: "keypaw,rgb-matrix-effect-common.yaml"\n'
         'properties:\n  zephyr,deferred-init:\n    type: boolean\n')
     (plugin / "CMakeLists.txt").write_text(
         "zephyr_library()\nzephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)\n"
