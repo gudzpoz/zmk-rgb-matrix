@@ -49,16 +49,21 @@ BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS <=
                "keypaw,rgb-matrix: invalid mapping entry");
 DT_FOREACH_PROP_ELEM(KP_RGB_NODE, mapping, KP_MAP_ENTRY_ASSERT);
 
+#define KP_RGB_INITIAL_ON DT_PROP_OR(KP_RGB_NODE, initial_on, 1)
+#define KP_RGB_INITIAL_BRIGHTNESS                                              \
+  CLAMP((int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30), 0,           \
+        KP_RGB_BRT_MAX)
+
+const struct kp_rgb_config kp_rgb_config = {
+    .initial_on = KP_RGB_INITIAL_ON,
+    .initial_brightness = KP_RGB_INITIAL_BRIGHTNESS,
+    .max_brightness = DT_PROP_OR(KP_RGB_NODE, max_brightness, 40),
+    .idle_brightness = DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30),
+};
+
 struct kp_rgb_global kp_rgb_global = {
-    .user_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
-    .brightness = CLAMP((int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
-                        0, KP_RGB_BRT_MAX),
-    .initial_on = DT_PROP_OR(KP_RGB_NODE, initial_on, 1),
-    .initial_brightness = DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30),
-    .tuning = {
-        .max_brightness = DT_PROP_OR(KP_RGB_NODE, max_brightness, 40),
-        .idle_brightness = DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30),
-    },
+    .user_on = KP_RGB_INITIAL_ON,
+    .brightness = KP_RGB_INITIAL_BRIGHTNESS,
 };
 
 static const uint32_t kp_map[KP_LED_COUNT] = DT_PROP(KP_RGB_NODE, mapping);
@@ -119,7 +124,6 @@ static struct led_rgb scratch[KP_LED_COUNT];
    (pre-brightness). */
 static struct led_rgb kp_rgb_prefix[KP_LED_COUNT];
 static size_t kp_rgb_prefix_len;
-static bool kp_rgb_prefix_valid;
 
 static K_MUTEX_DEFINE(kp_rgb_lock);
 static atomic_t kp_rgb_output_allowed;
@@ -377,7 +381,7 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   }
 
   if (allowed && (paint || kp_rgb_scene_dirty || input_changed)) {
-    bool reuse = kp_rgb_prefix_valid && !kp_rgb_scene_dirty && !input_changed;
+    bool reuse = kp_rgb_prefix_len != 0 && !kp_rgb_scene_dirty && !input_changed;
     size_t skip = reuse ? kp_rgb_prefix_len : 0;
     size_t prefix_count = 0;
     if (reuse) {
@@ -420,11 +424,10 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
     }
     if (!reuse) {
       kp_rgb_prefix_len = prefix_count;
-      kp_rgb_prefix_valid = prefix_count > 0;
     }
 
-    uint8_t cap = frame.is_idle ? kp_rgb_global.tuning.idle_brightness
-                                : kp_rgb_global.tuning.max_brightness;
+    uint8_t cap = frame.is_idle ? kp_rgb_config.idle_brightness
+                                : kp_rgb_config.max_brightness;
     uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_global.brightness) /
                                    KP_RGB_BRT_MAX);
     for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -571,7 +574,6 @@ void kp_rgb_reconcile_power_locked(void) {
     const struct device *const *overlays = kp_rgb_overlay_list();
     for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
       if (overlays[i] == NULL) continue;
-      kp_rgb_overlay_scenes[i].state.animating = false;
       kp_rgb_overlay_scenes[i].reset_pending = true;
     }
     kp_rgb_next_frame_ms = INT64_MAX;
@@ -708,15 +710,13 @@ int zmk_rgb_matrix_get_user_state(bool *user_on) {
   return 0;
 }
 
-int kp_rgb_apply_defaults(void) {
+void kp_rgb_apply_defaults(void) {
   kp_rgb_matrix_lock();
-  kp_rgb_global.user_on = kp_rgb_global.initial_on;
-  kp_rgb_global.brightness =
-      (uint8_t)CLAMP(kp_rgb_global.initial_brightness, 0, KP_RGB_BRT_MAX);
+  kp_rgb_global.user_on = kp_rgb_config.initial_on;
+  kp_rgb_global.brightness = kp_rgb_config.initial_brightness;
   kp_rgb_reconcile_power_locked();
   zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();
-  return 0;
 }
 
 static bool kp_rgb_parameter_target_ready(const struct device *fx) {

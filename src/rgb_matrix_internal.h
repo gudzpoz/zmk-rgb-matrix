@@ -20,19 +20,19 @@
 
 #include "rgb_selector_internal.h"
 
-struct kp_rgb_tuning {
+struct kp_rgb_config {
+  bool initial_on;
+  uint8_t initial_brightness;
   uint8_t max_brightness;
   uint8_t idle_brightness;
 };
 
 struct kp_rgb_global {
   bool user_on;
-  struct kp_rgb_tuning tuning;
   uint8_t brightness;
-  bool initial_on;
-  int32_t initial_brightness;
 };
 
+extern const struct kp_rgb_config kp_rgb_config;
 extern struct kp_rgb_global kp_rgb_global;
 
 void kp_rgb_callbacks_set_active(const struct device *dev,
@@ -100,14 +100,13 @@ void kp_rgb_overlay_conditions_init(void);
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_TRIGGERS)
 void kp_rgb_triggers_init(void);
 void kp_rgb_triggers_begin(void);
-bool kp_rgb_triggers_evaluate(int64_t now_ms);
+void kp_rgb_triggers_evaluate(int64_t now_ms);
 void kp_rgb_triggers_quarantine(void);
 #else
 static inline void kp_rgb_triggers_init(void) {}
 static inline void kp_rgb_triggers_begin(void) {}
-static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
+static inline void kp_rgb_triggers_evaluate(int64_t now_ms) {
   ARG_UNUSED(now_ms);
-  return false;
 }
 static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
@@ -125,5 +124,5 @@ int kp_rgb_save_selector_state(const struct device *selector, bool reset);
 int kp_rgb_settings_commit(void);
 
 /* Restore global defaults and reconcile local output permission. */
-int kp_rgb_apply_defaults(void);
+void kp_rgb_apply_defaults(void);
 void kp_rgb_reset_state(void);

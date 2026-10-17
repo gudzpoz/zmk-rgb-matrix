@@ -86,17 +86,17 @@ static void matrix_defaults(void) {
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     KP_CHECK(KP_RGB_OVERLAY_WORDS == 1);
     int32_t initial = (int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30);
-    KP_CHECK(kp_rgb_global.initial_brightness == initial);
+    KP_CHECK(kp_rgb_config.initial_brightness == CLAMP(initial, 0, 100));
     KP_CHECK(kp_rgb_global.brightness == CLAMP(initial, 0, 100));
     KP_CHECK(kp_rgb_global.user_on == DT_PROP(KP_RGB_NODE, initial_on));
-    KP_CHECK(kp_rgb_global.initial_on == DT_PROP(KP_RGB_NODE, initial_on));
-    KP_CHECK(kp_rgb_global.tuning.max_brightness == DT_PROP_OR(KP_RGB_NODE, max_brightness, 40));
-    KP_CHECK(kp_rgb_global.tuning.idle_brightness == DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30));
+    KP_CHECK(kp_rgb_config.initial_on == DT_PROP(KP_RGB_NODE, initial_on));
+    KP_CHECK(kp_rgb_config.max_brightness == DT_PROP_OR(KP_RGB_NODE, max_brightness, 40));
+    KP_CHECK(kp_rgb_config.idle_brightness == DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30));
     KP_CHECK(device_is_ready(DEV(rgb_matrix)));
     KP_CHECK(strcmp(DEV(rgb_matrix)->name, "rgb") == 0);
     KP_CHECK(zmk_rgb_matrix_off() == 0);
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 7; kp_rgb_matrix_unlock();
-    KP_CHECK(kp_rgb_apply_defaults() == 0);
+    kp_rgb_apply_defaults();
     KP_CHECK(user_on() == DT_PROP(KP_RGB_NODE, initial_on));
     KP_CHECK(kp_rgb_global.brightness == CLAMP(initial, 0, 100));
 }
@@ -288,10 +288,10 @@ static void global_defaults(void) {
     KP_CHECK(invoke(DEV(rgb_matrix), RGB_BRT_SET_CMD, 17) == 0);
     KP_CHECK(zmk_rgb_matrix_off() == 0);
     unsigned count = callback_count();
-    KP_CHECK(kp_rgb_apply_defaults() == 0);
-    KP_CHECK(kp_rgb_global.brightness == CLAMP(kp_rgb_global.initial_brightness, 0, 100));
-    KP_CHECK(kp_rgb_global.user_on == kp_rgb_global.initial_on);
-    KP_CHECK(kp_rgb_global.tuning.max_brightness == 100 && kp_rgb_global.tuning.idle_brightness == 100);
+    kp_rgb_apply_defaults();
+    KP_CHECK(kp_rgb_global.brightness == CLAMP((int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30), 0, 100));
+    KP_CHECK(kp_rgb_global.user_on == DT_PROP(KP_RGB_NODE, initial_on));
+    KP_CHECK(kp_rgb_config.max_brightness == 100 && kp_rgb_config.idle_brightness == 100);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 47);

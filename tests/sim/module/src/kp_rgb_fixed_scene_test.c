@@ -46,8 +46,8 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(zmk_rgb_matrix_set_period(DEV(status_color), 1000) == 0);
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_global.brightness == 50);
-  CHECK(kp_rgb_global.tuning.max_brightness == 75);
-  CHECK(kp_rgb_global.tuning.idle_brightness == 25);
+  CHECK(kp_rgb_config.max_brightness == 75);
+  CHECK(kp_rgb_config.idle_brightness == 25);
   kp_rgb_matrix_unlock();
   check_gate(false);
   mark("empty");

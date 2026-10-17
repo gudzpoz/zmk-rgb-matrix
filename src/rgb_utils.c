@@ -22,12 +22,7 @@ size_t kp_rgb_overlay_target_count(const struct device *dev) {
 
 /* Appends `led` unless it is already present, so an LED named twice (or by both
  * the key and raw-LED lists) is painted once. */
-static void kp_rgb_target_add(size_t *out, size_t *n, size_t out_max,
-                              size_t led) {
-  if (*n >= out_max) {
-    return;
-  }
-
+static void kp_rgb_target_add(size_t *out, size_t *n, size_t led) {
   for (size_t j = 0; j < *n; j++) {
     if (out[j] == led) {
       return;
@@ -45,13 +40,13 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
   for (size_t i = 0; i < keys_len && n < out_max; i++) {
     size_t led = kp_rgb_led_for_position(keys[i]);
     if (led != SIZE_MAX) {
-      kp_rgb_target_add(out, &n, out_max, led);
+      kp_rgb_target_add(out, &n, led);
     }
   }
 
   for (size_t i = 0; i < leds_len && n < out_max; i++) {
     if (leds[i] < KP_LED_COUNT) {
-      kp_rgb_target_add(out, &n, out_max, leds[i]);
+      kp_rgb_target_add(out, &n, leds[i]);
     }
   }
 

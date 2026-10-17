@@ -265,7 +265,7 @@ int kp_rgb_save_selector_state(const struct device *selector, bool reset) {
 
 void kp_rgb_reset_state(void) {
   kp_rgb_matrix_lock();
-  (void)kp_rgb_apply_defaults();
+  kp_rgb_apply_defaults();
   kp_rgb_selector_overlays_defaults_locked();
   kp_rgb_request_runtime_reset_locked();
 #if IS_ENABLED(CONFIG_SETTINGS)
