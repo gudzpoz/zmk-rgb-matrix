@@ -107,7 +107,7 @@ SELECTED_CASES = {
                           '&rgbs_b { status = "disabled"; }; '
                           '&selected_a { selector = <&selector_b>; };',
                           r'static assertion failed: "selected-effect condition requires an enabled selector overlay"'),
-    "wrong-effect": ('&selected_a { effect = <&fixture_always>; };',
+    "wrong-effect": ('&selected_a { effect = <&fixture_latch>; };',
                      r'static assertion failed: "selected-effect condition requires an enabled effect member of its selector"'),
     "disabled-effect": ('''&selector_a { disabled_probe: disabled_probe {
         compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>;

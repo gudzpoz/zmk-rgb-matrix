@@ -25,7 +25,6 @@ struct kp_eff_heatmap_config {
   uint16_t spread;            /* layout-unit radius for neighbour heating */
   uint8_t area_limit;         /* cap on neighbour heat contribution */
   uint8_t increase_step;      /* shades added per keypress */
-  bool slim;                  /* skip neighbour spread */
 };
 
 struct kp_eff_heatmap_data {
@@ -121,7 +120,7 @@ static void kp_eff_heatmap_apply(const struct device *dev,
   }
 
   data->temp[led] = MIN(255u, (uint32_t)data->temp[led] + cfg->increase_step);
-  if (cfg->slim || cfg->spread == 0) {
+  if (cfg->spread == 0) {
     return;
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -210,7 +209,6 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
       .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
       .area_limit = DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16),             \
       .increase_step = DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32),       \
-      .slim = DT_PROP_OR(DT_DRV_INST(inst), slim, 0),                          \
   };                                                                           \
   static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {           \
       KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \

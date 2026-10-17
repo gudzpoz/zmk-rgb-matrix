@@ -48,7 +48,6 @@ CASES = {
     "two-child-overlay": (True, '''
 &rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
-    condition = <&fixture_always>;
     all-leds;
     first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
         color = <0x20ff40>; duration = <700>; };
@@ -109,6 +108,11 @@ CASES = {
 &fixture_overlay { condition = <&selected_preview>; };
 &fixture_battery { condition = <&selected_preview>; };
 '''),
+    "removed-heatmap-slim": (False, '&fx_heatmap_no_spread { slim; };'),
+    "heatmap-spread-zero": (True, '''
+&preview_selector { heatmap_zero { compatible = "keypaw,rgb-matrix-heatmap";
+    #binding-cells = <0>; spread = <0>; }; };
+'''),
     "removed-selector-persist-id": (False, '&preview_selector { persist-id = "preview"; };'),
     "removed-effect-persist-id": (False, '&fx_solid { persist-id = "solid"; };'),
 }
@@ -133,6 +137,7 @@ DIAGNOSTICS = {
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
     "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
+    "removed-heatmap-slim": r"['\"]slim['\"].*not declared|unknown property.*slim",
     "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
 }
 

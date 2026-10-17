@@ -85,21 +85,19 @@ VARIANTS = ('normal', 'zero', 'idle-off', 'idle-dim', 'empty', 'no-active', 'boo
 FIRST = '''
 composition_first: composition_first {
     compatible = "keypaw,rgb-overlay"; opacity = <37>; leds = <1>;
-    condition = <&fixture_always>;
     first_child { compatible = "keypaw,native-engine-effect"; slot = <0>; };
 };
 '''
 SECOND = '''
 composition_second: composition_second {
     compatible = "keypaw,rgb-overlay"; opacity = <61>; leds = <1 0>;
-    condition = <&fixture_always>;
     second_child { compatible = "keypaw,native-engine-effect"; slot = <1>; };
 };
 '''
 FILTER = '''
 composition_filter {
     compatible = "keypaw,native-engine-overlay"; slot = <4>; filter;
-    all-leds; condition = <&fixture_always>;
+    all-leds;
 };
 '''
 

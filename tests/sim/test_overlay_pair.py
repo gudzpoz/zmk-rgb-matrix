@@ -20,7 +20,6 @@ WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west
 PAIR = '''
 &rgb_matrix { fixture_pair: fixture_pair {
     compatible = "keypaw,rgb-overlay-pair";
-    condition = <&fixture_always>;
     all-leds;
     first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
         color = <0x20ff40>; duration = <650>; };

@@ -483,13 +483,12 @@ to a copy-and-pastable devicetree snippet that produced it.
 <tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap">heatmap</a></code></td>
     <td>Per-key heat map of recent keypresses, decaying over time (QMK <code>TYPING_HEATMAP</code>).</td>
     <td><code>decrease-delay-ms</code> (ms idle before one shade of heat is lost)<br>
-        <code>spread</code> (radius heating neighbours, layout units)<br>
+        <code>spread</code> (radius heating neighbours, layout units; 0 heats only the pressed key)<br>
         <code>area-limit</code> (per-press cap on heat a neighbour receives)<br>
-        <code>increase-step</code> (shades added per keypress)<br>
-        <code>slim</code> (heat only the pressed key, not neighbours)</td></tr>
+        <code>increase-step</code> (shades added per keypress)</td></tr>
 <tr><td colspan="3">
 <a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap">default</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/heatmap.gif" width="200" alt="Heatmap" title="Heatmap"><br>
-<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap-slim">slim</a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/heatmap-slim.gif" width="200" alt="Heatmap (slim)" title="Heatmap (slim)">
+<a href="https://gudzpoz.github.io/zmk-rgb-matrix/#heatmap-slim"><code>spread = &lt;0&gt;</code></a>: <img src="https://gudzpoz.github.io/zmk-rgb-matrix/heatmap-slim.gif" width="200" alt="Heatmap (no spread)" title="Heatmap (no spread)">
 </td></tr>
 <tr><td><code><a href="https://gudzpoz.github.io/zmk-rgb-matrix/#digital-rain">digital_rain</a></code></td>
     <td>Matrix-style falling columns: a head falls per column leaving a fading green tail.</td>

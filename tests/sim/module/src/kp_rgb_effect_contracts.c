@@ -366,7 +366,7 @@ static void random_timing(void) {
     if (KP_LED_COUNT) KP_CHECK(rgb_equal(pixels[0], (struct led_rgb){0, 40, 40}));
 }
 static void feedback(void) {
-    const struct device *feedback_devices[] = {DEV(effects_reactive_a), DEV(effects_heat), DEV(fx_ripple)};
+    const struct device *feedback_devices[] = {DEV(effects_reactive_a), DEV(effects_heat_no_spread), DEV(fx_ripple)};
     for (size_t n = 0; n < ARRAY_SIZE(feedback_devices); n++) {
         const struct device *dev = feedback_devices[n];
         const struct kp_rgb_effect_callbacks *cb = callbacks(dev);
@@ -376,6 +376,11 @@ static void feedback(void) {
         inject(dev, 0, epoch + 1000);
         frame.local_ms = epoch + 1000; frame.elapsed_ms = 0; clear_targets();
         KP_CHECK(kp_rgb_effect_render(dev, &frame) == (KP_LED_COUNT > 0));
+        if (n == 1 && KP_LED_COUNT > 0) {
+            KP_CHECK(!rgb_equal(pixels[0], (struct led_rgb){0}));
+            for (size_t i = 1; i < KP_LED_COUNT; i++)
+                KP_CHECK(rgb_equal(pixels[i], (struct led_rgb){0}));
+        }
         frame.local_ms += 100000; frame.elapsed_ms = 100000;
         KP_CHECK(!kp_rgb_effect_render(dev, &frame));
         inject(dev, 0, frame.local_ms + 1);

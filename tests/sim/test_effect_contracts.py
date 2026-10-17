@@ -60,7 +60,7 @@ def fragment(zero=False, example=True):
                             if index & (1 << bit)))
     effect("effects_reactive_a", "reactive", 'multi; background-brightness = <0>;')
     effect("effects_reactive_b", "reactive", 'multi; background-brightness = <0>;')
-    effect("effects_heat", "heatmap", 'slim; decrease-delay-ms = <25>; increase-step = <32>;')
+    effect("effects_heat_no_spread", "heatmap", 'spread = <0>; decrease-delay-ms = <25>; increase-step = <32>;')
     effect("effects_digital", "digital-rain")
     if example:
         effect("effects_example", "example", 'tail-length = <200>;')

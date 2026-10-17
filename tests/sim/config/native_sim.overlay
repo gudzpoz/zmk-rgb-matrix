@@ -457,11 +457,11 @@
                 spread = <300>;
             };
 
-            fx_heatmap_slim: fx_heatmap_slim {
+            fx_heatmap_no_spread: fx_heatmap_no_spread {
                 compatible = "keypaw,rgb-matrix-heatmap";
                 #binding-cells = <0>;
-                display-name = "Heatmap (slim)";
-                slim;
+                display-name = "Heatmap (no spread)";
+                spread = <0>;
             };
 
             fx_digital_rain: fx_digital_rain {
@@ -473,7 +473,6 @@
         };
         fixture_overlay: fixture_overlay {
             compatible = "keypaw,rgb-overlay";
-            condition = <&fixture_always>;
             fx_fixture {
                 compatible = "keypaw,rgb-matrix-reactive";
                 #binding-cells = <0>;
@@ -507,11 +506,6 @@
         };
     };
 
-    /* Conditions are reusable predicates consumed by overlays and triggers.
-     * The fixture instantiates one of each built-in kind so their sources are
-     * compiled and the DT-to-config mapping is exercised; nothing consumes them
-     * yet (the compositor overlay and generic trigger come next), so they are
-     * inert here. */
     rgb_conditions: rgb_conditions {
         compatible = "keypaw,rgb-conditions";
 
@@ -522,10 +516,6 @@
         fixture_layer: fixture_layer {
             compatible = "keypaw,rgb-condition-layer";
             layer = <1>;
-        };
-
-        fixture_always: fixture_always {
-            compatible = "keypaw,rgb-condition-always";
         };
 
         /* A stateful latch with its nested toggle behavior. Nothing presses
@@ -540,14 +530,6 @@
                 compatible = "keypaw,behavior-rgb-overlay-toggle";
                 #binding-cells = <0>;
             };
-        };
-
-        /* Combinators over the conditions above, to compile their operand-list
-         * plumbing. `conditions` is a plain phandles list, so sibling
-         * references are a DAG and need no #*-cells. */
-        fixture_and: fixture_and {
-            compatible = "keypaw,rgb-condition-and";
-            conditions = <&fixture_always &fixture_layer>;
         };
 
         fixture_or: fixture_or {

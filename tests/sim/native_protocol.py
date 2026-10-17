@@ -6,7 +6,7 @@ from native_build import SELECTORS
 SOLID_SELECTORS = (SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
                                     "keypaw,rgb-matrix-solid")
                    .replace(" animate;", "")
-                   .replace("condition = <&preview_visible>;", "condition = <&fixture_always>;") + '''
+                   .replace("condition = <&preview_visible>;", "") + '''
 &rgb_matrix { /delete-node/ preview_selector; };
 &rgb_conditions { /delete-node/ preview_visible; };
 / { behaviors { /delete-node/ rgbs; }; };

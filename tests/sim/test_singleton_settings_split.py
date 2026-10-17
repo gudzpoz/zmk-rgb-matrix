@@ -22,7 +22,7 @@ MASK_SCENE = '''
     singleton_mask_{index}: singleton_mask_{index} {{
         compatible = "keypaw,rgb-overlay";
         all-leds;
-        condition = <&{"fixture_always" if MASKS[index // 16] & (1 << (index % 16)) else "singleton_closed"}>;
+        {"" if MASKS[index // 16] & (1 << (index % 16)) else "condition = <&singleton_closed>;"}
         mask_fx_{index} {{ compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }};
     }};
 ''' for index in range(1, 32)) + "};\n"
