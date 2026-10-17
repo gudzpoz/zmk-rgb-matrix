@@ -24,7 +24,11 @@ static bool sample(const struct device *dev, int64_t now_ms,
   return false;
 }
 
-#define DEFINE(inst) KP_RGB_CONDITION_LIST_DEFINE(inst, sample)
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_ANY_SIDE,
+    .sample = sample,
+    .dependencies = kp_rgb_condition_list_dependencies};
+#define DEFINE(inst) KP_RGB_CONDITION_LIST_DEFINE(inst, api)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 #endif

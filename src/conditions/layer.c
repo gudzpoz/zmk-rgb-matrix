@@ -51,13 +51,13 @@ ZMK_LISTENER(kp_cond_layer_state, listener);
 ZMK_SUBSCRIPTION(kp_cond_layer_state, zmk_layer_state_changed);
 #endif
 
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};
 #define DEFINE(inst)                                                           \
   static const struct layer_cfg cfg_##inst = {                                 \
       DT_PROP(DT_DRV_INST(inst), layer),                                       \
       DT_PROP(DT_DRV_INST(inst), only_topmost)};                               \
-  static const struct kp_rgb_condition_api api_##inst = {                      \
-      .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};               \
-  KP_RGB_CONDITION_DEFINE(inst, &api_##inst, &cfg_##inst, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 #endif

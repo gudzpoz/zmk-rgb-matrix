@@ -68,13 +68,12 @@ ZMK_LISTENER(kp_cond_ble, listener);
 ZMK_SUBSCRIPTION(kp_cond_ble, zmk_ble_active_profile_changed);
 #endif
 
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};
 #define DEFINE(inst)                                                           \
   static const struct ble_cfg cfg_##inst = {                                   \
       .profile = DT_PROP(DT_DRV_INST(inst), profile),                          \
       .state = CONV_DT_ENUM(inst, state)};                                     \
-  static const struct kp_rgb_condition_api api_##inst = {                      \
-      .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};               \
-  KP_RGB_CONDITION_DEFINE(inst, &api_##inst, &cfg_##inst, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
-
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */

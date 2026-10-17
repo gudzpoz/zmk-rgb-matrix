@@ -23,7 +23,14 @@ struct kp_rgb_condition_list_config {
 #define KP_RGB_CONDITION_AT_IDX(idx, node_id)                                  \
   DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, conditions, idx))
 
-#define KP_RGB_CONDITION_LIST_DEFINE(inst, sample_fn)                          \
+static inline const struct device *const *
+kp_rgb_condition_list_dependencies(const struct device *dev, size_t *count) {
+  const struct kp_rgb_condition_list_config *cfg = dev->config;
+  *count = cfg->count;
+  return cfg->conditions;
+}
+
+#define KP_RGB_CONDITION_LIST_DEFINE(inst, api)                                \
   KP_RGB_CONDITION_LIST_ASSERT_NON_EMPTY(DT_DRV_INST(inst));                   \
   static const struct device *const kp_rgb_cond_##inst##_conditions[] = {      \
       LISTIFY(DT_PROP_LEN(DT_DRV_INST(inst), conditions),                      \
@@ -31,15 +38,4 @@ struct kp_rgb_condition_list_config {
   static const struct kp_rgb_condition_list_config kp_rgb_cond_##inst##_cfg =  \
       {.conditions = kp_rgb_cond_##inst##_conditions,                          \
        .count = DT_PROP_LEN(DT_DRV_INST(inst), conditions)};                   \
-  static const struct device *const *kp_rgb_cond_##inst##_dependencies(        \
-      const struct device *dev, size_t *count) {                               \
-    const struct kp_rgb_condition_list_config *cfg = dev->config;              \
-    *count = cfg->count;                                                       \
-    return cfg->conditions;                                                    \
-  }                                                                            \
-  static const struct kp_rgb_condition_api kp_rgb_cond_##inst##_api = {        \
-      .scope = KP_RGB_CONDITION_ANY_SIDE,                                      \
-      .sample = sample_fn,                                                     \
-      .dependencies = kp_rgb_cond_##inst##_dependencies};                      \
-  KP_RGB_CONDITION_DEFINE(inst, &kp_rgb_cond_##inst##_api,                     \
-                          &kp_rgb_cond_##inst##_cfg, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, &api, &kp_rgb_cond_##inst##_cfg, NULL)

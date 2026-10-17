@@ -25,8 +25,10 @@ static bool sample(const struct device *dev, int64_t now_ms,
   return zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
 }
 
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample};
 #define INVALIDATE(inst)                                                       \
-  if (event->selector == cfg_##inst.selector)                                   \
+  if (event->selector == cfg_##inst.selector)                                  \
     kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
 
 #define DEFINE(inst)                                                           \
@@ -45,9 +47,7 @@ static bool sample(const struct device *dev, int64_t now_ms,
       .selector = DEVICE_DT_GET(DT_INST_PHANDLE(inst, selector)),              \
       .effect = DEVICE_DT_GET(DT_INST_PHANDLE(inst, effect)),                  \
   };                                                                           \
-  static const struct kp_rgb_condition_api api_##inst = {                      \
-      .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample};                   \
-  KP_RGB_CONDITION_DEFINE(inst, &api_##inst, &cfg_##inst, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
