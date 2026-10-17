@@ -227,13 +227,6 @@ BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
  * not clear pixels, manage clocks or check engine activity. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 
-/* Notify after a synchronized source update changes pixels or animation demand.
- * Any-context, non-blocking and coalescing; does not enable output, reset clocks
- * or sample conditions. Suppressed output is recomposed when eligible again.
- * Supply a valid RGB effect device; composition membership is not required.
- * Early notifications are retained or subsumed by the first fresh composition. */
-void kp_rgb_effect_invalidate(const struct device *effect);
-
 int kp_rgb_effect_convert_central_state_dependent_params(
     struct zmk_behavior_binding *binding,
     struct zmk_behavior_binding_event event);
@@ -610,5 +603,6 @@ int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hs
 int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
 /* Request a scene pass: reconcile activity and repaint if output is eligible.
- * Any-context; does not sample conditions or grant output permission. */
+ * Notify after a synchronized source update changes pixels or animation demand.
+ * Any-context, non-blocking and coalescing. */
 void zmk_rgb_matrix_flush(void);

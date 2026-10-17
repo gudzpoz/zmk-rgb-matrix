@@ -12,7 +12,7 @@ SCENARIOS = (
     'idle-policy', 'idempotent', 'intent', 'purge', 'stale', 'resume',
     'slow-render', 'slow-driver', 'black-slow', 'boundary', 'lock-retry',
     'black-resume', 'stale-early', 'submit-failure', 'finish-failure',
-    'settled', 'slow-early', 'fairness', 'ignored-release', 'source-invalidate', 'callback-invalidate',
+    'settled', 'slow-early', 'fairness', 'ignored-release', 'source-invalidate',
     'color-backoff', 'latest-scene', 'urgent-black', 'coalesced-gates',
     'slow-failure', 'boot-off', 'boot-on', 'boot-inhibited', 'unready',
     'retry-lock', 'requests', 'healthy-mutation', 'mutation-before-lock',

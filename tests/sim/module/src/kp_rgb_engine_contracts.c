@@ -24,7 +24,7 @@ struct transfer {
 static struct transfer transfers[LIMIT];
 static atomic_t writes, fail_count, transfer_delay, block_transfer, block_render;
 static atomic_t reschedule_failures, inject_finish_failure, input_replenish;
-static atomic_t callback_flushes, callback_invalidates, callback_input;
+static atomic_t callback_flushes, callback_input;
 static atomic_t capture_output, finish_notify, notify_from_render;
 static struct k_work_delayable *observed_output;
 K_SEM_DEFINE(finish_seen, 0, 1);
@@ -130,7 +130,6 @@ static bool provider_render(const struct device *dev, const struct kp_rgb_frame 
             KP_CHECK(k_sem_take(&block_release, K_SECONDS(5)) == 0);
         }
         if (atomic_get(&callback_flushes)) { atomic_dec(&callback_flushes); zmk_rgb_matrix_flush(); }
-        if (atomic_cas(&callback_invalidates, 1, 0)) kp_rgb_effect_invalidate(NULL);
         if (atomic_cas(&callback_input, 1, 0)) position(true, -123);
         if (atomic_cas(&inject_finish_failure, 1, 0)) atomic_set(&reschedule_failures, 1);
     }
@@ -748,10 +747,9 @@ void kp_test_engine_run(void) {
             kp_rgb_matrix_unlock(); settled(); settled();
             KP_CHECK(events(0) == 15 && paints(0) == p + 1);
         }
-    } else if (!strcmp(name, "reentrant") || !strcmp(name, "callback-invalidate") || !strcmp(name, "input-during-render") || !strcmp(name, "fairness")) {
+    } else if (!strcmp(name, "reentrant") || !strcmp(name, "input-during-render") || !strcmp(name, "fairness")) {
         unsigned p = paints(0);
         if (!strcmp(name, "input-during-render")) atomic_set(&callback_input, 1);
-        else if (!strcmp(name, "callback-invalidate")) atomic_set(&callback_invalidates, 1);
         else atomic_set(&callback_flushes, !strcmp(name, "fairness") ? 4 : 1);
         if (!strcmp(name, "fairness")) {
             unsigned n = atomic_get(&writes);
@@ -779,7 +777,7 @@ void kp_test_engine_run(void) {
     } else if (!strcmp(name, "healthy-mutation") || !strcmp(name, "source-invalidate") || !strcmp(name, "status-only")) {
         if (!strcmp(name, "status-only")) prefix("multi-prefix");
         else { set_color(0, (struct led_rgb){.r = 99}); unsigned n = atomic_get(&writes);
-               kp_rgb_effect_invalidate(NULL); wait_writes(n + 1); check_all(n, 99); repaint(); check_all(n + 1, 99); }
+               zmk_rgb_matrix_flush(); wait_writes(n + 1); check_all(n, 99); repaint(); check_all(n + 1, 99); }
     } else if (!strcmp(name, "stale") || !strcmp(name, "boundary") || !strcmp(name, "stale-early")) {
         if (!strcmp(name, "boundary")) completion_boundary();
         else if (!strcmp(name, "stale-early")) {

@@ -231,11 +231,6 @@ static void kp_rgb_request_output_pass(bool scene_changed) {
 
 void zmk_rgb_matrix_flush(void) { kp_rgb_request_output_pass(true); }
 
-void kp_rgb_effect_invalidate(const struct device *effect) {
-  ARG_UNUSED(effect);
-  zmk_rgb_matrix_flush();
-}
-
 void kp_rgb_control_refresh_locked(void) {
   kp_rgb_refresh_pending = true;
   kp_rgb_refresh_token++;

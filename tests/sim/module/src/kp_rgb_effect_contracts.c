@@ -578,7 +578,10 @@ static void generic_overlay(void) {
     KP_CHECK(o->renders == 1 && o->frame.scratch == NULL && o->frame.elapsed_ms == frame.elapsed_ms);
     for (size_t t = 0; t < frame.target_count; t++) KP_CHECK(rgb_equal(pixels[targets[t]], (struct led_rgb){104, 73, 101}));
 }
-static void invalidation_isr(const void *dev) { kp_rgb_effect_invalidate(dev); }
+static void flush_isr(const void *arg) {
+    ARG_UNUSED(arg);
+    zmk_rgb_matrix_flush();
+}
 static void private_parameters(void) {
     const struct device *dev = DEV(effects_fallback);
     KP_CHECK(device_is_ready(dev) && kp_rgb_effect_cfg(dev)->owner == NULL);
@@ -588,7 +591,7 @@ static void private_parameters(void) {
     struct kp_rgb_hsb color = {.h = 120, .s = 90, .b = 80};
     KP_CHECK(zmk_rgb_matrix_set_color(DEV(effects_reactive_a), &color) == 0);
     KP_CHECK(zmk_rgb_matrix_set_period(DEV(effects_reactive_a), 1000) == 0);
-    irq_offload(invalidation_isr, DEV(effects_reactive_a));
+    irq_offload(flush_isr, NULL);
     kp_rgb_matrix_lock();
     dev = DEV(effects_reactive_a);
     struct kp_rgb_effect_common_data saved = *kp_rgb_effect_data(dev);
