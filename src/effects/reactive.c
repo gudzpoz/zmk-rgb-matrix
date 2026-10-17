@@ -136,7 +136,7 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
   bool evolving = false;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
-  uint16_t span = MAX(f->board_length, 1u);
+  uint16_t span = f->board_length;
 
   for (size_t i = 0; i < f->count; i++) {
     evolving |= data->levels[i] != 0;

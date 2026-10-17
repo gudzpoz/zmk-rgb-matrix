@@ -44,8 +44,6 @@ struct kp_eff_digital_rain_config {
 struct kp_eff_digital_rain_data {
   struct kp_rgb_effect_common_data common;
   bool seeded;
-  uint16_t min_x;
-  uint16_t max_x;
   uint16_t min_y;
   uint16_t max_y;
 #if KP_LED_COUNT > 0
@@ -92,11 +90,8 @@ static void kp_eff_digital_rain_seed(const struct device *dev,
       max_y = f->coords[i].y;
     }
   }
-  data->min_x = min_x;
-  data->max_x = max_x;
   data->min_y = min_y;
   data->max_y = max_y;
-
   uint32_t span_x = (uint32_t)max_x - min_x + 1u;
   uint32_t range_y = MAX((uint32_t)max_y - min_y, 1u);
   uint32_t duration = kp_rgb_effect_period(dev);
