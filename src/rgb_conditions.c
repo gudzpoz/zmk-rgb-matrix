@@ -18,7 +18,7 @@ static size_t condition_count;
 static uint64_t refresh_requested;
 static void control_handler(struct k_work *work);
 
-static K_WORK_DELAYABLE_DEFINE(control_work, control_handler);
+static K_WORK_DEFINE(control_work, control_handler);
 
 static struct kp_rgb_condition_registration *lookup(const struct device *dev) {
   for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
@@ -39,7 +39,6 @@ static void fault(struct kp_rgb_condition_registration *e, const char *reason) {
   if (!e->fault)
     LOG_ERR("RGB condition %s: %s", e->dev->name, reason);
   e->fault = true;
-  e->deadline = KP_RGB_CONDITION_NEVER;
 }
 
 void kp_rgb_condition_register(const struct device *dev,
@@ -47,7 +46,6 @@ void kp_rgb_condition_register(const struct device *dev,
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
   __ASSERT(!started, "condition registered after startup");
   entry->dev = dev;
-  entry->deadline = KP_RGB_CONDITION_NEVER;
   entry->next = registry;
   registry = entry;
   condition_count++;
@@ -76,8 +74,7 @@ void kp_rgb_condition_invalidate(const struct device *dev) {
   if (!on_worker())
     atomic_set(&external_pending, 1);
   if (started && !on_worker()) {
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
-                                K_NO_WAIT);
+    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
   k_spin_unlock(&schedule_lock, key);
 }
@@ -87,8 +84,7 @@ void kp_rgb_conditions_request_refresh(uint64_t token) {
   refresh_requested = token;
   atomic_set(&external_pending, 1);
   if (started) {
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
-                                K_NO_WAIT);
+    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
   k_spin_unlock(&schedule_lock, key);
 }
@@ -197,9 +193,9 @@ static void build_graph(void) {
   }
 }
 
-static void evaluate(int64_t now) {
+static void evaluate(void) {
   for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
-    e->dirty = atomic_set(&e->pending, 0) || !e->sampled || e->deadline <= now;
+    e->dirty = atomic_set(&e->pending, 0) || !e->sampled;
   }
 
   for (size_t rank = 0; rank < condition_count; rank++) {
@@ -217,19 +213,15 @@ static void evaluate(int64_t now) {
       if (e->fault || !e->dirty)
         continue;
 
-      int64_t next_wakeup_ms = KP_RGB_CONDITION_NEVER;
       const struct kp_rgb_condition_api *api = e->dev->api;
       sampling = e;
-      bool active = api->sample(e->dev, now, &next_wakeup_ms);
+      bool active = api->sample(e->dev);
       sampling = NULL;
 
-      if (next_wakeup_ms <= now)
-        fault(e, "non-future deadline");
       if (e->fault)
         continue;
 
       e->value = active;
-      e->deadline = next_wakeup_ms;
       e->sampled = true;
     }
   }
@@ -265,7 +257,7 @@ static void control_handler(struct k_work *work) {
 
   for (unsigned pass = 0; pass < 8; pass++) {
     int64_t now = k_uptime_get();
-    evaluate(now);
+    evaluate();
     bool changed = kp_rgb_overlay_refresh();
     kp_rgb_overlay_dispatch();
     if (changed)
@@ -283,18 +275,8 @@ static void control_handler(struct k_work *work) {
   if (refresh_token && !refresh_complete && !refresh_requested) {
     refresh_requested = refresh_token;
   }
-  int64_t next = KP_RGB_CONDITION_NEVER;
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
-    if (e->live && !e->fault)
-      next = MIN(next, e->deadline);
-  }
-
   if (refresh_requested || pending() || atomic_get(&external_pending)) {
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
-                                K_NO_WAIT);
-  } else if (next != KP_RGB_CONDITION_NEVER) {
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
-                                K_MSEC(MAX(INT64_C(0), next - k_uptime_get())));
+    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
   k_spin_unlock(&schedule_lock, key);
   if (refresh_complete) kp_rgb_conditions_refreshed(refresh_token);
@@ -304,8 +286,7 @@ void kp_rgb_conditions_start(void) {
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
   if (!started) {
     started = true;
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &control_work,
-                                K_NO_WAIT);
+    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
   k_spin_unlock(&schedule_lock, key);
 }

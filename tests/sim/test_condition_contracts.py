@@ -8,8 +8,8 @@ import tempfile
 from native_build import SELECTORS, build, run
 
 SCENARIOS = (
-    'startup', 'dag', 'deadline', 'deadline-reset', 'same-value', 'isr',
-    'cycle', 'missing', 'undeclared', 'invalid-deadline', 'scope', 'unused-scope',
+    'startup', 'dag', 'same-value', 'isr', 'external-timer', 'event-only',
+    'cycle', 'missing', 'undeclared', 'scope', 'unused-scope',
     'unready', 'metadata', 'invalid-scope', 'short-circuit', 'sample-notification',
     'refresh', 'refresh-interrupted', 'early-refresh', 'self-feedback', 'multi-feedback',
     'trigger-startup', 'trigger-capture', 'trigger-fault', 'trigger-errors',
@@ -134,7 +134,7 @@ VARIANTS['held-source-refresh'] = VARIANTS['stale-source-refresh']
 DIAGNOSTICS = {
     'cycle': 'dependency cycle', 'missing': 'unregistered dependency',
     'metadata': 'missing dependency metadata', 'undeclared': 'undeclared dependency read',
-    'invalid-deadline': 'non-future deadline', 'sample-notification': 'notification from sample callback',
+    'sample-notification': 'notification from sample callback',
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
     'startup-unready-selector': 'canonical control is not ready',
@@ -195,6 +195,8 @@ def main():
                         assert 'central-only source used on peripheral' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-unregistered-root':
                         assert 'Unregistered RGB condition root cc_noreg' in result.stdout
+                    if role != 'peripheral' and scenario == 'trigger-fault':
+                        assert 'undeclared dependency read' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-errors':
                         assert 'binding 1' in result.stdout and 'err -5' in result.stdout
                     log = root / f'{image}-{scenario}.log'

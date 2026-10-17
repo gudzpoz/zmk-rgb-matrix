@@ -29,10 +29,7 @@ struct ble_cfg {
   ble_state_t state;
 };
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
+static bool sample(const struct device *dev) {
 #if KP_COND_BLE_READABLE
   const struct ble_cfg *c = dev->config;
   if (c->profile >= 0 && zmk_ble_active_profile_index() != c->profile) {

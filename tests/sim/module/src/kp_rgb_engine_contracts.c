@@ -184,8 +184,8 @@ DT_INST_FOREACH_STATUS_OKAY(CHILD)
 static atomic_t block_condition;
 static uint64_t latest_refresh_token;
 static struct k_spinlock refresh_token_lock;
-static bool condition_sample(const struct device *dev, int64_t now, int64_t *next) {
-    ARG_UNUSED(dev); ARG_UNUSED(now); *next = KP_RGB_CONDITION_NEVER;
+static bool condition_sample(const struct device *dev) {
+    ARG_UNUSED(dev);
     atomic_inc(&condition_samples);
     if (atomic_cas(&block_condition, 1, 0)) {
         k_sem_give(&block_entered);

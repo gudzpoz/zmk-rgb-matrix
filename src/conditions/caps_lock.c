@@ -14,11 +14,8 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
+static bool sample(const struct device *dev) {
   ARG_UNUSED(dev);
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
   return (zmk_hid_indicators_get_current_profile() & HID_INDICATOR_CAPS_LOCK) != 0;
 #else

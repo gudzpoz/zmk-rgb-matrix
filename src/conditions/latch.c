@@ -13,11 +13,8 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
+static bool sample(const struct device *dev) {
   const struct kp_rgb_latch_data *data = dev->data;
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
   return atomic_get(&data->active);
 }
 

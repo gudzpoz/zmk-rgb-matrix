@@ -23,10 +23,7 @@ struct layer_cfg {
   bool only_topmost;
 };
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
+static bool sample(const struct device *dev) {
 #if HAS_KEYMAP
   const struct layer_cfg *c = dev->config;
   return c->only_topmost

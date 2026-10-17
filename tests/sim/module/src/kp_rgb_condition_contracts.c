@@ -18,7 +18,7 @@
 #define KP_TEST_SELECTOR_A_STATE \
     "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
 struct source {
-    atomic_t value, calls, period, invalid_deadline, undeclared, notify, pause;
+    atomic_t value, calls, undeclared, notify, pause;
     const struct device *deps[3];
     size_t dep_count;
     bool bad_metadata, short_circuit;
@@ -35,7 +35,7 @@ static void interrupt(const void *arg) {
     atomic_inc(&irq_calls);
     kp_rgb_condition_invalidate(irq_device);
 }
-static bool sample(const struct device *dev, int64_t now, int64_t *deadline) {
+static bool sample(const struct device *dev) {
     struct source *s = dev->data;
     const struct source_config *cfg = dev->config;
     KP_CHECK(!k_is_in_isr());
@@ -56,9 +56,6 @@ static bool sample(const struct device *dev, int64_t now, int64_t *deadline) {
         (void)kp_rgb_condition_value(DEV(cc_unused));
     if (atomic_cas(&s->notify, 1, 0))
         kp_rgb_condition_invalidate(dev);
-    int period = atomic_get(&s->period);
-    if (period) *deadline = now + period;
-    if (atomic_get(&s->invalid_deadline)) *deadline = now - atomic_get(&s->invalid_deadline) + 1;
     return value;
 }
 static const struct device *const *dependencies(const struct device *dev, size_t *count) {
@@ -123,6 +120,13 @@ static void drain(void) {
         k_msleep(1);
     }
 }
+static void external_invalidation_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    KP_CHECK(k_current_get() != k_work_queue_thread_get(kp_rgb_work_q()));
+    atomic_set(&src(DEV(cc_leaf))->value, true);
+    kp_rgb_condition_invalidate(DEV(cc_leaf));
+}
+K_WORK_DELAYABLE_DEFINE(external_invalidation_work, external_invalidation_handler);
 static void wait_calls(const struct device *dev, unsigned count) {
     int64_t until = k_uptime_get() + 1000;
     while (calls(dev) < count && k_uptime_get() < until) k_msleep(1);
@@ -217,15 +221,10 @@ static void graph_prepare(void) {
     else if (kp_test_case("scope")) { link(root, left); link(left, DEV(cc_central)); }
     else if (kp_test_case("undeclared")) atomic_set(&src(root)->undeclared, 1);
     else if (kp_test_case("sample-notification")) atomic_set(&src(root)->notify, 1);
-    else if (kp_test_case("invalid-deadline")) {
-        atomic_set(&src(root)->invalid_deadline, 1);
-        atomic_set(&src(left)->invalid_deadline, 2);
-        KP_CHECK(kp_rgb_condition_require(left));
-    } else {
+    else {
         link(root, left); link(root, right); link(left, leaf); link(right, leaf);
         if (kp_test_case("short-circuit")) {
             src(root)->short_circuit = true;
-            atomic_set(&src(right)->period, 100);
         }
     }
     for (size_t i = 0; i < 4; i++) {
@@ -258,8 +257,11 @@ static void graph_cases(void) {
     KP_CHECK(calls(DEV(cc_unused)) == 0);
     if (kp_test_case("short-circuit")) {
         KP_CHECK(!gate(DEV(ordinary)));
-        wait_calls(right, 2);
-        KP_CHECK(calls(root) >= 2 && calls(leaf) == 1);
+        unsigned right_before = calls(right), root_before = calls(root), leaf_before = calls(leaf);
+        kp_rgb_condition_invalidate(right);
+        drain();
+        KP_CHECK(calls(right) == right_before + 1 && calls(root) == root_before + 1);
+        KP_CHECK(calls(leaf) == leaf_before);
     } else {
         KP_CHECK(gate(DEV(ordinary)));
         set(leaf, false); drain();
@@ -270,8 +272,11 @@ static void graph_cases(void) {
 
 static void timing_prepare(void) {
     const struct device *root = DEV(cc_root);
-    if (kp_test_case("deadline") || kp_test_case("deadline-reset") || kp_test_case("same-value"))
-        atomic_set(&src(root)->period, 100);
+    if (kp_test_case("external-timer")) {
+        link(root, DEV(cc_leaf));
+        atomic_set(&src(root)->value, true);
+        atomic_set(&src(DEV(cc_leaf))->value, false);
+    }
     if (kp_test_case("early-refresh")) kp_rgb_conditions_request_refresh(17);
     kp_rgb_condition_invalidate(root);
     KP_CHECK(calls(root) == 0);
@@ -280,30 +285,19 @@ static void timing_cases(void) {
     const struct device *root = DEV(cc_root);
     wait_ready();
     KP_CHECK(calls(root) == 1);
-    if (kp_test_case("deadline")) {
-        k_msleep(30); KP_CHECK(calls(root) == 1);
-        wait_calls(root, 2);
-        wait_calls(root, 3);
-        pause(DEV(cc_event));
-        unsigned before = calls(root);
-        k_msleep(350);
-        KP_CHECK(calls(root) == before);
-        resume();
-        KP_CHECK(calls(root) == before + 1);
-        KP_CHECK(kp_rgb_condition_valid(root));
-    } else if (kp_test_case("deadline-reset")) {
-        atomic_set(&src(root)->period, 0); set(root, true); drain();
-        KP_CHECK(calls(root) == 2 && gate(DEV(ordinary)));
-        k_msleep(160); KP_CHECK(calls(root) == 2);
-        atomic_set(&src(root)->period, 50); set(root, false); drain();
-        wait_calls(root, 4);
-        atomic_set(&src(root)->period, 0); kp_rgb_condition_invalidate(root); drain();
-        unsigned before = calls(root); k_msleep(100); KP_CHECK(calls(root) == before);
-    } else if (kp_test_case("same-value")) {
-        atomic_set(&src(root)->period, 25); kp_rgb_condition_invalidate(root); drain();
+    if (kp_test_case("same-value")) {
+        kp_rgb_condition_invalidate(root); drain();
         KP_CHECK(!gate(DEV(ordinary)) && calls(root) == 2);
-        wait_calls(root, 3);
-        atomic_set(&src(root)->period, 0); set(root, true); drain();
+        k_msleep(100); KP_CHECK(calls(root) == 2);
+        set(root, true); drain();
+        KP_CHECK(gate(DEV(ordinary)) && calls(root) == 3);
+    } else if (kp_test_case("external-timer")) {
+        unsigned root_before = calls(root), leaf_before = calls(DEV(cc_leaf));
+        KP_CHECK(!gate(DEV(ordinary)) && leaf_before == 1);
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); drain();
+        KP_CHECK(k_work_schedule(&external_invalidation_work, K_MSEC(50)) >= 0);
+        wait_calls(DEV(cc_leaf), leaf_before + 1);
+        KP_CHECK(calls(root) == root_before + 1 && calls(DEV(cc_leaf)) == leaf_before + 1);
         KP_CHECK(gate(DEV(ordinary)));
     } else if (kp_test_case("isr")) {
         pause(root); irq_device = root;
@@ -358,7 +352,7 @@ static void trigger_cases(void) {
         KP_CHECK(actions[0].timestamp == actions[3].timestamp);
     } else if (kp_test_case("trigger-fault")) {
         set(DEV(cc_root), true); drain(); unsigned before = action_count;
-        atomic_set(&src(DEV(cc_root))->invalid_deadline, 1);
+        atomic_set(&src(DEV(cc_root))->undeclared, 1);
         kp_rgb_condition_invalidate(DEV(cc_root)); drain();
         KP_CHECK(!kp_rgb_condition_valid(DEV(cc_root)) && action_count == before);
         set(DEV(cc_root), false); drain(); KP_CHECK(action_count == before);
@@ -386,6 +380,11 @@ static void selection_cases(void) {
     wait_ready(); expect_selection(true);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     unsigned event_samples = calls(DEV(cc_event));
+    if (kp_test_case("event-only")) {
+        k_msleep(100);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples);
+        return;
+    }
     if (kp_test_case("scoped-listener")) {
         unsigned samples_b = calls(DEV(cc_event_b)), root_samples = calls(DEV(cc_root));
         KP_CHECK(raise_zmk_rgb_selector_selection_changed((struct zmk_rgb_selector_selection_changed){.selector = DEV(selector_a)}) >= 0);
@@ -491,9 +490,9 @@ static void overlay_cases(void) {
 
 static int auto_prepare(void) {
     const char *graphs[] = {"dag", "cycle", "missing", "metadata", "unready", "invalid-scope",
-        "scope", "undeclared", "sample-notification", "invalid-deadline", "short-circuit"};
-    const char *timings[] = {"startup", "deadline", "deadline-reset", "same-value", "isr",
-        "refresh", "refresh-interrupted", "early-refresh"};
+        "scope", "undeclared", "sample-notification", "short-circuit"};
+    const char *timings[] = {"startup", "same-value", "isr", "refresh", "refresh-interrupted",
+        "early-refresh", "external-timer"};
     for (size_t i = 0; i < ARRAY_SIZE(graphs); i++)
         if (kp_test_case(graphs[i])) graph_prepare();
     for (size_t i = 0; i < ARRAY_SIZE(timings); i++)
@@ -705,10 +704,10 @@ void kp_test_conditions_run(void) {
     else if (kp_test_case("dag") || kp_test_case("cycle") || kp_test_case("missing") ||
         kp_test_case("metadata") || kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
         kp_test_case("undeclared") || kp_test_case("sample-notification") ||
-        kp_test_case("invalid-deadline") || kp_test_case("short-circuit")) graph_cases();
-    else if (kp_test_case("startup") || kp_test_case("deadline") || kp_test_case("deadline-reset") ||
-        kp_test_case("same-value") || kp_test_case("isr") || kp_test_case("refresh") ||
-        kp_test_case("refresh-interrupted") || kp_test_case("early-refresh")) timing_cases();
+        kp_test_case("short-circuit")) graph_cases();
+    else if (kp_test_case("startup") || kp_test_case("same-value") || kp_test_case("isr") ||
+        kp_test_case("external-timer") || kp_test_case("refresh") || kp_test_case("refresh-interrupted") ||
+        kp_test_case("early-refresh")) timing_cases();
     else if (kp_test_case("trigger-startup") || kp_test_case("trigger-capture") ||
         kp_test_case("trigger-fault") || kp_test_case("trigger-errors") ||
         kp_test_case("self-feedback") || kp_test_case("multi-feedback")) trigger_cases();
@@ -717,8 +716,9 @@ void kp_test_conditions_run(void) {
         wait_ready(); KP_CHECK(calls(DEV(cc_unused)) == 0);
         KP_CHECK(calls(DEV(cc_central)) == (peripheral() ? 0 : 1));
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)));
-    } else if (kp_test_case("initial-shared") || kp_test_case("scoped-listener") ||
-        kp_test_case("third-party") || kp_test_case("coalesced") || kp_test_case("reentrant") ||
+    } else if (kp_test_case("initial-shared") || kp_test_case("event-only") ||
+        kp_test_case("scoped-listener") || kp_test_case("third-party") ||
+        kp_test_case("coalesced") || kp_test_case("reentrant") ||
         kp_test_case("trigger-mutation") || kp_test_case("resume-held") ||
         kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) selection_cases();
     else KP_CHECK(false);

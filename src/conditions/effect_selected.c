@@ -17,10 +17,7 @@ struct selected_cfg {
   const struct device *effect;
 };
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
+static bool sample(const struct device *dev) {
   const struct selected_cfg *cfg = dev->config;
   return zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
 }

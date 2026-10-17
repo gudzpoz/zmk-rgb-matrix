@@ -15,7 +15,6 @@ struct kp_rgb_condition_registration {
   size_t rank;
 
   atomic_t pending;
-  int64_t deadline;
   bool live;
   bool resolved;
   bool fault;

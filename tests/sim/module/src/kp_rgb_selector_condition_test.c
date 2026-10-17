@@ -19,8 +19,7 @@ void selector_test_release_sample(void) { k_sem_give(&sample_release); }
 unsigned selector_test_samples(void) { return atomic_get(&samples); }
 unsigned selector_test_notifications(void) { return atomic_get(&notifications); }
 
-static bool sample(const struct device *dev, int64_t now, int64_t *deadline) {
-  ARG_UNUSED(now); ARG_UNUSED(deadline);
+static bool sample(const struct device *dev) {
   atomic_inc(&samples);
   if (atomic_cas(&pause_sample, 1, 0)) {
     k_sem_give(&sample_entered);

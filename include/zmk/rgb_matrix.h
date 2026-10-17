@@ -360,7 +360,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 
 /* Conditions are sampled on the control worker, never by a renderer. A variable
  * source must invalidate after a synchronized update; there is no polling fallback.
- * Deadlines use the supplied monotonic uptime and must be > now_ms or NEVER.
+ * Timed providers must arrange their own wakeups and invalidate when due.
  * Dependencies are immutable, lifetime-long metadata; samples may only read their
  * declared children's cached values, and must not execute actions or LED I/O.
  */
@@ -368,15 +368,11 @@ enum kp_rgb_condition_scope {
   KP_RGB_CONDITION_ANY_SIDE = 0,
   KP_RGB_CONDITION_CENTRAL_ONLY,
 };
-#define KP_RGB_CONDITION_NEVER INT64_MAX
 
 struct kp_rgb_condition_api {
   enum kp_rgb_condition_scope scope;
-  /* Returns current activity. Assign to next_wakeup_ms to set a deadline for
-   * next sample call.
-   */
-  bool (*sample)(const struct device *dev, int64_t now_ms,
-                 int64_t *next_wakeup_ms);
+  /* Return true when active. Must not synchronously invalidate any condition. */
+  bool (*sample)(const struct device *dev);
   const struct device *const *(*dependencies)(const struct device *dev,
                                               size_t *count);
 };
@@ -566,10 +562,9 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
  * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
  * colored submissions until released. Release preserves outstanding transfer
  * backoff and resumes current logical intent without advancing animation time
- * spent inhibited. Event/deadline control and
- * overlay synchronization remain live even while logically OFF. Pending key
- * feedback is discarded while inhibited. An in-flight render or feedback pass
- * may finish computing. */
+ * spent inhibited. Event-driven control and overlay synchronization remain live
+ * even while logically OFF. Pending key feedback is discarded while inhibited.
+ * An in-flight render or feedback pass may finish computing. */
 int zmk_rgb_matrix_set_inhibited(bool inhibited);
 /* Returns the current gate state, not hardware settlement; safe from any context. */
 bool zmk_rgb_matrix_is_inhibited(void);
