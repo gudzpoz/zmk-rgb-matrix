@@ -61,6 +61,7 @@ def fragment(zero=False, example=True):
     effect("effects_reactive_a", "reactive", 'multi; background-brightness = <0>;')
     effect("effects_reactive_b", "reactive", 'multi; background-brightness = <0>;')
     effect("effects_heat_no_spread", "heatmap", 'spread = <0>; decrease-delay-ms = <25>; increase-step = <32>;')
+    effect("effects_heat_zero_delay", "heatmap", 'spread = <0>; decrease-delay-ms = <0>; increase-step = <32>;')
     effect("effects_digital", "digital-rain")
     if example:
         # Required by the separately owned example's unmigrated binding.

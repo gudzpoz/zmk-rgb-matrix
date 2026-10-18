@@ -39,9 +39,8 @@ static bool sample(const struct device *dev) {
 #define INVALIDATE(inst)                                                       \
   kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
 static int listener(const zmk_event_t *eh) {
-  if (as_zmk_layer_state_changed(eh)) {
-    DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
-  }
+  ARG_UNUSED(eh);
+  DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
   return ZMK_EV_EVENT_BUBBLE;
 }
 ZMK_LISTENER(kp_cond_layer_state, listener);

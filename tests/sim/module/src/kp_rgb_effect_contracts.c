@@ -248,7 +248,7 @@ static void variants(void) {
     KP_CHECK(kinds[RAINBOW] == 67 && kinds[STARLIGHT] == 28 && kinds[BAND] == 10);
     KP_CHECK(kinds[BREATHE] == 10 && kinds[RAIN] == 20 && kinds[SOLID] == 7);
     KP_CHECK(kinds[STATIC] == 1 && kinds[SPECTRUM] == 1 && kinds[REACTIVE] == 11);
-    KP_CHECK(kinds[RIPPLE] == 1 && kinds[HEATMAP] == 3 && kinds[DIGITAL] == 2);
+    KP_CHECK(kinds[RIPPLE] == 1 && kinds[HEATMAP] == 4 && kinds[DIGITAL] == 2);
     KP_CHECK(kinds[EXAMPLE] == DT_NODE_EXISTS(DT_NODELABEL(effects_example)));
 }
 static uint8_t peak(struct led_rgb rgb) { return MAX(rgb.r, MAX(rgb.g, rgb.b)); }
@@ -568,6 +568,23 @@ static void feedback(void) {
             inject(dev, 0, INT64_MIN); frame.local_ms = INT64_MAX; KP_CHECK(!kp_rgb_effect_render(dev, &frame));
             inject(dev, 0, INT64_MAX); frame.local_ms = 0; KP_CHECK(kp_rgb_effect_render(dev, &frame));
             cb->reset(dev, 0); KP_CHECK(!kp_rgb_effect_render(dev, &frame));
+        }
+    }
+    const struct device *zero_delay = DEV(effects_heat_zero_delay);
+    reset_device(zero_delay, 0);
+    inject(zero_delay, 0, 0);
+    frame.local_ms = 0; frame.elapsed_ms = 0; clear_targets();
+    KP_CHECK(kp_rgb_effect_render(zero_delay, &frame) == (KP_LED_COUNT > 0));
+    for (unsigned step = 1; step <= 32; step++) {
+        frame.local_ms = step; frame.elapsed_ms = 1; clear_targets();
+        KP_CHECK(kp_rgb_effect_render(zero_delay, &frame) == (KP_LED_COUNT > 0 && step < 32));
+        if (KP_LED_COUNT) {
+            uint8_t temperature = 32 - step;
+            struct led_rgb expected = temperature == 0 ? (struct led_rgb){0} :
+                kp_rgb_hsb_to_rgb((struct kp_rgb_hsb){
+                    .h = (255u - temperature) * 240u / 255u, .s = 100,
+                    .b = (uint32_t)kp_rgb_effect_data(zero_delay)->color.b * temperature / 255u});
+            KP_CHECK(rgb_equal(pixels[0], expected));
         }
     }
 }

@@ -82,21 +82,16 @@ static struct {
   bool previous;
   bool participant;
 } kp_trigger_state[ARRAY_SIZE(kp_triggers)];
-static bool kp_triggers_ready;
 
 void kp_rgb_triggers_init(void) {
-  if (kp_triggers_ready) {
-    return;
-  }
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];
-    bool valid = t->condition == NULL || kp_rgb_condition_require(t->condition);
+    bool valid = kp_rgb_condition_require(t->condition);
     kp_trigger_state[i].disabled = !valid;
     if (!valid) {
       LOG_ERR("RGB trigger %s disabled: invalid condition", t->name);
     }
   }
-  kp_triggers_ready = true;
 }
 
 void kp_rgb_triggers_begin(void) {
@@ -118,9 +113,6 @@ static void kp_triggers_run(const struct kp_trig *t,
 }
 
 void kp_rgb_triggers_evaluate(int64_t now_ms) {
-  if (!kp_triggers_ready) {
-    return;
-  }
   int8_t edges[MAX(1, ARRAY_SIZE(kp_triggers))] = {0};
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];

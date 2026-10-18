@@ -28,9 +28,6 @@ const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
                                     uint16_t current, int16_t delta) {
   size_t count = kp_rgb_selector_count(selector);
-  if (count == 0) {
-    return current;
-  }
   int64_t norm_delta = delta % (int64_t)count;
   size_t start =
       ((int64_t)current + norm_delta + (int64_t)count) % (int64_t)count;
@@ -49,9 +46,6 @@ uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
 }
 
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
-  if (kp_rgb_selector_count(selector) == 0) {
-    return -ENOENT;
-  }
   const struct device *previous = selector->active_fx;
   if (selector->effect_index >= kp_rgb_selector_count(selector)) {
     selector->effect_index = 0;

@@ -181,9 +181,6 @@ static void kp_eff_reactive_apply(const struct device *dev,
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
-    if (c == NULL) {
-      continue;
-    }
     uint8_t contrib = kp_reactive_shape(cfg, origin->x, origin->y, c->x, c->y);
     if (contrib == 0) {
       continue;

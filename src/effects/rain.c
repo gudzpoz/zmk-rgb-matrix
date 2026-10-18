@@ -99,9 +99,6 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
   struct kp_rgb_hsb base = data->common.color;
   uint16_t bl = f->board_length;
 
-  if (f->count == 0) {
-    return true;
-  }
   if (cfg->mode == DT_ENUM_CONST(mode, drops) && !data->drops_seeded) {
     for (size_t i = 0; i < f->count; i++) {
       data->val[i] = 255;

@@ -63,14 +63,11 @@ static uint8_t kp_rgb_calc_brt_locked(int8_t direction) {
                        0, KP_RGB_BRT_MAX);
 }
 
-static int kp_rgb_change_brt(int8_t direction) {
-  if (k_is_in_isr())
-    return -EWOULDBLOCK;
+static void kp_rgb_change_brt(int8_t direction) {
   kp_rgb_matrix_lock();
   kp_rgb_global.brightness = kp_rgb_calc_brt_locked(direction);
   zmk_rgb_matrix_flush();
   kp_rgb_matrix_unlock();
-  return 0;
 }
 
 static int on_keymap_binding_convert_central_state_dependent_params(
@@ -126,7 +123,8 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
     break;
   case RGB_BRI_CMD:
   case RGB_BRD_CMD:
-    ret = kp_rgb_change_brt(command == RGB_BRI_CMD ? 1 : -1);
+    kp_rgb_change_brt(command == RGB_BRI_CMD ? 1 : -1);
+    ret = 0;
     break;
   case RGB_BRT_SET_CMD:
     if (argument > KP_RGB_BRT_MAX)

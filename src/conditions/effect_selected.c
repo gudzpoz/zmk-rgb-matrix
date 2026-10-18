@@ -51,9 +51,7 @@ DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 static int listener(const zmk_event_t *eh) {
   const struct zmk_rgb_selector_selection_changed *event =
       as_zmk_rgb_selector_selection_changed(eh);
-  if (event != NULL) {
-    DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
-  }
+  DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
   return ZMK_EV_EVENT_BUBBLE;
 }
 

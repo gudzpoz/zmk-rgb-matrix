@@ -114,9 +114,6 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
   ARG_UNUSED(dev);
   ARG_UNUSED(f);
 #else
-  if (f->count == 0) {
-    return true;
-  }
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   /* Tail length in layout units, capped at the board height so a short board
@@ -137,8 +134,7 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
     int64_t head = data->head_q8[c];
     int32_t speed = data->speed_q8[c];
 
-    for (uint8_t recycles = 0; recycles < 8 && remaining_ms > 0 && speed > 0;
-         recycles++) {
+    for (uint8_t recycles = 0; recycles < 8 && remaining_ms > 0; recycles++) {
       int64_t crossing_ms = ((int64_t)recycle_q8 - head) / speed + 1;
       if (crossing_ms > remaining_ms) {
         break;
