@@ -18,6 +18,11 @@ config KEYPAW_SIM_COMPOSITE_TEST
     default n
     depends on ARCH_POSIX && LED_STRIP
 
+config KEYPAW_SIM_GEOMETRY_TEST
+    bool "native_sim declared-layout geometry regression test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP
+
 config KEYPAW_SIM_SELECTOR_TEST
     bool "native_sim selector runtime test"
     default n

@@ -1,0 +1,63 @@
+/* Copyright (c) 2026 The ZMK Contributors
+ * SPDX-License-Identifier: MIT
+ */
+#include <dt-bindings/zmk/matrix_transform.h>
+#include <dt-bindings/keypaw/rgb_matrix.h>
+#include <physical_layouts.dtsi>
+
+/ {
+    chosen { zmk,physical-layout = &geometry_layout; };
+    geometry_transform: geometry-transform {
+        compatible = "zmk,matrix-transform";
+        rows = <1>;
+        columns = <8>;
+        map = <RC(0, 0) RC(0, 1) RC(0, 2) RC(0, 3)
+               RC(0, 4) RC(0, 5) RC(0, 6) RC(0, 7)>;
+    };
+    runtime_layout: runtime-layout {
+        compatible = "zmk,physical-layout";
+        status = "disabled";
+        display-name = "Runtime decoy";
+        transform = <&geometry_transform>;
+        keys = <&key_physical_attrs 100 100 900 800 0 0 0>;
+    };
+    geometry_layout: geometry-layout {
+        compatible = "zmk,physical-layout";
+        display-name = "Declared geometry";
+        transform = <&geometry_transform>;
+        keys = <&key_physical_attrs 100 100 20 30 0 0 0>,
+               <&key_physical_attrs 80 120 220 70 0 0 0>,
+               <&key_physical_attrs 100 100 400 400 0 0 0>,
+               <&key_physical_attrs 100 60 120 230 0 0 0>,
+               <&key_physical_attrs 100 100 500 500 0 0 0>,
+               <&key_physical_attrs 100 100 600 600 0 0 0>;
+    };
+    geometry_strip: geometry-strip {
+        compatible = "keypaw,led-strip-composite-probe";
+        chain-length = <5>;
+    };
+    rgb_matrix: rgb {
+        compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
+        strip = <&geometry_strip>;
+        physical-layout = <&geometry_layout>;
+        mapping = <3 0 KP_RGB_NO_KEY(10, 20) 3 1>;
+        initial-on;
+        initial-brightness = <100>;
+        max-brightness = <100>;
+        idle-brightness = <100>;
+        geometry_overlay: geometry-overlay {
+            compatible = "keypaw,rgb-overlay";
+            all-leds;
+            geometry_probe: geometry-probe {
+                compatible = "keypaw,rgb-matrix-selector-probe";
+            };
+        };
+    };
+};
+&kscan {
+    rows = <1>;
+    columns = <8>;
+    events = <>;
+    /delete-property/ exit-after;
+};

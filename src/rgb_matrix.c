@@ -19,7 +19,6 @@
 #include <zmk/activity.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/position_state_changed.h>
-#include <zmk/physical_layouts.h>
 #include <zmk/rgb_matrix.h>
 
 #include <zmk/events/activity_state_changed.h>
@@ -31,7 +30,12 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 #define KP_LAYOUT DT_PHANDLE(KP_RGB_NODE, physical_layout)
-#define KP_NKEYS DT_PROP_LEN(KP_LAYOUT, keys)
+#define KP_NKEYS DT_PROP_LEN_OR(KP_LAYOUT, keys, 0)
+
+BUILD_ASSERT(DT_NODE_HAS_COMPAT(KP_LAYOUT, zmk_physical_layout),
+             "RGB physical-layout must reference zmk,physical-layout");
+BUILD_ASSERT(DT_NODE_HAS_PROP(KP_LAYOUT, keys),
+             "RGB physical-layout must provide keys");
 
 BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 1,
              "RGB matrix requires exactly one enabled matrix node");
@@ -73,13 +77,29 @@ struct kp_rgb_global kp_rgb_global = {
     .brightness = KP_RGB_INITIAL_BRIGHTNESS,
 };
 
+/* Match ZMK's signed 16-bit physical attributes before unsigned storage. */
+#define KP_KEY_CENTER_AXIS(x, width)                                           \
+  (uint16_t)((int16_t)(int32_t)DT_PHA_BY_IDX(node_id, prop, idx, x) +          \
+             (int16_t)(int32_t)DT_PHA_BY_IDX(node_id, prop, idx, width) / 2)
+#define KP_KEY_CENTER(node_id, prop, idx)                                      \
+  {                                                                            \
+      .x = KP_KEY_CENTER_AXIS(x, width),                                       \
+      .y = KP_KEY_CENTER_AXIS(y, height),                                      \
+  },
+
+static const struct kp_rgb_coord kp_key_centers[KP_NKEYS] = {
+#if DT_NODE_HAS_COMPAT(KP_LAYOUT, zmk_physical_layout) && DT_NODE_HAS_PROP(KP_LAYOUT, keys)
+    DT_FOREACH_PROP_ELEM(KP_LAYOUT, keys, KP_KEY_CENTER)
+#endif
+};
+
 static const uint32_t kp_map[KP_LED_COUNT] = DT_PROP(KP_RGB_NODE, mapping);
 static struct kp_rgb_coord kp_led_coords[KP_LED_COUNT];
 static uint16_t kp_rgb_board_length;
 static uint16_t kp_rgb_board_height;
 static size_t kp_key_to_led[KP_NKEYS];
 
-static void kp_resolve_layout(const struct zmk_physical_layout *layout) {
+static void kp_resolve_layout(void) {
   uint16_t min_x = UINT16_MAX, min_y = UINT16_MAX, max_x = 0, max_y = 0;
   memset(kp_key_to_led, 0xFF, sizeof(kp_key_to_led));
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -88,16 +108,10 @@ static void kp_resolve_layout(const struct zmk_physical_layout *layout) {
     if (k & KP_RGB_NO_KEY_XY_FLAG) {
       x = (k >> 16) & KP_RGB_NO_KEY_XY_X_MASK;
       y = k & KP_RGB_NO_KEY_XY_Y_MASK;
-    } else if (k < MIN((size_t)KP_NKEYS, layout->keys_len)) {
-      const struct zmk_key_physical_attrs *key = &layout->keys[k];
-      x = key->x + key->width / 2;
-      y = key->y + key->height / 2;
-      kp_key_to_led[k] = i;
     } else {
-      LOG_ERR("mapping key %u out of range (layout has %u keys)", k,
-              (uint32_t)layout->keys_len);
-      x = 0;
-      y = 0;
+      x = kp_key_centers[k].x;
+      y = kp_key_centers[k].y;
+      kp_key_to_led[k] = i;
     }
     kp_led_coords[i] =
         (struct kp_rgb_coord){.x = (uint16_t)x, .y = (uint16_t)y};
@@ -797,13 +811,7 @@ int zmk_rgb_matrix_set_period(const struct device *fx, uint32_t period_ms) {
 }
 
 static int kp_rgb_matrix_layout_init(void) {
-  const struct zmk_physical_layout *const *layouts;
-  size_t layout_count = zmk_physical_layouts_get_list(&layouts);
-  if (layout_count == 0) {
-    LOG_ERR("No physical layout available for the RGB matrix");
-    return -ENODEV;
-  }
-  kp_resolve_layout(layouts[0]);
+  kp_resolve_layout();
   return 0;
 }
 SYS_INIT(kp_rgb_matrix_layout_init, POST_KERNEL,

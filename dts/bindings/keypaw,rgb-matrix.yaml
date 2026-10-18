@@ -38,11 +38,14 @@ properties:
     type: phandle
     required: true
     description: |
-      The zmk,physical-layout node whose key attributes are used to place every
-      per-key LED. A "mapping" entry that is a plain integer is treated as a key
-      position into this layout; the LED's (x, y) centre is computed from the
-      key's (x, y, width, height). LEDs not under a key use KP_RGB_NO_KEY(x, y)
-      in the "mapping" instead.
+      The zmk,physical-layout node supplying fixed RGB geometry. It must provide
+      a keys property. A plain integer in "mapping" indexes that property; the
+      LED's (x, y) centre is computed from the key's (x, y, width, height).
+      LEDs not under a key use KP_RGB_NO_KEY(x, y) in "mapping" instead.
+
+      This node need not be the active or chosen keyboard layout. Incoming key
+      positions must use numbering compatible with "mapping"; RGB geometry does
+      not follow runtime layout selection or remap its key positions.
 
   mapping:
     type: array
