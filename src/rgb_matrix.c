@@ -78,13 +78,13 @@ struct kp_rgb_global kp_rgb_global = {
 };
 
 /* Match ZMK's signed 16-bit physical attributes before unsigned storage. */
-#define KP_KEY_CENTER_AXIS(x, width)                                           \
+#define KP_KEY_CENTER_AXIS(node_id, prop, idx, x, width)                       \
   (uint16_t)((int16_t)(int32_t)DT_PHA_BY_IDX(node_id, prop, idx, x) +          \
              (int16_t)(int32_t)DT_PHA_BY_IDX(node_id, prop, idx, width) / 2)
 #define KP_KEY_CENTER(node_id, prop, idx)                                      \
   {                                                                            \
-      .x = KP_KEY_CENTER_AXIS(x, width),                                       \
-      .y = KP_KEY_CENTER_AXIS(y, height),                                      \
+      .x = KP_KEY_CENTER_AXIS(node_id, prop, idx, x, width),                   \
+      .y = KP_KEY_CENTER_AXIS(node_id, prop, idx, y, height),                  \
   },
 
 static const struct kp_rgb_coord kp_key_centers[KP_NKEYS] = {

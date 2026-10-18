@@ -15,7 +15,7 @@
 
 struct kp_rgb_effect_defaults {
   struct kp_rgb_hsb color;
-  uint32_t duration_ms; /* 0 -> initial_duration_ms */
+  uint16_t duration_ms;
 };
 
 /* Indexed by DTS child slot; disabled children retain a zeroed entry. */
@@ -32,7 +32,6 @@ struct kp_rgb_selector {
   size_t effect_count;
   size_t effect_index;
   const struct device *active_fx;
-  int64_t initial_duration_ms;
   uint16_t initial_effect;
   bool publish_changes;
   bool notification_pending;

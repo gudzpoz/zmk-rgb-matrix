@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Native effect initialization, public setters, deferred readiness and reset."""
 from pathlib import Path
+import os
 import shlex
 import subprocess
 import tempfile
@@ -68,6 +69,93 @@ OVERLAY = '''
 }; };
 '''
 
+# Values are paired with independent literal expectations in selector_defaults.c.
+BOUNDARIES = [("below", "99"), ("min", "100"), ("max", "10000"),
+              ("above", "10001"), ("negative", "(-1)"), ("zero", "0"),
+              ("omitted", None)]
+for index, (name, duration) in enumerate(BOUNDARIES):
+    prop = f"duration = <{duration}>;" if duration is not None else ""
+    parent_prop = (f"initial-duration-ms = <{duration}>;"
+                   if duration is not None else "")
+    OVERLAY += f'''
+&rgb_matrix {{
+    boundary_parent_{name}: boundary_parent_{name} {{
+        compatible = "keypaw,rgb-overlay-selector";
+        {parent_prop}
+        parent_{name}: parent_{name} {{
+            compatible = "test,rgb-default-effect";
+            duration = <0>;
+        }};
+    }};
+    child_boundaries {{
+        compatible = "keypaw,rgb-overlay-selector";
+        initial-duration-ms = <2345>;
+        child_{name}: child_{name} {{
+            compatible = "test,rgb-default-effect"; {prop}
+        }};
+    }};
+    private_owner_{name} {{
+        compatible = "keypaw,rgb-overlay";
+        private_{name}: private_{name} {{
+            compatible = "test,rgb-default-effect"; {prop}
+        }};
+    }};
+    default_disabled {{
+        disabled_{name}: disabled_{name} {{
+            compatible = "test,rgb-default-effect"; {prop}
+        }};
+    }};
+}};
+/ {{ behaviors {{
+    bp{index} {{ compatible = "keypaw,behavior-rgb-selector";
+        #binding-cells = <2>; selector = <&boundary_parent_{name}>; }};
+}}; }};
+'''
+OVERLAY += '''
+&rgb_matrix {
+    child_boundaries: child_boundaries {};
+    default_selector {
+        missing_selected: missing_selected {
+            compatible = "test,rgb-missing-defaults"; test-period = <3210>;
+            zephyr,deferred-init;
+        };
+    };
+    missing_owner {
+        compatible = "keypaw,rgb-overlay";
+        missing_private: missing_private {
+            compatible = "test,rgb-missing-defaults"; test-period = <3210>;
+        };
+    };
+    missing_owner_wide {
+        compatible = "keypaw,rgb-overlay";
+        missing_private_wide: missing_private_wide {
+            compatible = "test,rgb-missing-defaults"; test-period = <70000>;
+        };
+    };
+    missing_owner_negative {
+        compatible = "keypaw,rgb-overlay";
+        missing_private_negative: missing_private_negative {
+            compatible = "test,rgb-missing-defaults"; test-period = <(-65536)>;
+        };
+    };
+    missing_owner_minus_one {
+        compatible = "keypaw,rgb-overlay";
+        missing_private_minus_one: missing_private_minus_one {
+            compatible = "test,rgb-missing-defaults"; test-period = <(-1)>;
+        };
+    };
+    default_disabled {
+        missing_disabled: missing_disabled {
+            compatible = "test,rgb-missing-defaults"; test-period = <3210>;
+        };
+    };
+};
+/ { behaviors {
+    cbctl { compatible = "keypaw,behavior-rgb-selector";
+        #binding-cells = <2>; selector = <&child_boundaries>; };
+}; };
+'''
+
 
 def run_variant(root, settings):
     root = root / ("settings" if settings else "no-settings")
@@ -78,6 +166,8 @@ def run_variant(root, settings):
     (config / "native_sim.conf").write_text(
         (SIM / "config/native_sim.conf").read_text() +
         "\nCONFIG_ASSERT=y\n"
+        "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS=100\n"
+        "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS=10000\n"
         f"CONFIG_SETTINGS={'y' if settings else 'n'}\n" +
         ("CONFIG_SETTINGS_CUSTOM=y\n" if settings else ""))
     (config / "native_sim.overlay").write_text(
@@ -91,6 +181,11 @@ def run_variant(root, settings):
         'description: Defaults test effect\ncompatible: "test,rgb-default-effect"\n'
         'include: "keypaw,rgb-matrix-effect-common.yaml"\n'
         'properties:\n  zephyr,deferred-init:\n    type: boolean\n')
+    (plugin / "dts/bindings/test,rgb-missing-defaults.yaml").write_text(
+        'description: Extension without color or duration properties\n'
+        'compatible: "test,rgb-missing-defaults"\ninclude: "base.yaml"\n'
+        'properties:\n  test-period:\n    type: int\n    required: true\n'
+        '  zephyr,deferred-init:\n    type: boolean\n')
     (plugin / "CMakeLists.txt").write_text(
         "zephyr_library()\nzephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)\n"
         f'zephyr_library_sources("{SIM / "selector_defaults.c"}")\n')
@@ -98,6 +193,7 @@ def run_variant(root, settings):
                "-b", "native_sim//zmk_test_mock", "--", f"-DZMK_CONFIG={config}",
                f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'};{plugin}"]
     result = run_logged(command, cwd=WORKSPACE, text=True, stdout=subprocess.PIPE,
+                        env={**os.environ, "ZEPHYR_TOOLCHAIN_VARIANT": "host"},
                         stderr=subprocess.STDOUT, timeout=600, log_path=root / "build.log")
     assert result.returncode == 0, result.stdout[-16000:]
     result = run_logged([str(root / "build/zephyr/zmk.exe"), "--stop_at=2", "-no-rt"],

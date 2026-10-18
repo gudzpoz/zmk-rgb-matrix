@@ -58,9 +58,6 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
 }
 
 int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
-  uint16_t duration = (uint16_t)CLAMP(selector->initial_duration_ms,
-                                      CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                                      CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   for (size_t i = 0; i < kp_rgb_selector_count(selector); i++) {
     const struct device *fx = kp_rgb_selector_at(selector, i);
     if (fx == NULL) {
@@ -69,12 +66,7 @@ int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
     const struct kp_rgb_effect_defaults *def = &selector->members[i].defaults;
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
     data->color = def->color;
-    data->duration_ms =
-        def->duration_ms != 0
-            ? (uint16_t)CLAMP(def->duration_ms,
-                              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
-                              CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
-            : duration;
+    data->duration_ms = def->duration_ms;
   }
   selector->effect_index = selector->initial_effect;
   return kp_rgb_selector_resolve_locked(selector);

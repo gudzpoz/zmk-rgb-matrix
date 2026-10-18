@@ -97,7 +97,9 @@ static const struct kp_rgb_effect_callbacks geometry_callbacks = {.render = geom
 static const struct { struct kp_rgb_effect_common_config common; } geometry_effect_cfg = {
     KP_RGB_EFFECT_COMMON_CONFIG(0),
 };
-static struct { struct kp_rgb_effect_common_data common; } geometry_effect_data;
+static struct { struct kp_rgb_effect_common_data common; } geometry_effect_data = {
+    KP_RGB_EFFECT_COMMON_DATA(0, 0, 0),
+};
 KP_RGB_EFFECT_DEFINE(DT_NODELABEL(geometry_probe), &geometry_callbacks, geometry_effect);
 
 static int strip_update(const struct device *dev, struct led_rgb *pixels, size_t count) {
