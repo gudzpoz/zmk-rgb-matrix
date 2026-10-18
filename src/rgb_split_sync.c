@@ -104,14 +104,20 @@ struct kp_rgb_sync_source {
   struct kp_rgb_sync_selector_progress selectors[KP_RGB_SYNC_SELECTOR_CAPACITY];
 };
 
-static struct k_work_delayable kp_rgb_sync_poll;
-static struct k_work_delayable kp_rgb_sync_step;
-static struct k_work_delayable kp_rgb_sync_clock;
+static void kp_rgb_sync_poll_handler(struct k_work *work);
+static void kp_rgb_sync_step_handler(struct k_work *work);
+static void kp_rgb_sync_clock_handler(struct k_work *work);
+static void kp_rgb_sync_selector_step_handler(struct k_work *work);
+
+static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
+static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_step, kp_rgb_sync_step_handler);
+static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
 /* Source progress belongs to the RGB work queue; revisions use the matrix mutex. */
 static struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
 
-static struct k_work_delayable kp_rgb_sync_selector_step;
+static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_selector_step,
+                               kp_rgb_sync_selector_step_handler);
 static size_t kp_rgb_sync_selector_cursor;
 
 void kp_rgb_split_selector_dirty_locked(const struct device *selector) {
@@ -507,11 +513,6 @@ static void kp_rgb_sync_poll_handler(struct k_work *work) {
 }
 
 static int kp_rgb_split_sync_init(void) {
-  k_work_init_delayable(&kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
-  k_work_init_delayable(&kp_rgb_sync_step, kp_rgb_sync_step_handler);
-  k_work_init_delayable(&kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
-  k_work_init_delayable(&kp_rgb_sync_selector_step,
-                        kp_rgb_sync_selector_step_handler);
   /* The module work queue is started at POST_KERNEL, well before this. The
    * first poll is delayed rather than immediate to stay clear of the
    * settings_load() that runs at the top of main(). */
