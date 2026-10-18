@@ -216,6 +216,10 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
     }
     if (action == 3) {
         global_apply(RGB_RESET_CMD, 0);
+    } else if (action == 4) {
+        CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
+            RGB_COLOR_HSB_VAL(10, 100, 0)) == 0);
     } else if (action) {
         CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
             action == 2 ? RGB_RESET_CMD : RGB_EFS_CMD, action == 2 ? 0 : 2) == 0);
@@ -297,17 +301,21 @@ static struct lane lane(unsigned source, unsigned index) {
 static void apply(const struct device *selector, uint32_t command, uint32_t value) {
     CHECK(kp_rgb_selector_binding_apply(selector, command, value) == 0);
 }
-static void parameters(const struct device *selector, unsigned slot, unsigned hue, unsigned period) {
-    apply(selector, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, slot),
-          RGB_COLOR_HSB_VAL(hue, 100, 100));
+static void parameters_hsb(const struct device *selector, unsigned slot, uint32_t color, unsigned period) {
+    apply(selector, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, slot), color);
     apply(selector, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, slot), period);
 }
-static void matches(unsigned source, unsigned index, unsigned slot, unsigned hue, unsigned period) {
+static void matches_hsb(unsigned source, unsigned index, unsigned slot, uint32_t color, unsigned period) {
     struct lane value = lane(source, index);
     CHECK(value.completed > 0 && value.phase == 0);
-    CHECK(value.selected == slot);
-    CHECK(value.selected_color == RGB_COLOR_HSB_VAL(hue, 100, 100));
+    CHECK(value.selected == slot && value.selected_color == color);
     CHECK(value.selected_period == period);
+}
+static void parameters(const struct device *selector, unsigned slot, unsigned hue, unsigned period) {
+    parameters_hsb(selector, slot, RGB_COLOR_HSB_VAL(hue, 100, 100), period);
+}
+static void matches(unsigned source, unsigned index, unsigned slot, unsigned hue, unsigned period) {
+    matches_hsb(source, index, slot, RGB_COLOR_HSB_VAL(hue, 100, 100), period);
 }
 
 static void check_all_members(unsigned index) {
@@ -357,6 +365,119 @@ static void central_irq(const void *unused) {
     ARG_UNUSED(unused);
     CHECK(k_is_in_isr());
     central_irq_result = control_apply(RGB_EFS_CMD, 2);
+}
+static void brightness_split(void) {
+    bool reset = !strcmp(split_case, "brightness-reset");
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 50);
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 25);
+    CHECK(kp_rgb_effect_data(DEV(probe_b))->color.b == 50);
+    CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 25);
+    const uint32_t old = RGB_COLOR_HSB_VAL(10, 100, 37);
+    parameters_hsb(DEV(selector_a), 1, old, 1100);
+    parameters_hsb(DEV(selector_b), 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
+    if (reset) {
+        parameters_hsb(DEV(selector_a), 2, RGB_COLOR_HSB_VAL(220, 70, 7), 2300);
+        parameters_hsb(DEV(selector_b), 1, RGB_COLOR_HSB_VAL(180, 60, 0), 2400);
+    }
+    mutate_kind = RGB_SELECTOR_COLOR_CMD;
+    mutate_action = reset ? 3 : 4;
+    failing(!reset);
+    connect(3);
+    k_sleep(K_MSEC(900));
+    CHECK(mutation_count == 1);
+    if (!reset) {
+        CHECK(lane(0, 0).completed == 0);
+        CHECK(lane(1, 0).completed && lane(0, 1).completed && lane(1, 1).completed);
+        unsigned failures = 0;
+        for (unsigned i = 0; i < attempt_count; i++) {
+            const struct attempt *r = &attempts[i];
+            if (r->accepted) continue;
+            CHECK(r->source == 0 && !strcmp(r->endpoint, DEV(rgbs_a)->name));
+            CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+            CHECK(r->argument == old);
+            failures++;
+        }
+        CHECK(failures >= 3);
+        failing(false);
+    }
+    k_sleep(K_MSEC(2500));
+    uint32_t a_period = kp_rgb_effect_period(DEV(probe_a));
+    uint32_t c_period = kp_rgb_effect_period(DEV(probe_c));
+    const uint32_t commands[] = {
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD,
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), RGB_EFS_CMD};
+    const uint32_t reset_values[] = {old, 1100, 1, RGB_COLOR_HSB_VAL(120, 100, 50),
+        a_period, RGB_COLOR_HSB_VAL(240, 100, 25), c_period, 1};
+    const uint32_t latest_values[] = {old, 1100, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100, 1};
+    unsigned step = 0, expected = reset ? 8 : 6;
+    for (unsigned i = 0; i < attempt_count && step < expected; i++) {
+        const struct attempt *r = &attempts[i];
+        if (!r->accepted || r->source || strcmp(r->endpoint, DEV(rgbs_a)->name)) continue;
+        uint32_t command = !reset && step == 5 ? RGB_EFS_CMD : commands[step];
+        CHECK(r->command == command);
+        CHECK(r->argument == (reset ? reset_values[step] : latest_values[step]));
+        step++;
+    }
+    CHECK(step == expected);
+    if (reset) {
+        check_all_members(0); check_all_members(1);
+        for (unsigned s = 0; s < 2; s++) {
+            struct lane a = lane(s, 0), b = lane(s, 1);
+            CHECK(a.member_color[1] == RGB_COLOR_HSB_VAL(120, 100, 50));
+            CHECK(a.member_color[2] == RGB_COLOR_HSB_VAL(240, 100, 25));
+            CHECK(b.member_color[0] == RGB_COLOR_HSB_VAL(60, 100, 50));
+            CHECK(b.member_color[1] == RGB_COLOR_HSB_VAL(180, 100, 25));
+            for (unsigned index = 0; index < 2; index++) {
+                const char *endpoint = index ? DEV(rgbs_b)->name : DEV(rgbs_a)->name;
+                unsigned count = 0;
+                for (unsigned i = 0; i < attempt_count; i++)
+                    if (attempts[i].accepted && attempts[i].source == s &&
+                        !strcmp(attempts[i].endpoint, endpoint)) count++;
+                CHECK(count >= 5);
+                unsigned seen = 0;
+                for (unsigned i = 0; i < attempt_count; i++) {
+                    const struct attempt *r = &attempts[i];
+                    if (!r->accepted || r->source != s || strcmp(r->endpoint, endpoint)) continue;
+                    if (seen++ < count - 5) continue;
+                    unsigned n = seen - (count - 5) - 1;
+                    unsigned slot = index ? n / 2 : 1 + n / 2;
+                    uint32_t command = n == 4 ? RGB_EFS_CMD : KP_RGB_SELECTOR_MEMBER_COMMAND(
+                        n & 1 ? RGB_SELECTOR_PERIOD_CMD : RGB_SELECTOR_COLOR_CMD, slot);
+                    CHECK(r->command == command);
+                    if (n == 4) CHECK(r->argument == (index ? 0 : 1));
+                    else if (!(n & 1)) {
+                        uint32_t color = index ? (n == 0 ? RGB_COLOR_HSB_VAL(60, 100, 50) :
+                            RGB_COLOR_HSB_VAL(180, 100, 25)) : (n == 0 ? RGB_COLOR_HSB_VAL(120, 100, 50) :
+                            RGB_COLOR_HSB_VAL(240, 100, 25));
+                        CHECK(r->argument == color);
+                    } else {
+                        const struct device *member = index ? (n == 1 ? DEV(probe_b) : DEV(probe_d)) :
+                            (n == 1 ? DEV(probe_a) : DEV(probe_c));
+                        CHECK(r->argument == kp_rgb_effect_period(member));
+                    }
+                }
+            }
+        }
+    } else {
+        for (unsigned s = 0; s < 2; s++) {
+            matches_hsb(s, 0, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
+            matches_hsb(s, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
+        }
+        connect(2); k_sleep(K_MSEC(150));
+        k_mutex_lock(&records_lock, K_FOREVER);
+        memset(remote[0], 0, sizeof(remote[0]));
+        k_mutex_unlock(&records_lock);
+        connect(3); k_sleep(K_MSEC(1200));
+        matches_hsb(0, 0, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
+        matches_hsb(0, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
+    }
+    printk("PASS split %s\n", split_case); exit(0);
 }
 static void extended_split(void) {
     if (!strncmp(split_case, "sweep-", 6)) {
@@ -669,6 +790,7 @@ static void test_thread(void *a, void *b, void *c) {
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
     if (!strncmp(split_case, "late-", 5) || !strncmp(split_case, "ready-", 6)) readiness();
+    if (!strncmp(split_case, "brightness-", 11)) brightness_split();
     apply(DEV(selector_a), RGB_EFS_CMD, 1);
     parameters(DEV(selector_a), 1, 10, 1100);
     apply(DEV(selector_b), RGB_EFS_CMD, 0);
@@ -921,20 +1043,44 @@ static void receiving(void *a, void *b, void *c) {
     struct kp_rgb_hsb a_color = kp_rgb_effect_data(DEV(probe_a))->color;
     struct kp_rgb_hsb b_color = kp_rgb_effect_data(DEV(probe_b))->color;
     uint32_t a_period = kp_rgb_effect_period(DEV(probe_a)), b_period = kp_rgb_effect_period(DEV(probe_b));
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
-                  RGB_COLOR_HSB_VAL(220, 70, 100)) == 0);
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2300) == 0);
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 220);
-    CHECK(kp_rgb_effect_period(DEV(probe_c)) == 2300);
+    struct kp_rgb_hsb d_color = kp_rgb_effect_data(DEV(probe_d))->color;
+    uint32_t d_period = kp_rgb_effect_period(DEV(probe_d));
+    CHECK(receive(DEV(rgb_matrix), RGB_BRT_SET_CMD, 37) == 0);
+    bool initial_on;
+    CHECK(zmk_rgb_matrix_get_user_state(&initial_on) == 0);
+    const unsigned levels[] = {37, 0};
+    for (size_t i = 0; i < ARRAY_SIZE(levels); i++) {
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
+                      RGB_COLOR_HSB_VAL(220, 70, levels[i])) == 0);
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2300) == 0);
+        CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+        struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(probe_c))->color;
+        CHECK(color.h == 220 && color.s == 70 && color.b == levels[i]);
+        CHECK(kp_rgb_effect_period(DEV(probe_c)) == 2300);
+        color = kp_rgb_effect_data(DEV(probe_a))->color;
+        CHECK(color.h == a_color.h && color.s == a_color.s && color.b == a_color.b);
+        color = kp_rgb_effect_data(DEV(probe_b))->color;
+        CHECK(color.h == b_color.h && color.s == b_color.s && color.b == b_color.b);
+        color = kp_rgb_effect_data(DEV(probe_d))->color;
+        CHECK(color.h == d_color.h && color.s == d_color.s && color.b == d_color.b);
+        CHECK(kp_rgb_effect_period(DEV(probe_a)) == a_period);
+        CHECK(kp_rgb_effect_period(DEV(probe_b)) == b_period && kp_rgb_effect_period(DEV(probe_d)) == d_period);
+        bool on;
+        CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on == initial_on);
+        CHECK(kp_rgb_global.brightness == 37);
+    }
+    k_sleep(K_MSEC(200)); CHECK(peripheral_reports == 0);
     CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, 2) == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 0), 0) == -ENOENT);
     const uint32_t colors[] = {RGB_COLOR_HSB_VAL(361, 1, 100), RGB_COLOR_HSB_VAL(1, 101, 100),
-                              RGB_COLOR_HSB_VAL(1, 1, 101), UINT32_MAX};
+                              RGB_COLOR_HSB_VAL(1, 1, 101), RGB_COLOR_HSB_VAL(1, 1, 255), UINT32_MAX};
     for (size_t i = 0; i < ARRAY_SIZE(colors); i++)
         CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), colors[i]) == -EINVAL);
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 220 &&
+          kp_rgb_effect_data(DEV(probe_c))->color.s == 70 && kp_rgb_effect_data(DEV(probe_c))->color.b == 0);
     const uint32_t periods[] = {0, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS - 1,
                                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS + 1, UINT32_MAX};
     for (size_t i = 0; i < ARRAY_SIZE(periods); i++)
@@ -954,13 +1100,13 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(behavior_keymap_binding_pressed(&no_control, (struct zmk_behavior_binding_event){0}) == -EINVAL);
     irq_offload(receiving_irq, NULL);
     CHECK(irq_result == -EWOULDBLOCK);
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), RGB_COLOR_HSB_VAL(220, 70, 100)) == 0);
+    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), RGB_COLOR_HSB_VAL(220, 70, 0)) == 0);
     CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2300) == 0);
     CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, 2) == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 220 && kp_rgb_effect_data(DEV(probe_c))->color.s == 70 &&
-          kp_rgb_effect_data(DEV(probe_c))->color.b == 100 && kp_rgb_effect_period(DEV(probe_c)) == 2300);
+          kp_rgb_effect_data(DEV(probe_c))->color.b == 0 && kp_rgb_effect_period(DEV(probe_c)) == 2300);
     CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == a_color.h &&
           kp_rgb_effect_data(DEV(probe_a))->color.s == a_color.s && kp_rgb_effect_data(DEV(probe_a))->color.b == a_color.b);
     CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == b_color.h &&

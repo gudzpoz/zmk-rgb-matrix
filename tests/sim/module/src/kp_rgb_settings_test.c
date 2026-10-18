@@ -332,7 +332,7 @@ static void perturb_and_reload(void) {
     colors[i] = kp_rgb_effect_data(effects[i])->color;
     periods[i] = kp_rgb_effect_period(effects[i]);
     struct kp_rgb_hsb changed = {.h = (colors[i].h + 17) % 360,
-                                 .s = colors[i].s == 25 ? 75 : 25, .b = 100};
+                                 .s = colors[i].s == 25 ? 75 : 25, .b = (uint8_t)(i * 25)};
     CHECK(zmk_rgb_matrix_set_color(effects[i], &changed) == 0);
     CHECK(zmk_rgb_matrix_set_period(effects[i], periods[i] == 1700 ? 1800 : 1700) == 0);
     colors[i] = changed;
@@ -361,8 +361,10 @@ static void perturb_and_reload(void) {
   for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
     CHECK(kp_rgb_effect_data(effects[i])->color.h == colors[i].h);
     CHECK(kp_rgb_effect_data(effects[i])->color.s == colors[i].s);
+    CHECK(kp_rgb_effect_data(effects[i])->color.b == colors[i].b);
     CHECK(kp_rgb_effect_period(effects[i]) == periods[i]);
   }
+  CHECK(saves == before);
 }
 
 static void check_selection_bytes(const void *bytes, size_t len, const char *id) {
@@ -446,7 +448,7 @@ static void runtime_parameters(void) {
   const uint32_t commands[] = {RGB_HUI_CMD, RGB_HUD_CMD, RGB_SAI_CMD, RGB_SAD_CMD,
                               RGB_SPI_CMD, RGB_SPD_CMD, RGB_COLOR_HSB_CMD};
   for (size_t i = 0; i < ARRAY_SIZE(commands); i++) {
-    uint32_t argument = commands[i] == RGB_COLOR_HSB_CMD ? RGB_COLOR_HSB_VAL(211, 37, 100) : 0;
+    uint32_t argument = commands[i] == RGB_COLOR_HSB_CMD ? RGB_COLOR_HSB_VAL(211, 37, 43) : 0;
     invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
     invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
     k_sleep(K_MSEC(60));
@@ -454,9 +456,10 @@ static void runtime_parameters(void) {
   }
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 211);
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 37);
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 43);
   qualified_parameter(DEV(rgbs_a),
       KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
-      RGB_COLOR_HSB_VAL(288, 55, 100));
+      RGB_COLOR_HSB_VAL(288, 55, 29));
   qualified_parameter(DEV(rgbs_a),
       KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
       2888);
@@ -468,6 +471,9 @@ static void runtime_parameters(void) {
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2888);
   CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 288);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 29);
+  CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 43);
+  CHECK(saves == before);
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2888);
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 211);
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
@@ -499,7 +505,7 @@ static void runtime_parameters(void) {
 static void validation_case(void) {
   struct kp_rgb_persist_global_record valid = {.version = 3, .user_on = 0, .brightness = 66};
   struct kp_rgb_persist_selector_record selected;
-  struct kp_rgb_hsb live = {.h = 211, .s = 37, .b = 100};
+  struct kp_rgb_hsb live = {.h = 211, .s = 37, .b = 41};
   CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &live) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 1234) == 0);
   for (unsigned order = 0; order < 2; order++) {
@@ -533,6 +539,7 @@ static void validation_case(void) {
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == (order ? DEV(probe_c) : DEV(probe_a)));
     CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == live.h);
     CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == live.s);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == live.b);
     CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1234);
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
   }
@@ -753,10 +760,10 @@ static void extended_case(void) {
     stage(SELECTOR_A_PATH "state", &selection, sizeof(selection));
     CHECK(kp_rgb_persist_encode_selector(B_STATIC_NAME, &selection) == 0);
     stage(SELECTOR_B_PATH "state", &selection, sizeof(selection));
-    struct kp_rgb_hsb live = {.h = 267, .s = 61, .b = 100};
+    struct kp_rgb_hsb live = {.h = 267, .s = 61, .b = 27};
     CHECK(zmk_rgb_matrix_set_color(DEV(probe_b), &live) == 0);
     CHECK(zmk_rgb_matrix_set_period(DEV(probe_b), 2345) == 0);
-    struct kp_rgb_hsb changed_a = {.h = 313, .s = 22, .b = 100};
+    struct kp_rgb_hsb changed_a = {.h = 313, .s = 22, .b = 38};
     CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &changed_a) == 0);
     CHECK(zmk_rgb_matrix_set_color(DEV(probe_c), &changed_a) == 0);
     CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2777) == 0);
@@ -769,6 +776,8 @@ static void extended_case(void) {
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
     CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 100);
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 100);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 100);
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 100);
     CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
     CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
 #if DT_NODE_EXISTS(DT_NODELABEL(optout))
@@ -776,6 +785,7 @@ static void extended_case(void) {
 #endif
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 267);
+    CHECK(kp_rgb_effect_data(DEV(probe_b))->color.b == 27);
     CHECK(kp_rgb_effect_period(DEV(probe_b)) == 2345);
     bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
     CHECK(kp_rgb_global.brightness == 33);

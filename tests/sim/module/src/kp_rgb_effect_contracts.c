@@ -251,6 +251,124 @@ static void variants(void) {
     KP_CHECK(kinds[RIPPLE] == 1 && kinds[HEATMAP] == 3 && kinds[DIGITAL] == 2);
     KP_CHECK(kinds[EXAMPLE] == DT_NODE_EXISTS(DT_NODELABEL(effects_example)));
 }
+static uint8_t peak(struct led_rgb rgb) { return MAX(rgb.r, MAX(rgb.g, rgb.b)); }
+
+/* HSV conversion floors V first, then floors V * channel_factor / 255.
+ * At B50, floor(50*f/d) == floor(floor(100*f/d)/2), including generated H/S.
+ * Recover the exact integer V and enumerate only channel factors compatible
+ * with the full-brightness sample; RGB/2 is not a valid oracle here.
+ */
+static void half_channel(uint8_t full, uint8_t half, unsigned v, unsigned half_v) {
+    bool matched = false;
+    for (unsigned factor = 0; factor <= 255; factor++) {
+        if (v * factor / 255 == full && half_v * factor / 255 == half) matched = true;
+    }
+    KP_CHECK(matched);
+}
+static void half_pixel(struct led_rgb full, struct led_rgb half) {
+    unsigned b = 0;
+    while (b < 100 && b * 255 / 100 < peak(full)) b++;
+    unsigned v = b * 255 / 100, half_v = (b / 2) * 255 / 100;
+    KP_CHECK(v == peak(full) && peak(half) == half_v);
+    half_channel(full.r, half.r, v, half_v);
+    half_channel(full.g, half.g, v, half_v);
+    half_channel(full.b, half.b, v, half_v);
+}
+static struct led_rgb ripple_expected(const struct device *dev, size_t led) {
+    struct kp_rgb_hsb base = kp_rgb_effect_data(dev)->color;
+    struct kp_rgb_hsb bg = base;
+    bg.b = base.b * DT_PROP(DT_NODELABEL(fx_ripple), background_brightness) / 100;
+    struct led_rgb result = kp_rgb_hsb_to_rgb(bg);
+    uint32_t period = kp_rgb_effect_period(dev), age = frame.local_ms;
+    if (age >= period) return result;
+    unsigned radius = (uint64_t)frame.board_length * age / period;
+    if (!radius) return result;
+    unsigned width = MAX(radius * 60 / 100, 1), window = MAX(period / 4, 1);
+    unsigned fade = age + window < period ? 255 : 255 * (period - age) / window;
+    int32_t dx = (int32_t)coords[led].x - coords[0].x;
+    int32_t dy = (int32_t)coords[led].y - coords[0].y;
+    unsigned distance = 0, square = dx * dx + dy * dy;
+    while ((uint64_t)(distance + 1) * (distance + 1) <= square) distance++;
+    unsigned delta = distance > radius ? distance - radius : radius - distance;
+    if (delta > width) return result;
+    unsigned amplitude = (255 - delta * 255 / width) * fade / 255;
+    base.h = (base.h + radius * 360 / frame.board_length) % 360;
+    base.b = base.b * amplitude / 255;
+    struct led_rgb ring = kp_rgb_hsb_to_rgb(base);
+    /* Two coincident triggers must add independently, then saturate. */
+    result.r = MIN(255, result.r + 2 * ring.r);
+    result.g = MIN(255, result.g + 2 * ring.g);
+    result.b = MIN(255, result.b + 2 * ring.b);
+    return result;
+}
+static void brightness(void) {
+    enum { STEPS = 24 };
+    static struct led_rgb full[STEPS][CAP];
+    bool demands[STEPS];
+    size_t calls[STEPS];
+    const uint8_t levels[] = {100, 50, 0};
+    for (size_t n = 0; n < ARRAY_SIZE(devices); n++) {
+        const struct effects_device *entry = &devices[n];
+        const struct device *dev = entry->dev;
+        struct kp_rgb_effect_common_data original = *kp_rgb_effect_data(dev);
+        bool lit = false;
+        printk("BRIGHTNESS %s\n", dev->name);
+        for (size_t level = 0; level < ARRAY_SIZE(levels); level++) {
+            struct kp_rgb_hsb color = {.h = 23, .s = 73, .b = levels[level]};
+            kp_rgb_matrix_unlock();
+            KP_CHECK(zmk_rgb_matrix_set_color(dev, &color) == 0);
+            kp_rgb_matrix_lock();
+            struct kp_rgb_effect_common_data saved = *kp_rgb_effect_data(dev);
+            KP_CHECK(saved.color.h == 23 && saved.color.s == 73 && saved.color.b == levels[level]);
+            entropy_calls = 0; reset_device(dev, 0); common_equal(dev, saved);
+            inject(dev, 0, 0);
+            if (entry->kind == RIPPLE) inject(dev, 0, 0);
+            uint32_t now = 0;
+            for (unsigned step = 0; step < STEPS; step++) {
+                uint32_t delta = !step ? 0 : step % 2 && entry->interval ? entry->interval : 173;
+                now += delta;
+                frame.local_ms = now; frame.clock_ms = now; frame.elapsed_ms = delta;
+                frame.targets = step % 2 ? reverse_targets : all;
+                frame.target_count = KP_LED_COUNT;
+                clear_targets();
+                bool demand = kp_rgb_effect_render(dev, &frame);
+                if (!level) {
+                    memcpy(full[step], pixels, sizeof(pixels));
+                    demands[step] = demand; calls[step] = entropy_calls;
+                } else KP_CHECK(demand == demands[step] && entropy_calls == calls[step]);
+                for (size_t i = 0; i < KP_LED_COUNT; i++) {
+                    if (entry->kind == STATIC) {
+                        /* Static's per-LED DTS colors intentionally ignore common HSB, even B0. */
+                        KP_CHECK(rgb_equal(pixels[i], full[step][i]));
+                    } else if (entry->kind == RIPPLE) {
+                        KP_CHECK(rgb_equal(pixels[i], ripple_expected(dev, i)));
+                    } else if (levels[level] == 50) half_pixel(full[step][i], pixels[i]);
+                    else if (!levels[level]) KP_CHECK(rgb_equal(pixels[i], (struct led_rgb){0}));
+                    if (level == 1) lit |= peak(pixels[i]) > 0;
+                }
+                sentinels(); common_equal(dev, saved);
+                memcpy(reference, pixels, sizeof(pixels));
+                size_t sparse[] = {3, 1}, before = entropy_calls;
+                frame.elapsed_ms = 0; frame.targets = sparse;
+                frame.target_count = KP_LED_COUNT ? ARRAY_SIZE(sparse) : 0;
+                clear_targets();
+                KP_CHECK(kp_rgb_effect_render(dev, &frame) == demand && entropy_calls == before);
+                for (size_t t = 0; t < frame.target_count; t++)
+                    KP_CHECK(rgb_equal(pixels[sparse[t]], reference[sparse[t]]));
+                sentinels();
+                frame.target_count = 0; clear_targets();
+                KP_CHECK(kp_rgb_effect_render(dev, &frame) == demand && entropy_calls == before);
+                sentinels(); common_equal(dev, saved);
+            }
+            if (callbacks(dev)->set_active) callbacks(dev)->set_active(dev, false, now);
+            reset_device(dev, now); common_equal(dev, saved);
+        }
+        if (KP_LED_COUNT) KP_CHECK(lit);
+        kp_rgb_matrix_unlock();
+        KP_CHECK(zmk_rgb_matrix_set_color(dev, &original.color) == 0);
+        kp_rgb_matrix_lock(); common_equal(dev, original);
+    }
+}
 static void targets(void) {
     size_t sparse[] = {3, 1};
     for (size_t n = 0; n < ARRAY_SIZE(devices); n++) {
@@ -600,7 +718,7 @@ static void private_parameters(void) {
     kp_rgb_matrix_lock();
     dev = DEV(effects_reactive_a);
     struct kp_rgb_effect_common_data saved = *kp_rgb_effect_data(dev);
-    KP_CHECK(saved.color.h == 120 && saved.color.s == 90 && saved.color.b == 100);
+    KP_CHECK(saved.color.h == 120 && saved.color.s == 90 && saved.color.b == 80);
     reset_device(dev, 0); common_equal(dev, saved);
     callbacks(dev)->set_active(dev, false, 0); common_equal(dev, saved);
     KP_CHECK(kp_rgb_effect_cfg(DEV(effects_owned_reactive))->owner == NULL);
@@ -651,6 +769,7 @@ void kp_test_effects_run(void) {
     kp_rgb_matrix_lock();
     if (kp_test_case("effects-variants")) variants();
     else if (kp_test_case("effects-targets")) targets();
+    else if (kp_test_case("effects-brightness")) brightness();
     else if (kp_test_case("effects-phase")) phase();
     else if (kp_test_case("effects-random")) random_timing();
     else if (kp_test_case("effects-feedback")) feedback();

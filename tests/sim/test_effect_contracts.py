@@ -12,7 +12,7 @@ from native_build import MODULE, SIM, WORKSPACE, build, run
 SCENARIOS = CASES = (
     "effects-variants", "effects-targets", "effects-phase", "effects-random",
     "effects-feedback", "effects-instances", "effects-dispatch", "effects-overlay",
-    "effects-private", "effects-enums", "effects-battery",
+    "effects-brightness", "effects-private", "effects-enums", "effects-battery",
 )
 CONF = """
 CONFIG_KEYPAW_SIM_EFFECT_CONTRACTS=y

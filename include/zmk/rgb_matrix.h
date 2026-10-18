@@ -281,7 +281,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * Select effects through their selector control, not as keymap behaviors.
  *
  * Initializes parameters before the effect becomes ready. An enabled selector's
- * children use their DTS color at maximum brightness and their nonzero duration,
+ * children use their DTS color and their nonzero duration,
  * or the parent's initial-duration-ms when zero; periods are clamped to the
  * configured bounds. Private effects retain COMMON_DATA color and zero-duration
  * fallback semantics. Selector preparation preserves accepted parameter changes. */
@@ -305,7 +305,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
         KP_RGB_EFFECT_HAS_OWNER(node_id),                                      \
         (kp_rgb_effect_data(dev)->color = (struct kp_rgb_hsb)                  \
              KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0));               \
-         kp_rgb_effect_data(dev)->color.b = KP_RGB_BRT_MAX;                    \
          if (duration == 0) {                                                  \
            duration = DT_PROP(DT_PARENT(node_id), initial_duration_ms);        \
          } kp_rgb_effect_data(dev)                                             \
@@ -552,8 +551,6 @@ int zmk_rgb_matrix_get_user_state(bool *user_on);
 /* Set parameters of a ready RGB effect device. Thread context only.
  * Supply an RGB effect device; composition membership is not required.
  * Hue accepts 0..360 (360 becomes 0); saturation/brightness accept 0..100.
- * Color updates hue/saturation and sets effect brightness to 100; supplied
- * brightness is validated but does not change global master brightness.
  * Period accepts configured DURATION_MIN_MS..DURATION_MAX_MS without clamping.
  * NULL color/invalid values return -EINVAL; NULL/not-ready effect devices
  * return -ENODEV; ISR calls return -EWOULDBLOCK. Changed values request repaint

@@ -237,7 +237,13 @@ static void scoped_snapshot_roundtrip(void) {
   struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(selector_a);
   struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(selector_b);
   CHECK(a != NULL && b != NULL);
+  const struct device *captured_member = a->active_fx;
+  struct kp_rgb_hsb initial_color = kp_rgb_effect_data(captured_member)->color;
+  struct kp_rgb_hsb snapshot_color = initial_color;
+  snapshot_color.b = 47;
+  CHECK(kp_rgb_set_color_locked(captured_member, &snapshot_color) == 0);
   CHECK(kp_rgb_selector_snapshot_locked(selector_a, &captured_a) == 0);
+  CHECK(captured_a.color.b == 47);
   CHECK(kp_rgb_selector_snapshot_locked(selector_b, &captured_b) == 0);
   uint16_t original_slot = captured_a.slot;
   const struct device *original_member = a->active_fx;
@@ -256,6 +262,7 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(kp_rgb_selector_select_locked(a, alternate_slot) == 1);
   struct kp_rgb_hsb changed_color = captured_a.color;
   changed_color.h = (changed_color.h + 1) % 360;
+  changed_color.b = 23;
   CHECK(kp_rgb_set_color_locked(original_member, &changed_color) == 0);
   uint32_t changed_period = captured_a.period_ms > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS
                                 ? captured_a.period_ms - 1
@@ -288,6 +295,7 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(kp_rgb_selector_dispatch_locked(a, selection_binding.param1,
                                          selection_binding.param2) == 0);
   CHECK(a->active_fx == original_member && a->effect_index == original_slot);
+  CHECK(kp_rgb_set_color_locked(original_member, &initial_color) == 0);
   kp_rgb_matrix_unlock();
   CHECK(captured_b.control == kp_rgb_selector_control(selector_b));
 }
@@ -357,7 +365,7 @@ static void controls(void) {
         (120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360);
   CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 60);
   invoke(DEV(rgbs_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(120, 100, 40));
-  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 100);
+  CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 40);
   CHECK(kp_rgb_global.brightness == brightness);
   kp_rgb_matrix_unlock();
   k_timer_start(&boundary_timer, K_MSEC(1), K_NO_WAIT);
@@ -373,7 +381,7 @@ static void reset_controls(void) {
   invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
   invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
   invoke(DEV(rgbs_b), RGB_SPI_CMD, 3000);
-  invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 100));
+  invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 31));
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();
   atomic_val_t a_notifications = atomic_get(&selection_events_a);
@@ -386,6 +394,7 @@ static void reset_controls(void) {
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_d));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == 3000);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 42);
+  CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 31);
   CHECK(DATA(probe_c)->resets == a_resets && DATA(probe_d)->resets == b_resets);
   kp_rgb_matrix_unlock();
   k_sleep(K_MSEC(100));
@@ -398,6 +407,7 @@ static void reset_controls(void) {
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_b));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 180);
+  CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 100);
   CHECK(DATA(probe_d)->resets == b_resets);
   kp_rgb_matrix_unlock();
   k_sleep(K_MSEC(100));

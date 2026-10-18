@@ -586,6 +586,49 @@ static void composition(const char *name) {
     KP_CHECK(paints(0) >= p + 3 && paints(4) >= q + 3);
     KP_CHECK(atomic_get(&child_paints[0]) >= 3 && atomic_get(&child_paints[1]) >= 3);
 }
+#if DT_NODE_EXISTS(DT_NODELABEL(engine_solid))
+static void solid_composition(void) {
+    const struct device *effect = DEVICE_DT_GET(DT_NODELABEL(engine_solid));
+    struct kp_rgb_hsb color = {.h = 30, .s = 80, .b = 50};
+    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    kp_rgb_matrix_lock(); kp_rgb_global.brightness = 70; kp_rgb_matrix_unlock();
+    setup(false);
+    /* cap 60 * master 70 / 100 = 42; solid B50 -> (127,76,25).
+     * Overlay 37 over (17,0,0) -> (57,28,9), then master -> (23,11,3).
+     */
+    unsigned n = atomic_get(&writes);
+    for (unsigned i = 0; i < KP_LED_COUNT; i++)
+        check_pixel(n - 1, i, i == 1 ? (struct led_rgb){23, 11, 3} : (struct led_rgb){7, 0, 0});
+    unsigned p = paints(0);
+    sleep_until(k_uptime_get() + 80); settled();
+    KP_CHECK(atomic_get(&writes) == n && paints(0) == p);
+
+    /* Only B changes: the settled prefix must be invalidated. B80 yields
+     * (204,122,40), blend (86,45,14), output (36,18,5).
+     */
+    atomic_set(&fail_count, 2);
+    color.b = 80;
+    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    wait_writes(n + 3); settled();
+    for (unsigned tx = n; tx < n + 3; tx++) {
+        KP_CHECK(transfers[tx].result == (tx == n + 2 ? 0 : -EIO));
+        for (unsigned i = 0; i < KP_LED_COUNT; i++)
+            check_pixel(tx, i, i == 1 ? (struct led_rgb){36, 18, 5} : (struct led_rgb){7, 0, 0});
+        if (tx > n) KP_CHECK(transfers[tx].start >= transfers[tx - 1].finish + (tx == n + 1 ? 99 : 199));
+    }
+    /* The driver overwrites Scratch on every attempt; Scene remains scaled once. */
+    KP_CHECK(strip_mutates && paints(0) == p + 1);
+    n += 3;
+    sleep_until(k_uptime_get() + 120); settled();
+    KP_CHECK(atomic_get(&writes) == n && paints(0) == p + 1);
+    color.b = 0;
+    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    wait_writes(n + 1); settled();
+    for (unsigned i = 0; i < KP_LED_COUNT; i++)
+        check_pixel(n, i, i == 1 ? (struct led_rgb){4, 0, 0} : (struct led_rgb){7, 0, 0});
+    KP_CHECK(paints(0) == p + 2);
+}
+#endif
 
 static void flush_irq(const void *unused) {
     ARG_UNUSED(unused); KP_CHECK(k_is_in_isr());
@@ -613,6 +656,9 @@ void kp_test_engine_run(void) {
         KP_CHECK(transfers[0].result == -EIO && transfers[1].start >= transfers[0].finish + 99);
         check_all(1, off || inhibited ? 0 : 17); KP_CHECK(paints(0) == !(off || inhibited)); kp_test_complete();
     }
+#if DT_NODE_EXISTS(DT_NODELABEL(engine_solid))
+    if (!strcmp(name, "solid-brightness")) { solid_composition(); kp_test_complete(); }
+#endif
     bool animation = !strcmp(name, "periodic") || !strcmp(name, "coalesce") ||
         !strcmp(name, "starved") || !strcmp(name, "slow-render") || !strcmp(name, "slow-driver") ||
         !strcmp(name, "slow-early") || !strcmp(name, "animating-bottom") || !strcmp(name, "rollover") ||

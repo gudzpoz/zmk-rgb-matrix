@@ -199,7 +199,7 @@ static const struct behavior_parameter_value_metadata
 };
 static const struct behavior_parameter_value_metadata
     kp_selector_color_command[] = {
-        {.display_name = "Hue/Saturation",
+        {.display_name = "Color (HSB)",
          .type = BEHAVIOR_PARAMETER_VALUE_TYPE_VALUE,
          .value = RGB_COLOR_HSB_CMD},
 };

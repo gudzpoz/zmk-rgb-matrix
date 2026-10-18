@@ -91,8 +91,8 @@ def main():
             for phase, time in phases.items():
                 pixels = max((frame for frame in frames if frame[0] <= time),
                              key=lambda frame: frame[0])[1]
-                # The color setter gives the child full value; master scale is 37%.
-                expected = bytes((94, 47, 23)) if phase in ("status", "resumed") else bytes(3)
+                # Preset B50 gives RGB127/63/31; cap75 * master50 gives scale37.
+                expected = bytes((46, 23, 11)) if phase in ("status", "resumed") else bytes(3)
                 assert pixels == expected * count, (phase, pixels)
         print(f"PASS fixed scene {name}: matrix defaults/live OFF/inhibited gates", flush=True)
 

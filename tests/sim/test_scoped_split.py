@@ -23,10 +23,16 @@ SCENARIOS += tuple(f"sweep-{kind}-{phase}" for kind in
 SCENARIOS += tuple(f"global-reset-{kind}-{phase}" for kind in ("success", "failed")
                    for phase in ("color", "period", "selection"))
 SCENARIOS += ("identical", "dirty-hook", "dirty-timing", "no-transport", "negative-query")
+SCENARIOS += ("brightness-frozen", "brightness-reset")
 THREE = '''&selector_a { probe_e: a_third { compatible = "keypaw,rgb-matrix-solid";
     color = <0xff0000>; duration = <1700>; }; };'''
+DIM = '''&probe_a { color = <0x008000>; };
+&probe_c { color = <0x000040>; };
+&probe_b { color = <0x808000>; };
+&probe_d { color = <0x004040>; };'''
 CONFIGS = {
     "transport": ("", CONF), "transport-zero": (ZERO, CONF),
+    "brightness": (DIM, CONF), "brightness-zero": (DIM + ZERO, CONF),
     "transport-dirty-timing": ("", CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
     "transport-dirty-timing-zero": (ZERO, CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
     "transport-absent": ("", CONF + "CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START=y\nCONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"),
@@ -50,13 +56,16 @@ for name in ("receiving", "receiving-zero"):
 def supported(name):
     if name.startswith("receiving"):
         return ("receiving",)
+    if name.startswith("brightness"):
+        return ("brightness-frozen", "brightness-reset")
     if name.startswith(("late-", "ready-")):
         return (name,)
     if "absent" in name:
         return ("no-transport",)
     if "dirty-timing" in name:
         return ("dirty-timing",)
-    return tuple(s for s in SCENARIOS if s not in ("no-transport", "dirty-timing") and not (s.startswith("sweep-") and
+    return tuple(s for s in SCENARIOS if not s.startswith("brightness-") and
+                 s not in ("no-transport", "dirty-timing") and not (s.startswith("sweep-") and
                  int(s[-1]) >= 5 and "three" not in name))
 
 

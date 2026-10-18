@@ -75,7 +75,6 @@ int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
     const struct kp_rgb_effect_defaults *def = &selector->members[i].defaults;
     struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
     data->color = def->color;
-    data->color.b = KP_RGB_BRT_MAX;
     data->duration_ms =
         def->duration_ms != 0
             ? (uint16_t)CLAMP(def->duration_ms,
@@ -158,7 +157,6 @@ int kp_rgb_selector_convert_locked(struct kp_rgb_selector *selector,
   if (effect == NULL || !device_is_ready(effect))
     return -ENODEV;
   struct kp_rgb_hsb color = kp_rgb_effect_data(effect)->color;
-  color.b = KP_RGB_BRT_MAX;
 
   switch (command) {
   case RGB_EFF_CMD:

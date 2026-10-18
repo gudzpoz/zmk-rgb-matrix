@@ -36,6 +36,13 @@ OVERLAY = '''
             compatible = "test,rgb-default-effect";
             color = <0x808000>; zephyr,deferred-init;
         };
+        default_black: black {
+            compatible = "test,rgb-default-effect";
+            color = <0x000000>;
+        };
+        default_white: white {
+            compatible = "test,rgb-default-effect";
+        };
     };
     default_private_owner: default_private_owner {
         compatible = "keypaw,rgb-overlay";

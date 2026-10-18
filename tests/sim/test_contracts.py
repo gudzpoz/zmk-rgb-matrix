@@ -24,7 +24,7 @@ SCENARIOS = (
     'lifecycle-batch',
     'status-only', 'no-active', 'empty-registry', 'lifecycle',
     'output-serialization', 'render-serialization',
-    'composition-ab', 'composition-ba', 'filters',
+    'composition-ab', 'composition-ba', 'filters', 'solid-brightness',
 )
 FRAGMENT = r'''
 &preview_selector { status = "disabled"; };
@@ -81,7 +81,7 @@ CONFIG_IRQ_OFFLOAD=y
 CONFIG_LTO=n
 """
 
-VARIANTS = ('normal', 'zero', 'idle-off', 'idle-dim', 'empty', 'no-active', 'boot-off', 'composition-ab', 'composition-ba')
+VARIANTS = ('normal', 'zero', 'idle-off', 'idle-dim', 'empty', 'no-active', 'boot-off', 'composition-ab', 'composition-ba', 'solid-brightness')
 FIRST = '''
 composition_first: composition_first {
     compatible = "keypaw,rgb-overlay"; opacity = <37>; leds = <1>;
@@ -113,7 +113,7 @@ def main():
     for variant in ((args.variant,) if args.variant else VARIANTS):
         fragment, conf = FRAGMENT, CONF
         scenarios = SCENARIOS if variant == 'normal' else ('settled', 'purge', 'resume') if variant == 'zero' else ('idle-policy', 'intent') if variant.startswith('idle') else ('empty-registry',) if variant == 'empty' else ('boot-off',) if variant == 'boot-off' else ('no-active',)
-        if variant == 'normal': scenarios = tuple(s for s in scenarios if s not in ('idle-policy', 'intent', 'idle', 'no-active', 'boot-off', 'empty-registry', 'composition-ab', 'composition-ba', 'filters'))
+        if variant == 'normal': scenarios = tuple(s for s in scenarios if s not in ('idle-policy', 'intent', 'idle', 'no-active', 'boot-off', 'empty-registry', 'composition-ab', 'composition-ba', 'filters', 'solid-brightness'))
         if variant == 'boot-off': fragment += '\n&rgb_matrix { /delete-property/ initial-on; };\n'
         if variant == 'zero': fragment += '\n&engine_strip { chain-length = <0>; }; &rgb_matrix { mapping = <>; };\n'
         if variant == 'idle-off': conf += 'CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=y\n'
@@ -123,6 +123,19 @@ def main():
         if variant.startswith('composition-'):
             fragment += '\n&rgb_matrix {\n' + (SECOND + FIRST if variant.endswith('ba') else FIRST + SECOND) + FILTER + '\n};\n'
             scenarios = (variant, 'filters') if variant.endswith('ab') else (variant,)
+        if variant == 'solid-brightness':
+            fragment += '''
+&rgb_matrix {
+    max-brightness = <60>;
+    engine_solid_owner {
+        compatible = "keypaw,rgb-overlay"; opacity = <37>; leds = <1>;
+        engine_solid: engine_solid {
+            compatible = "keypaw,rgb-matrix-solid"; color = <0xff0000>;
+        };
+    };
+};
+'''
+            scenarios = ('solid-brightness',)
         if args.scenario:
             if args.scenario not in scenarios:
                 if args.variant: parser.error('scenario is not available in the selected variant')

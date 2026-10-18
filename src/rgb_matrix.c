@@ -731,10 +731,8 @@ int kp_rgb_set_color_locked(const struct device *fx,
   next.h %= KP_RGB_HUE_MAX;
   struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
   if (data->color.h != next.h || data->color.s != next.s ||
-      data->color.b != KP_RGB_BRT_MAX) {
-    data->color.h = next.h;
-    data->color.s = next.s;
-    data->color.b = KP_RGB_BRT_MAX;
+      data->color.b != next.b) {
+    data->color = next;
     zmk_rgb_matrix_flush();
   }
   return 0;

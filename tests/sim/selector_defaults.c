@@ -59,7 +59,7 @@ static void check_static_metadata(void) {
   CHECK(strcmp(selector->members[2].id, "explicit") == 0);
 
   selector = find_selector("default_late_selector");
-  CHECK(selector != NULL && selector->effect_count == 1);
+  CHECK(selector != NULL && selector->effect_count == 3);
   CHECK(selector->members[0].effect == DEV(default_late));
   CHECK(strcmp(selector->members[0].id, "late") == 0);
   kp_rgb_matrix_lock();
@@ -81,8 +81,8 @@ static void check_hole_selection(void) {
   kp_rgb_matrix_unlock();
 }
 
-static const struct kp_rgb_hsb early_color = {.h = 137, .s = 61, .b = 100};
-static const struct kp_rgb_hsb late_color = {.h = 271, .s = 42, .b = 100};
+static const struct kp_rgb_hsb early_color = {.h = 137, .s = 61, .b = 37};
+static const struct kp_rgb_hsb late_color = {.h = 271, .s = 42, .b = 73};
 
 static void check_parameters(const struct device *effect,
                              struct kp_rgb_hsb color, uint16_t period) {
@@ -97,9 +97,13 @@ static void check_parameters(const struct device *effect,
 static int before_startup(void) {
   check_static_metadata();
   CHECK(device_is_ready(DEV(default_ready)));
-  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 100}, 2345);
-  check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 100},
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
+  check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 50},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
   check_parameters(DEV(default_private), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   check_parameters(DEV(default_disabled_child), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
@@ -118,7 +122,7 @@ static int prepare_deferred_effect(void) {
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_selector_at(find_selector("default_late_selector"), 0) == DEV(default_late));
   kp_rgb_matrix_unlock();
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 100},
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
@@ -169,12 +173,34 @@ static void defaults_test(void *a, void *b, void *c) {
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == DEV(default_ready));
   CHECK(zmk_rgb_selector_get_selected(DEV(default_late_selector)) == DEV(default_late));
   CHECK(zmk_rgb_selector_reset(DEV(default_selector)) == 0);
-  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 100}, 2345);
-  check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 100},
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
+  check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 50},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   check_parameters(DEV(default_late), late_color, 3456);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_white), &late_color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_black), 4567) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_white), 5678) == 0);
   CHECK(zmk_rgb_selector_reset(DEV(default_late_selector)) == 0);
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 100},
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_white), &late_color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 4321) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
+  kp_rgb_reset_state();
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
+                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
   printk("PASS selector defaults shared metadata/disabled slots/live readiness/setters/reset/automatic startup\n");
   exit(0);
