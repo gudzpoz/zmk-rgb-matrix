@@ -27,9 +27,6 @@ static uint16_t kp_overlay_sent[KP_RGB_OVERLAY_WORDS];
 
 void kp_rgb_overlay_register(const struct device *dev) {
   const struct kp_rgb_overlay_common_data *data = dev->data;
-  if (data == NULL || data->index >= KP_OVERLAY_SLOTS) {
-    return;
-  }
   kp_overlay_registry[data->index] = dev;
 }
 

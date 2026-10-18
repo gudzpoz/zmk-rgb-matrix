@@ -35,7 +35,8 @@ properties:
     default: 250
     description: |
       Falloff radius for "disc" and "nexus", in the same physical-layout units
-      as the LEDs (100 = one key width).
+      as the LEDs (100 = one key width). Valid range: 0..65535; zero contributes
+      no keypress brightness in these modes.
 
       "disc" measures the radius from the pressed key. "nexus" measures it
       outward from the excluded row/column cross instead, so the value is the

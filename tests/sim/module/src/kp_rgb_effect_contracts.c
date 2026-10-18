@@ -169,7 +169,11 @@ struct effects_device { const struct device *dev; enum effects_kind kind; uint32
 #define SPECTRUM_ENTRY(node) ENTRY(node, SPECTRUM, 0, 0)
 #define RAINBOW_ENTRY(node) ENTRY(node, RAINBOW, 0, 0)
 #define BAND_ENTRY(node) ENTRY(node, BAND, 0, 0)
-#define REACTIVE_ENTRY(node) ENTRY(node, REACTIVE, 0, 0)
+/* Zero-radius fixtures have separate no-feedback checks; the sweep expects lit feedback. */
+#define REACTIVE_ENTRY(node) \
+    COND_CODE_1(UTIL_OR(IS_EQ(DT_DEP_ORD(node), DT_DEP_ORD(DT_NODELABEL(effects_reactive_disc_zero))), \
+                        IS_EQ(DT_DEP_ORD(node), DT_DEP_ORD(DT_NODELABEL(effects_reactive_nexus_zero)))), \
+                (), (ENTRY(node, REACTIVE, 0, 0)))
 #define RIPPLE_ENTRY(node) ENTRY(node, RIPPLE, 0, 0)
 #define RAIN_ENTRY(node) ENTRY(node, RAIN, DT_PROP(node, step_interval_ms), DT_ENUM_IDX(node, mode))
 #define STAR_ENTRY(node) ENTRY(node, STARLIGHT, DT_PROP(node, step_interval_ms), 0)
@@ -483,7 +487,30 @@ static void random_timing(void) {
     frame.local_ms++; kp_rgb_effect_render(smooth, &frame);
     if (KP_LED_COUNT) KP_CHECK(rgb_equal(pixels[0], (struct led_rgb){0, 40, 40}));
 }
+static void zero_radius_reactive(void) {
+    const struct device *zero_radius[] = {
+        DEV(effects_reactive_disc_zero), DEV(effects_reactive_nexus_zero),
+    };
+    for (size_t n = 0; n < ARRAY_SIZE(zero_radius); n++) {
+        const struct device *dev = zero_radius[n];
+        const struct kp_rgb_effect_callbacks *cb = callbacks(dev);
+        KP_CHECK(device_is_ready(dev));
+        reset_device(dev, 0);
+        struct kp_rgb_key_event event = {.position = 0, .pressed = true, .timestamp_ms = 0};
+        KP_CHECK(cb->on_event(dev, &event) == (KP_LED_COUNT > 0));
+        frame.local_ms = 0;
+        frame.elapsed_ms = 0;
+        frame.targets = all;
+        frame.target_count = KP_LED_COUNT;
+        clear_targets();
+        KP_CHECK(!kp_rgb_effect_render(dev, &frame));
+        for (size_t i = 0; i < KP_LED_COUNT; i++)
+            KP_CHECK(rgb_equal(pixels[i], (struct led_rgb){0}));
+        sentinels();
+    }
+}
 static void feedback(void) {
+    zero_radius_reactive();
     const struct device *feedback_devices[] = {DEV(effects_reactive_a), DEV(effects_heat_no_spread), DEV(fx_ripple)};
     for (size_t n = 0; n < ARRAY_SIZE(feedback_devices); n++) {
         const struct device *dev = feedback_devices[n];
@@ -664,7 +691,57 @@ static void dispatch(void) {
     KP_CHECK(!instance.state.initialized && !instance.state.animating && o->frame.elapsed_ms == 77);
     KP_CHECK(!kp_rgb_effect_render(DEV(effects_optional), &frame));
 }
+static struct led_rgb paint_expected(struct led_rgb base, struct led_rgb over, uint8_t strength) {
+    return (struct led_rgb){
+        .r = (uint8_t)(base.r + ((int32_t)over.r - base.r) * strength / 100),
+        .g = (uint8_t)(base.g + ((int32_t)over.g - base.g) * strength / 100),
+        .b = (uint8_t)(base.b + ((int32_t)over.b - base.b) * strength / 100),
+    };
+}
+static void paint_helpers(void) {
+    struct kp_rgb_frame empty = frame;
+    empty.pixels = NULL;
+    kp_rgb_overlay_paint(&empty, NULL, 0, (struct led_rgb){1, 2, 3}, 50);
+    kp_rgb_overlay_paint_pixels(&empty, NULL, 0, NULL, 50);
+    if (KP_LED_COUNT < 3) return;
+
+    size_t sparse[] = {KP_LED_COUNT - 1, 1};
+    const struct led_rgb base = {17, 83, 149};
+    const struct led_rgb color = {201, 37, 111};
+    struct led_rgb source[CAP];
+    for (size_t i = 0; i < CAP; i++)
+        source[i] = (struct led_rgb){(uint8_t)(i + 10), (uint8_t)(i + 30), (uint8_t)(i + 50)};
+    frame.targets = sparse;
+    frame.target_count = ARRAY_SIZE(sparse);
+    frame.pixels = pixels;
+    const uint8_t strengths[] = {0, 37, 100};
+    for (size_t n = 0; n < ARRAY_SIZE(strengths); n++) {
+        memset(pixels, 0xa5, sizeof(pixels));
+        for (size_t t = 0; t < frame.target_count; t++) pixels[sparse[t]] = base;
+        kp_rgb_overlay_paint(&frame, sparse, ARRAY_SIZE(sparse), color, strengths[n]);
+        for (size_t t = 0; t < frame.target_count; t++)
+            KP_CHECK(rgb_equal(pixels[sparse[t]], paint_expected(base, color, strengths[n])));
+        sentinels();
+
+        memset(pixels, 0xa5, sizeof(pixels));
+        for (size_t t = 0; t < frame.target_count; t++) pixels[sparse[t]] = base;
+        kp_rgb_overlay_paint_pixels(&frame, sparse, ARRAY_SIZE(sparse), source, strengths[n]);
+        for (size_t t = 0; t < frame.target_count; t++)
+            KP_CHECK(rgb_equal(pixels[sparse[t]], paint_expected(base, source[sparse[t]], strengths[n])));
+        sentinels();
+    }
+    pixels[sparse[0]] = pixels[sparse[1]] = base;
+    kp_rgb_overlay_paint(&frame, sparse + 1, 1, color, 100);
+    KP_CHECK(rgb_equal(pixels[sparse[0]], base) && rgb_equal(pixels[sparse[1]], color));
+    sentinels();
+    kp_rgb_overlay_paint_pixels(&frame, sparse, 1, source, 100);
+    KP_CHECK(rgb_equal(pixels[sparse[0]], source[sparse[0]]) && rgb_equal(pixels[sparse[1]], color));
+    sentinels();
+    frame.targets = all;
+    frame.target_count = KP_LED_COUNT;
+}
 static void generic_overlay(void) {
+    paint_helpers();
     const struct device *owner = DEV(effects_owner);
     const struct kp_rgb_effect_callbacks *cb = overlay_callbacks(owner);
     struct effects_observation *o = DEV(effects_owned)->data;

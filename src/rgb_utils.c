@@ -56,9 +56,7 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
 void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
                           size_t led_count, struct led_rgb color, uint8_t strength) {
   for (size_t i = 0; i < led_count; i++) {
-    if (leds[i] < frame->count) {
-      frame->pixels[leds[i]] = kp_rgb_rgb_mix(frame->pixels[leds[i]], color, strength);
-    }
+    frame->pixels[leds[i]] = kp_rgb_rgb_mix(frame->pixels[leds[i]], color, strength);
   }
 }
 
@@ -66,9 +64,7 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength) {
   for (size_t i = 0; i < led_count; i++) {
-    if (leds[i] < frame->count) {
-      frame->pixels[leds[i]] =
-          kp_rgb_rgb_mix(frame->pixels[leds[i]], src[leds[i]], strength);
-    }
+    frame->pixels[leds[i]] =
+        kp_rgb_rgb_mix(frame->pixels[leds[i]], src[leds[i]], strength);
   }
 }

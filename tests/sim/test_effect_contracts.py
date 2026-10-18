@@ -60,6 +60,10 @@ def fragment(zero=False, example=True):
                             if index & (1 << bit)))
     effect("effects_reactive_a", "reactive", 'multi; background-brightness = <0>;')
     effect("effects_reactive_b", "reactive", 'multi; background-brightness = <0>;')
+    effect("effects_reactive_disc_zero", "reactive",
+           'spread = "disc"; spread-radius = <0>; background-brightness = <0>;')
+    effect("effects_reactive_nexus_zero", "reactive",
+           'spread = "nexus"; spread-radius = <0>; background-brightness = <0>;')
     effect("effects_heat_no_spread", "heatmap", 'spread = <0>; decrease-delay-ms = <25>; increase-step = <32>;')
     effect("effects_heat_zero_delay", "heatmap", 'spread = <0>; decrease-delay-ms = <0>; increase-step = <32>;')
     effect("effects_digital", "digital-rain")

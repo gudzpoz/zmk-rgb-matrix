@@ -48,6 +48,9 @@ BUILD_ASSERT(DT_PROP(KP_RGB_NODE, max_brightness) >= 0 &&
 BUILD_ASSERT(DT_PROP(KP_RGB_NODE, idle_brightness) >= 0 &&
                  DT_PROP(KP_RGB_NODE, idle_brightness) <= KP_RGB_BRT_MAX,
              "idle-brightness must be in 0..100");
+BUILD_ASSERT(DT_PROP(KP_RGB_NODE, initial_brightness) >= 0 &&
+                 DT_PROP(KP_RGB_NODE, initial_brightness) <= KP_RGB_BRT_MAX,
+             "initial-brightness must be in 0..100");
 
 #define KP_MAP_ENTRY_ASSERT(node_id, prop, idx)                                \
   BUILD_ASSERT((DT_PROP_BY_IDX(node_id, prop, idx) & KP_RGB_NO_KEY_XY_FLAG) || \
@@ -56,9 +59,7 @@ BUILD_ASSERT(DT_PROP(KP_RGB_NODE, idle_brightness) >= 0 &&
 DT_FOREACH_PROP_ELEM(KP_RGB_NODE, mapping, KP_MAP_ENTRY_ASSERT);
 
 #define KP_RGB_INITIAL_ON DT_PROP_OR(KP_RGB_NODE, initial_on, 1)
-#define KP_RGB_INITIAL_BRIGHTNESS                                              \
-  CLAMP((int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30), 0,           \
-        KP_RGB_BRT_MAX)
+#define KP_RGB_INITIAL_BRIGHTNESS DT_PROP(KP_RGB_NODE, initial_brightness)
 
 const struct kp_rgb_config kp_rgb_config = {
     .initial_on = KP_RGB_INITIAL_ON,

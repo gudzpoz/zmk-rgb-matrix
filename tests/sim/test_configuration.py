@@ -7,8 +7,10 @@ Requires the same workspace/toolchain as run-smoke.sh. Every case has a pristine
 build directory; positive controls distinguish rejection from a broken toolchain.
 """
 import argparse
+import json
 import os
 import re
+import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -89,6 +91,7 @@ CASES = {
     "removed-private-overlays": (False, '&fixture_overlay { fx_fixture { overlays = <&fixture_battery>; }; };'),
     "removed-private-no-overlays": (False, '&fixture_overlay { fx_fixture { no-overlays; }; };'),
     "matrix-global-default": (True, '&rgb_matrix { initial-brightness = <42>; };'),
+    "matrix-global-default-omitted": (True, '&rgb_matrix { /delete-property/ initial-brightness; };'),
     "removed-flat-default": (False, '&rgb_matrix { initial-effect = <0>; };'),
     "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
@@ -148,11 +151,28 @@ DIAGNOSTICS = {
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
-for prop in ("max-brightness", "idle-brightness"):
+for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
     for cap in (-1, 0, 100, 101):
         name = f"{prop}-{cap}"
         CASES[name] = (0 <= cap <= 100, f'&rgb_matrix {{ {prop} = <({cap})>; }};')
         DIAGNOSTICS[name] = rf'{prop} must be in 0\.\.100'
+
+for ordinal in (65535, 65536):
+    name = f"overlay-ordinal-{ordinal}"
+    CASES[name] = (ordinal <= 65535, "")
+    DIAGNOSTICS[name] = r"overlay ordinal must fit uint16_t"
+
+for opacity in (-1, 0, 100, 101, 256):
+    name = f"overlay-opacity-{opacity}"
+    CASES[name] = (0 <= opacity <= 100,
+                   f'&fixture_overlay {{ opacity = <({opacity})>; }};')
+    DIAGNOSTICS[name] = r"overlay opacity must be 0\.\.100"
+
+for radius in (-1, 0, 65535, 65536):
+    name = f"reactive-radius-{radius}"
+    CASES[name] = (0 <= radius <= 65535,
+                   f'&fx_reactive {{ spread-radius = <({radius})>; }};')
+    DIAGNOSTICS[name] = r"reactive spread-radius must be in 0\.\.65535"
 
 for effect in ("rain", "starlight"):
     for interval in (0, -1, 65536, 1, 65535):
@@ -162,6 +182,28 @@ for effect in ("rain", "starlight"):
     step-interval-ms = <({interval})>; }}; }};
 ''')
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
+
+
+def compile_overlay_ordinal(directory, ordinal):
+    """Probe the real definition helper without generating 65536 DTS children.
+
+    Only compile the substituted translation unit; never link or run its init.
+    """
+    source = MODULE / "src/overlays/overlay.c"
+    commands = json.loads((directory / "build/compile_commands.json").read_text())
+    entry = next(item for item in commands if Path(item["file"]) == source)
+    probe = directory / "ordinal-probe.c"
+    probe.write_text('#include <zmk/rgb_matrix.h>\n'
+                     '#undef DT_NODE_CHILD_IDX\n'
+                     f'#define DT_NODE_CHILD_IDX(node_id) {ordinal}\n'
+                     f'#include "{source}"\n')
+    command = shlex.split(entry["command"])
+    command[command.index("-c") + 1] = str(probe)
+    command[command.index("-o") + 1] = str(directory / "ordinal-probe.o")
+    result = subprocess.run(command, cwd=entry["directory"], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    (directory / "ordinal-probe.log").write_text(result.stdout)
+    return result
 
 
 def main():
@@ -195,11 +237,14 @@ def main():
         )
         command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
                    "-b", "native_sim//zmk_test_mock", "-p", "--",
+                   "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                    f"-DZMK_CONFIG={config}",
                    f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
         result = subprocess.run(command, cwd=WORKSPACE, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
         (root / f"{name}.log").write_text(result.stdout)
+        if name.startswith("overlay-ordinal-") and result.returncode == 0:
+            result = compile_overlay_ordinal(root / name, int(name.rsplit("-", 1)[1]))
         if (result.returncode == 0) != valid:
             raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                  + result.stdout[-12000:])

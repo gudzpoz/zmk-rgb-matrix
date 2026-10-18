@@ -49,8 +49,8 @@ properties:
     required: false
     default: 100
     description: |
-      Blend strength in percent: 100 replaces the underlying pixels on the
-      targeted LEDs, lower values mix the composited result over them.
+      Blend strength in percent (0..100): 100 replaces the underlying pixels
+      on the targeted LEDs, lower values mix the composited result over them.
 
   local:
     type: boolean

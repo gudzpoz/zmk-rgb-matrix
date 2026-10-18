@@ -407,7 +407,11 @@ struct kp_rgb_overlay_common_data {
 #define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM(KP_RGB_NODE)
 #define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
 
-/* Add a device to the engine's overlay registry, where `index` places it. */
+/* Register during device initialization, before automatic control startup.
+ * dev must have non-NULL data beginning with kp_rgb_overlay_common_data.
+ * Manual registrants must set index to their direct-child ordinal under
+ * KP_RGB_NODE, representable in uint16_t and below KP_RGB_OVERLAY_COUNT.
+ * KP_RGB_OVERLAY_DEFINE supplies these guarantees. */
 void kp_rgb_overlay_register(const struct device *dev);
 
 /* The most targets an overlay can resolve. */
@@ -423,8 +427,9 @@ size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
                               const uint32_t *leds, size_t leds_len,
                               size_t *out, size_t out_max);
 
-/* Blend intrinsic color over existing pixels at strength 0..100. Pass
- * frame->targets and frame->target_count, or a subset of those targets. */
+/* Blend intrinsic color over existing pixels at strength 0..100.
+ * Pass frame->targets with frame->target_count, or a subset with its length.
+ * Targets must be unique indices from frame->targets; indices are not checked. */
 void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
                           size_t led_count, struct led_rgb color,
                           uint8_t strength);
@@ -469,9 +474,13 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                        (const void *)&cfg_inst##_data.common,                  \
                "overlay data must embed struct kp_rgb_overlay_common_data "    \
                "as the first field");                                          \
-  BUILD_ASSERT(                                                                \
-      DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),                 \
-      "overlay must be a child of the keypaw,rgb-matrix node");                \
+  BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
+               "overlay must be a child of the keypaw,rgb-matrix node");       \
+  BUILD_ASSERT(DT_NODE_CHILD_IDX(DT_DRV_INST(inst)) <= UINT16_MAX,             \
+               "overlay ordinal must fit uint16_t");                           \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) >= 0 &&             \
+                   DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) <= 100,         \
+               "overlay opacity must be 0..100");                              \
   BUILD_ASSERT(!(DT_PROP(DT_DRV_INST(inst), all_leds) &&                       \
                  (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
@@ -500,8 +509,8 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
       .replaces_target = replaces,                                             \
   };                                                                           \
   DEVICE_DT_DEFINE(DT_DRV_INST(inst), cfg_inst##_init, NULL, &cfg_inst##_data, \
-                   &cfg_inst##_cfg, POST_KERNEL,                               \
-                   KP_RGB_DEVICE_INIT_PRIORITY, &cfg_inst##_api)
+                   &cfg_inst##_cfg, POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY,  \
+                   &cfg_inst##_api)
 
 /* The generic keypaw,rgb-overlay composites exactly one enabled nested effect. */
 
