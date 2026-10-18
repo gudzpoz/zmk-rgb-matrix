@@ -148,6 +148,12 @@ DIAGNOSTICS = {
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
+for prop in ("max-brightness", "idle-brightness"):
+    for cap in (-1, 0, 100, 101):
+        name = f"{prop}-{cap}"
+        CASES[name] = (0 <= cap <= 100, f'&rgb_matrix {{ {prop} = <({cap})>; }};')
+        DIAGNOSTICS[name] = rf'{prop} must be in 0\.\.100'
+
 for effect in ("rain", "starlight"):
     for interval in (0, -1, 65536, 1, 65535):
         name = f"{effect}-interval-{interval}"

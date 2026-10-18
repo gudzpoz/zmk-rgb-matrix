@@ -120,8 +120,6 @@ struct kp_rgb_frame {
    * (never 0). Needed by vertical-basis effects (gradient up/down, cycle
    * up/down, chevron, radial extent). */
   uint16_t board_height;
-  /* The keyboard is not ZMK_ACTIVITY_ACTIVE. */
-  bool is_idle;
 };
 
 struct kp_rgb_key_event {
@@ -534,17 +532,18 @@ int zmk_rgb_matrix_set_inhibited(bool inhibited);
 bool zmk_rgb_matrix_is_inhibited(void);
 
 /* Set or toggle local user intent; toggle inverts intent even while idle or
- * inhibited. Idle suppression and inhibition may still prevent output.
+ * inhibited. Activity suppression and inhibition may still prevent output.
  * Thread context only. Return 0 on success or a negative lock error; success
  * does not promise hardware settlement. These calls neither save settings nor
  * send split commands. */
 int zmk_rgb_matrix_toggle(void);
 int zmk_rgb_matrix_on(void);
 int zmk_rgb_matrix_off(void);
-/* Returns logical ON after idle suppression; external inhibition does not alter it. */
+/* Returns user intent after activity suppression: false during SLEEP and during
+ * IDLE with idle-brightness=0. Inhibition and brightness scaling do not alter it. */
 int zmk_rgb_matrix_get_state(bool *on_off);
 
-/* Return retained user intent before idle suppression. Thread context only;
+/* Return retained user intent before activity suppression. Thread context only;
  * NULL returns -EINVAL, ISR calls return -EWOULDBLOCK. */
 int zmk_rgb_matrix_get_user_state(bool *user_on);
 

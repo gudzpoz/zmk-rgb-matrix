@@ -59,16 +59,16 @@ properties:
   max-brightness:
     type: int
     default: 40
-    description: Capped RGB brightness in percent (0..100).
+    description: Maximum RGB brightness cap in percent (0..100), scaled by master brightness.
 
   idle-brightness:
     type: int
-    default: 30
+    default: 0
     description: |
-      RGB brightness in percent (0..100) to use while the keyboard is idle
-      (ZMK activity not ACTIVE). Only observable with
-      CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n, which keeps the LEDs on instead
-      of turning them off when idle.
+      Idle RGB brightness cap in percent (0..100), limited by max-brightness
+      and scaled by master brightness. Zero blanks output while IDLE without
+      changing user intent. Nonzero values keep effects running while dimmed.
+      SLEEP always blanks output.
 
   initial-brightness:
     type: int

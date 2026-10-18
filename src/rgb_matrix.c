@@ -42,6 +42,12 @@ BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS <=
                  CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS,
              "KEYPAW_RGB_MATRIX_DURATION_MIN_MS must not exceed "
              "KEYPAW_RGB_MATRIX_DURATION_MAX_MS");
+BUILD_ASSERT(DT_PROP(KP_RGB_NODE, max_brightness) >= 0 &&
+                 DT_PROP(KP_RGB_NODE, max_brightness) <= KP_RGB_BRT_MAX,
+             "max-brightness must be in 0..100");
+BUILD_ASSERT(DT_PROP(KP_RGB_NODE, idle_brightness) >= 0 &&
+                 DT_PROP(KP_RGB_NODE, idle_brightness) <= KP_RGB_BRT_MAX,
+             "idle-brightness must be in 0..100");
 
 #define KP_MAP_ENTRY_ASSERT(node_id, prop, idx)                                \
   BUILD_ASSERT((DT_PROP_BY_IDX(node_id, prop, idx) & KP_RGB_NO_KEY_XY_FLAG) || \
@@ -57,8 +63,8 @@ DT_FOREACH_PROP_ELEM(KP_RGB_NODE, mapping, KP_MAP_ENTRY_ASSERT);
 const struct kp_rgb_config kp_rgb_config = {
     .initial_on = KP_RGB_INITIAL_ON,
     .initial_brightness = KP_RGB_INITIAL_BRIGHTNESS,
-    .max_brightness = DT_PROP_OR(KP_RGB_NODE, max_brightness, 40),
-    .idle_brightness = DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30),
+    .max_brightness = DT_PROP(KP_RGB_NODE, max_brightness),
+    .idle_brightness = DT_PROP(KP_RGB_NODE, idle_brightness),
 };
 
 struct kp_rgb_global kp_rgb_global = {
@@ -150,7 +156,7 @@ static bool kp_rgb_scene_animating;
 static uint64_t kp_rgb_refresh_token;
 static bool kp_rgb_refresh_pending;
 static size_t kp_rgb_refresh_holds;
-static int kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
+static enum zmk_activity_state kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
 
 /* shared - local, in ms; 0 on the central/standalone. Written by the split
  * command handler, read once per render pass. */
@@ -170,8 +176,14 @@ static struct kp_rgb_scene_runtime kp_rgb_overlay_scenes[MAX(1, KP_RGB_OVERLAY_C
 
 static bool kp_rgb_logical_on_locked(void) {
   return kp_rgb_global.user_on &&
-         (!IS_ENABLED(CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE) ||
-          zmk_activity_get_state() == ZMK_ACTIVITY_ACTIVE);
+         (kp_rgb_activity_state == ZMK_ACTIVITY_ACTIVE ||
+          (kp_rgb_activity_state == ZMK_ACTIVITY_IDLE && kp_rgb_config.idle_brightness != 0));
+}
+
+static uint8_t kp_rgb_brightness_cap_locked(void) {
+  return kp_rgb_activity_state == ZMK_ACTIVITY_ACTIVE
+             ? kp_rgb_config.max_brightness
+             : MIN(kp_rgb_config.idle_brightness, kp_rgb_config.max_brightness);
 }
 
 #define KP_TRY_LOCK()                                                          \
@@ -395,7 +407,6 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
         .clock_ms = kp_rgb_clock_ms(),
         .board_length = kp_rgb_board_length,
         .board_height = kp_rgb_board_height,
-        .is_idle = zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE,
     };
     kp_rgb_scene_animating = false;
     frame.scratch = scratch;
@@ -421,8 +432,7 @@ static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
       kp_rgb_prefix_len = prefix_count;
     }
 
-    uint8_t cap = frame.is_idle ? kp_rgb_config.idle_brightness
-                                : kp_rgb_config.max_brightness;
+    uint8_t cap = kp_rgb_brightness_cap_locked();
     uint8_t brightness = (uint8_t)(((uint16_t)cap * kp_rgb_global.brightness) /
                                    KP_RGB_BRT_MAX);
     for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -643,11 +653,21 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
 
   if (as_zmk_activity_state_changed(eh) != NULL) {
     kp_rgb_matrix_lock();
-    int state = zmk_activity_get_state();
+    enum zmk_activity_state state = zmk_activity_get_state();
     if (state != kp_rgb_activity_state) {
+      uint8_t old_cap = kp_rgb_brightness_cap_locked();
       kp_rgb_activity_state = state;
       kp_rgb_reconcile_power_locked();
-      zmk_rgb_matrix_flush();
+      if (state == ZMK_ACTIVITY_SLEEP && kp_rgb_output_ready && kp_rgb_has_leds()) {
+        /* ZMK suspends devices immediately after this event returns. */
+        kp_rgb_request_black_locked();
+        kp_rgb_output_urgent_black = true;
+        kp_rgb_attempt_output_locked();
+        if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE) zmk_rgb_matrix_flush();
+      } else if (atomic_get(&kp_rgb_output_allowed) &&
+                 old_cap != kp_rgb_brightness_cap_locked()) {
+        zmk_rgb_matrix_flush();
+      }
     }
     kp_rgb_matrix_unlock();
     return ZMK_EV_EVENT_BUBBLE;
@@ -794,6 +814,7 @@ static int kp_rgb_matrix_init(void) {
     return -ENODEV;
   }
   kp_rgb_matrix_lock();
+  kp_rgb_activity_state = zmk_activity_get_state();
   kp_rgb_output_ready = true;
   if (kp_rgb_has_leds()) {
     kp_rgb_request_black_locked();

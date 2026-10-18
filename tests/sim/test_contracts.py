@@ -25,6 +25,10 @@ SCENARIOS = (
     'status-only', 'no-active', 'empty-registry', 'lifecycle',
     'output-serialization', 'render-serialization',
     'composition-ab', 'composition-ba', 'filters', 'solid-brightness',
+    'idle-phase', 'sleep', 'sleep-off', 'sleep-inhibited', 'sleep-idle',
+    'sleep-failure', 'sleep-debt', 'sleep-resume-debt',
+    'sleep-serialization', 'sleep-render-serialization',
+    'boot-idle', 'boot-sleep',
 )
 FRAGMENT = r'''
 &preview_selector { status = "disabled"; };
@@ -81,7 +85,9 @@ CONFIG_IRQ_OFFLOAD=y
 CONFIG_LTO=n
 """
 
-VARIANTS = ('normal', 'zero', 'idle-off', 'idle-dim', 'empty', 'no-active', 'boot-off', 'composition-ab', 'composition-ba', 'solid-brightness')
+VARIANTS = ('normal', 'zero', 'idle-off', 'idle-default', 'idle-dim',
+            'idle-equal', 'idle-above', 'max-zero', 'empty', 'no-active', 'boot-off',
+            'composition-ab', 'composition-ba', 'solid-brightness')
 FIRST = '''
 composition_first: composition_first {
     compatible = "keypaw,rgb-overlay"; opacity = <37>; leds = <1>;
@@ -112,12 +118,27 @@ def main():
     if args.repeat < 1: parser.error('--repeat must be positive')
     for variant in ((args.variant,) if args.variant else VARIANTS):
         fragment, conf = FRAGMENT, CONF
-        scenarios = SCENARIOS if variant == 'normal' else ('settled', 'purge', 'resume') if variant == 'zero' else ('idle-policy', 'intent') if variant.startswith('idle') else ('empty-registry',) if variant == 'empty' else ('boot-off',) if variant == 'boot-off' else ('no-active',)
-        if variant == 'normal': scenarios = tuple(s for s in scenarios if s not in ('idle-policy', 'intent', 'idle', 'no-active', 'boot-off', 'empty-registry', 'composition-ab', 'composition-ba', 'filters', 'solid-brightness'))
+        if variant == 'normal':
+            scenarios = tuple(s for s in SCENARIOS if s not in (
+                'idle-policy', 'intent', 'idle', 'idle-phase', 'no-active', 'boot-off',
+                'empty-registry', 'composition-ab', 'composition-ba', 'filters', 'solid-brightness'))
+        elif variant == 'zero':
+            scenarios = ('settled', 'purge', 'resume', 'sleep')
+        elif variant.startswith('idle-') or variant == 'max-zero':
+            scenarios = ('idle-policy', 'intent', 'idle')
+        else:
+            scenarios = {'empty': ('empty-registry',), 'boot-off': ('boot-off',)}.get(variant, ('no-active',))
         if variant == 'boot-off': fragment += '\n&rgb_matrix { /delete-property/ initial-on; };\n'
         if variant == 'zero': fragment += '\n&engine_strip { chain-length = <0>; }; &rgb_matrix { mapping = <>; };\n'
-        if variant == 'idle-off': conf += 'CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=y\n'
-        if variant == 'idle-dim': scenarios += ('idle',)
+        if variant == 'idle-off': fragment += '\n&rgb_matrix { idle-brightness = <0>; };\n'
+        if variant == 'idle-default': fragment += '\n&rgb_matrix { /delete-property/ idle-brightness; };\n'
+        if variant in ('idle-dim', 'idle-equal', 'idle-above', 'max-zero'):
+            cap = {'idle-dim': 30, 'idle-equal': 60, 'idle-above': 90, 'max-zero': 50}[variant]
+            maximum = 0 if variant == 'max-zero' else 60
+            fragment += f'\n&rgb_matrix {{ max-brightness = <{maximum}>; idle-brightness = <{cap}>; }};\n'
+            scenarios += ('idle-phase',)
+        if variant in ('idle-off', 'idle-default', 'idle-dim'): scenarios += ('sleep-idle',)
+        if variant == 'idle-default': scenarios += ('boot-idle',)
         if variant == 'empty': fragment += '\n&engine_bottom { status = "disabled"; }; &engine_mid { status = "disabled"; }; &engine_top { status = "disabled"; }; &engine_cover { status = "disabled"; };\n'
         if variant == 'no-active': fragment += '\n&engine_bottom { condition = <&engine_mid_latch>; };\n'
         if variant.startswith('composition-'):

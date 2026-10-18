@@ -92,7 +92,7 @@ static void matrix_defaults(void) {
     KP_CHECK(kp_rgb_global.user_on == DT_PROP(KP_RGB_NODE, initial_on));
     KP_CHECK(kp_rgb_config.initial_on == DT_PROP(KP_RGB_NODE, initial_on));
     KP_CHECK(kp_rgb_config.max_brightness == DT_PROP_OR(KP_RGB_NODE, max_brightness, 40));
-    KP_CHECK(kp_rgb_config.idle_brightness == DT_PROP_OR(KP_RGB_NODE, idle_brightness, 30));
+    KP_CHECK(kp_rgb_config.idle_brightness == DT_PROP_OR(KP_RGB_NODE, idle_brightness, 0));
     KP_CHECK(device_is_ready(DEV(rgb_matrix)));
     KP_CHECK(strcmp(DEV(rgb_matrix)->name, "rgb") == 0);
     KP_CHECK(zmk_rgb_matrix_off() == 0);

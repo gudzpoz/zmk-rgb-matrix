@@ -88,14 +88,6 @@ config KEYPAW_RGB_MATRIX_DURATION_MAX_MS
     default 10000
     range 1 60000
 
-
-config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
-    bool "Turn the matrix off when the keyboard goes idle"
-    default y
-    help
-      Without this the strip might latch at its last color through deep sleep
-      and keeps drawing current.
-
 # Caps Lock will pull in a HID-indicator event dependency. Disable it if you
 # don't need that.
 config KEYPAW_RGB_CONDITION_CAPS_LOCK
