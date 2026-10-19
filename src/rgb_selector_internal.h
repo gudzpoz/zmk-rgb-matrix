@@ -27,6 +27,7 @@ struct kp_rgb_selector_member {
 
 struct kp_rgb_selector {
   const struct device *owner;
+  const struct device *control;
   const char *id;
   const struct kp_rgb_selector_member *members;
   size_t effect_count;
@@ -43,7 +44,6 @@ struct kp_rgb_selector {
 size_t kp_rgb_selector_registry_count(void);
 struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index);
 
-size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector);
 /* Returns NULL for out-of-range, disabled or currently unready slots. */
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot);
@@ -80,11 +80,7 @@ kp_rgb_selector_overlay_state_locked(const struct device *selector);
 int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
 void kp_rgb_selector_overlays_defaults_locked(void);
 
-/* Generated from one-way behavior-to-selector references. */
-const struct device *kp_rgb_selector_control(const struct device *selector);
-
 struct zmk_behavior_binding;
-bool kp_rgb_selector_command(uint32_t command);
 int kp_rgb_selector_convert_locked(struct kp_rgb_selector *selector,
                                    struct zmk_behavior_binding *binding);
 int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,

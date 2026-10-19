@@ -60,6 +60,7 @@ static void check_static_metadata(void) {
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == NULL);
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
+  CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, defctl)));
   CHECK(selector->effect_count == 4);
   CHECK(selector->members[0].effect == DEV(default_ready));
   CHECK(strcmp(selector->members[0].id, "ready") == 0);
@@ -79,6 +80,7 @@ static void check_static_metadata(void) {
 
   selector = find_selector("default_late_selector");
   CHECK(selector != NULL && selector->effect_count == 3);
+  CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, latectl)));
   CHECK(selector->members[0].effect == DEV(default_late));
   CHECK(strcmp(selector->members[0].id, "late") == 0);
   kp_rgb_matrix_lock();
@@ -90,7 +92,7 @@ static void check_hole_selection(void) {
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
   kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_count(selector) == 4);
+  CHECK(selector->effect_count == 4);
   CHECK(kp_rgb_selector_at(selector, 1) == NULL);
   CHECK(kp_rgb_selector_calc_index(selector, 0, 1) == 2);
   CHECK(kp_rgb_selector_calc_index(selector, 2, -1) == 0);

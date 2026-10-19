@@ -177,12 +177,11 @@ static int kp_selector_start(const struct device *dev) {
     LOG_ERR("RGB selector %s is not ready", dev->name);
     return -ENODEV;
   }
-  const struct device *control = kp_rgb_selector_control(dev);
-  if (control == NULL || !device_is_ready(control)) {
+  struct kp_selector_data *data = dev->data;
+  if (!device_is_ready(data->selector.control)) {
     LOG_ERR("RGB selector %s canonical control is not ready", dev->name);
     return -ENODEV;
   }
-  struct kp_selector_data *data = dev->data;
   kp_rgb_matrix_lock();
   if (data->ready) {
     kp_rgb_matrix_unlock();
@@ -235,7 +234,17 @@ static int kp_selector_start(const struct device *dev) {
               (KP_RGB_EFFECT_INSTANCE_INIT(DEVICE_DT_GET(node_id)), ),         \
               (KP_RGB_EFFECT_INSTANCE_INIT(NULL), ))
 
+#define KP_CONTROL_MATCH(node_id, selector_id)                                 \
+  +DT_SAME_NODE(DT_PHANDLE(node_id, selector), selector_id)
+#define KP_CONTROL_FOR_SELECTOR(node_id, selector_id)                          \
+  DT_SAME_NODE(DT_PHANDLE(node_id, selector), selector_id)                     \
+  ? DEVICE_DT_GET(node_id):
+
 #define KP_SELECTOR_DEFINE(inst)                                               \
+  BUILD_ASSERT((0 DT_FOREACH_STATUS_OKAY_VARGS(keypaw_behavior_rgb_selector,   \
+                                               KP_CONTROL_MATCH,               \
+                                               DT_DRV_INST(inst))) == 1,       \
+               "RGB selector requires exactly one enabled canonical control"); \
   BUILD_ASSERT(sizeof(KP_SELECTOR_ID(DT_DRV_INST(inst))) <=                    \
                    KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH,                      \
                "RGB selector token exceeds "                                   \
@@ -263,6 +272,9 @@ static int kp_selector_start(const struct device *dev) {
       .selector =                                                              \
           {                                                                    \
               .owner = DEVICE_DT_GET(DT_DRV_INST(inst)),                       \
+              .control = DT_FOREACH_STATUS_OKAY_VARGS(                         \
+                  keypaw_behavior_rgb_selector, KP_CONTROL_FOR_SELECTOR,       \
+                  DT_DRV_INST(inst)) NULL,                                     \
               .id = KP_SELECTOR_ID(DT_DRV_INST(inst)),                         \
               .members = kp_selector_##inst##_members,                         \
               .effect_count = ARRAY_SIZE(kp_selector_##inst##_members),        \

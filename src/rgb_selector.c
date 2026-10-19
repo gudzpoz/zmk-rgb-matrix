@@ -13,10 +13,6 @@
 #include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
 
-size_t kp_rgb_selector_count(const struct kp_rgb_selector *selector) {
-  return selector->effect_count;
-}
-
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot) {
   if (slot >= selector->effect_count)
@@ -27,7 +23,7 @@ const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
 
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
                                     uint16_t current, int16_t delta) {
-  size_t count = kp_rgb_selector_count(selector);
+  size_t count = selector->effect_count;
   int64_t norm_delta = delta % (int64_t)count;
   size_t start =
       ((int64_t)current + norm_delta + (int64_t)count) % (int64_t)count;
@@ -47,7 +43,7 @@ uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
 
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
   const struct device *previous = selector->active_fx;
-  if (selector->effect_index >= kp_rgb_selector_count(selector)) {
+  if (selector->effect_index >= selector->effect_count) {
     selector->effect_index = 0;
   }
   selector->effect_index =
@@ -58,7 +54,7 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
 }
 
 int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
-  for (size_t i = 0; i < kp_rgb_selector_count(selector); i++) {
+  for (size_t i = 0; i < selector->effect_count; i++) {
     const struct device *fx = kp_rgb_selector_at(selector, i);
     if (fx == NULL) {
       continue;
@@ -74,7 +70,7 @@ int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
 
 int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,
                                   uint16_t slot) {
-  if (slot >= kp_rgb_selector_count(selector)) {
+  if (slot >= selector->effect_count) {
     return -EINVAL;
   }
   const struct device *fx = kp_rgb_selector_at(selector, slot);
@@ -104,7 +100,7 @@ int kp_rgb_selector_member_slot(const struct kp_rgb_selector *selector,
   return cfg->slot;
 }
 
-bool kp_rgb_selector_command(uint32_t command) {
+static bool kp_rgb_selector_command(uint32_t command) {
   switch (command) {
   case RGB_HUI_CMD:
   case RGB_HUD_CMD:

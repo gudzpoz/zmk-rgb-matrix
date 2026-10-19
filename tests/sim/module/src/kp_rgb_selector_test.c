@@ -248,7 +248,7 @@ static void scoped_snapshot_roundtrip(void) {
   uint16_t original_slot = captured_a.slot;
   const struct device *original_member = a->active_fx;
   uint16_t alternate_slot = UINT16_MAX;
-  for (size_t i = 0; i < kp_rgb_selector_count(a); i++) {
+  for (size_t i = 0; i < a->effect_count; i++) {
     if (i != original_slot && kp_rgb_selector_at(a, i) != NULL &&
         device_is_ready(kp_rgb_selector_at(a, i))) {
       alternate_slot = (uint16_t)i;
@@ -297,7 +297,7 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(a->active_fx == original_member && a->effect_index == original_slot);
   CHECK(kp_rgb_set_color_locked(original_member, &initial_color) == 0);
   kp_rgb_matrix_unlock();
-  CHECK(captured_b.control == kp_rgb_selector_control(selector_b));
+  CHECK(captured_b.control == DEV(rgbs_b));
 }
 
 static void controls(void) {
@@ -324,8 +324,8 @@ static void controls(void) {
   CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(private_white)));
   CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
   CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
-  CHECK(kp_rgb_selector_control(DEV(selector_a)) == DEV(rgbs_a));
-  CHECK(kp_rgb_selector_control(DEV(selector_b)) == DEV(rgbs_b));
+  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->control == DEV(rgbs_a));
+  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->control == DEV(rgbs_b));
   select_slot(DEV(selector_a), 0, -ENOENT);
   select_slot(DEV(selector_a), UINT16_MAX, -EINVAL);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);

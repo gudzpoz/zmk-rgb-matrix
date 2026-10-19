@@ -29,46 +29,17 @@ struct kp_selector_control_config {
   const struct device *selector;
 };
 
-struct kp_selector_control_entry {
-  const struct device *selector;
-  const struct device *control;
-};
-
-#define KP_CONTROL_ENTRY(node_id)                                              \
-  {DEVICE_DT_GET(DT_PHANDLE(node_id, selector)), DEVICE_DT_GET(node_id)},
-
-static const struct kp_selector_control_entry kp_selector_controls[] = {
-    DT_FOREACH_STATUS_OKAY(DT_DRV_COMPAT, KP_CONTROL_ENTRY){NULL, NULL},
-};
-
-const struct device *kp_rgb_selector_control(const struct device *selector) {
-  for (size_t i = 0; i + 1 < ARRAY_SIZE(kp_selector_controls); i++) {
-    if (kp_selector_controls[i].selector == selector)
-      return kp_selector_controls[i].control;
-  }
-  return NULL;
-}
-
-#define KP_CONTROL_MATCH(node_id, selector_id)                                 \
-  +DT_SAME_NODE(DT_PHANDLE(node_id, selector), selector_id)
-#define KP_CONTROL_ASSOCIATION(selector_id)                                    \
-  BUILD_ASSERT(                                                                \
-      (0 DT_FOREACH_STATUS_OKAY_VARGS(keypaw_behavior_rgb_selector,            \
-                                      KP_CONTROL_MATCH, selector_id)) == 1,    \
-      "RGB selector requires exactly one enabled canonical control");
-
-DT_FOREACH_STATUS_OKAY(keypaw_rgb_overlay_selector, KP_CONTROL_ASSOCIATION)
-
 int kp_rgb_selector_binding_convert(const struct device *selector,
                                     struct zmk_behavior_binding *binding) {
   if (k_is_in_isr())
     return -EWOULDBLOCK;
-  const struct device *control = kp_rgb_selector_control(selector);
-  if (control == NULL || !device_is_ready(control))
-    return -ENODEV;
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
+  if (state == NULL || !device_is_ready(state->control)) {
+    kp_rgb_matrix_unlock();
+    return -ENODEV;
+  }
   int err = kp_rgb_selector_convert_locked(state, binding);
   if (err == 0) {
     if (binding->param1 == RGB_COLOR_HSB_CMD)
@@ -77,7 +48,7 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
     else if (binding->param1 == RGB_SPI_CMD)
       binding->param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(
           RGB_SELECTOR_PERIOD_CMD, state->effect_index);
-    binding->behavior_dev = control->name;
+    binding->behavior_dev = state->control->name;
   }
   kp_rgb_matrix_unlock();
   return err;

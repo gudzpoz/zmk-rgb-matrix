@@ -85,6 +85,7 @@ static bool user_on(void) {
 
 static void matrix_defaults(void) {
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
+    KP_CHECK(kp_rgb_selector_registry_count() == 0);
     KP_CHECK(KP_RGB_OVERLAY_WORDS == 1);
     int32_t initial = (int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30);
     KP_CHECK(kp_rgb_config.initial_brightness == CLAMP(initial, 0, 100));
@@ -180,7 +181,34 @@ static void wait_ready(void) {
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
 }
+static void canonical_metadata_before_start(void) {
+    bool found_a = false, found_b = false;
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+        const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+        if (state->owner == DEV(selector_a)) {
+            KP_CHECK(state->control == DEV(rgbs_a));
+            found_a = true;
+        } else if (state->owner == DEV(selector_b)) {
+            KP_CHECK(state->control == DEV(rgbs_b));
+            found_b = true;
+        }
+    }
+    KP_CHECK(found_a && found_b);
+    struct zmk_behavior_binding b = binding(DEV(rgbs_a), RGB_EFF_CMD, 0);
+    KP_CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &b) == -ENODEV);
+    KP_CHECK(kp_rgb_selector_binding_convert(DEV(ordinary), &b) == -ENODEV);
+    KP_CHECK(kp_rgb_selector_binding_convert(NULL, &b) == -ENODEV);
+    struct kp_rgb_selector_snapshot snapshot;
+    size_t cursor = 0;
+    kp_rgb_matrix_lock();
+    KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a)) == NULL);
+    KP_CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == -ENODEV);
+    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot) == -ENODEV);
+    KP_CHECK(cursor == 0);
+    kp_rgb_matrix_unlock();
+}
 static void early_prepare(void) {
+    canonical_metadata_before_start();
     KP_CHECK(device_is_ready(DEV(probe_a)));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
@@ -226,7 +254,14 @@ static void registry(void) {
     struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
     struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(DEV(selector_b));
     KP_CHECK(a && b && a != b);
-    KP_CHECK(kp_rgb_selector_count(a) == 3 && kp_rgb_selector_count(b) == 2);
+    KP_CHECK(a->control == DEV(rgbs_a) && b->control == DEV(rgbs_b));
+    struct kp_rgb_selector_snapshot snapshot;
+    KP_CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
+    KP_CHECK(snapshot.control == DEV(rgbs_a));
+    size_t cursor = 0;
+    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_b), &cursor, &snapshot) == 1);
+    KP_CHECK(snapshot.control == DEV(rgbs_b));
+    KP_CHECK(a->effect_count == 3 && b->effect_count == 2);
     KP_CHECK(kp_rgb_selector_at(a, 0) == NULL && kp_rgb_selector_at(a, 3) == NULL);
     KP_CHECK(kp_rgb_selector_at(a, 1) == DEV(probe_a));
     KP_CHECK(kp_rgb_selector_at(a, 2) == DEV(probe_c));
@@ -406,8 +441,8 @@ static void conversion(void) {
     KP_CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
     KP_CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
     KP_CHECK(zmk_behavior_get_binding(DEV(rgbs_a)->name) == DEV(rgbs_a));
-    KP_CHECK(kp_rgb_selector_control(DEV(selector_a)) == DEV(rgbs_a));
-    KP_CHECK(kp_rgb_selector_control(DEV(selector_b)) == DEV(rgbs_b));
+    KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->control == DEV(rgbs_a));
+    KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->control == DEV(rgbs_b));
     enum behavior_locality locality;
     KP_CHECK(behavior_get_locality(DEV(rgbs_a), &locality) == 0 && locality == BEHAVIOR_LOCALITY_GLOBAL);
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -675,6 +710,7 @@ static void isr(const void *arg) {
 }
 static void deferred_prepare(void) {
     KP_CHECK(!device_is_ready(DEV(rgbs_a)));
+    canonical_metadata_before_start();
     struct kp_rgb_hsb c = {12,34,29};
     KP_CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &c) == 0);
     KP_CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 4321) == 0);
@@ -714,7 +750,7 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-global-defaults")) global_defaults();
     else if (kp_test_case("control-noop")) no_op();
     else if (kp_test_case("control-peripheral")) { conversion(); irq_offload(isr, NULL); }
-    else if (kp_test_case("control-conversion") || kp_test_case("control-large-step")) conversion();
+    else if (kp_test_case("control-conversion") || kp_test_case("control-conversion-metadata-off") || kp_test_case("control-large-step")) conversion();
     else if (kp_test_case("control-validation")) validation();
     else if (kp_test_case("control-global-commands")) global_commands();
     else if (kp_test_case("control-reset")) scoped_reset();
