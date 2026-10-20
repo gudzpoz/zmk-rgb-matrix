@@ -157,10 +157,10 @@ for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
         CASES[name] = (0 <= cap <= 100, f'&rgb_matrix {{ {prop} = <({cap})>; }};')
         DIAGNOSTICS[name] = rf'{prop} must be in 0\.\.100'
 
-for ordinal in (65535, 65536):
-    name = f"overlay-ordinal-{ordinal}"
-    CASES[name] = (ordinal <= 65535, "")
-    DIAGNOSTICS[name] = r"overlay ordinal must fit uint16_t"
+for index in (65535, 65536):
+    name = f"overlay-index-{index}"
+    CASES[name] = (index <= 65535, "")
+    DIAGNOSTICS[name] = r"overlay index must fit uint16_t"
 
 for opacity in (-1, 0, 100, 101, 256):
     name = f"overlay-opacity-{opacity}"
@@ -184,25 +184,25 @@ for effect in ("rain", "starlight"):
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
 
 
-def compile_overlay_ordinal(directory, ordinal):
+def compile_overlay_index(directory, index):
     """Probe the real definition helper without generating 65536 DTS children.
 
-    Only compile the substituted translation unit; never link or run its init.
+    Only compile the substituted translation unit; never link or run the substituted object.
     """
     source = MODULE / "src/overlays/overlay.c"
     commands = json.loads((directory / "build/compile_commands.json").read_text())
     entry = next(item for item in commands if Path(item["file"]) == source)
-    probe = directory / "ordinal-probe.c"
+    probe = directory / "index-probe.c"
     probe.write_text('#include <zmk/rgb_matrix.h>\n'
-                     '#undef DT_NODE_CHILD_IDX\n'
-                     f'#define DT_NODE_CHILD_IDX(node_id) {ordinal}\n'
+                     '#undef KP_RGB_OVERLAY_INDEX\n'
+                     f'#define KP_RGB_OVERLAY_INDEX(node_id) {index}\n'
                      f'#include "{source}"\n')
     command = shlex.split(entry["command"])
     command[command.index("-c") + 1] = str(probe)
-    command[command.index("-o") + 1] = str(directory / "ordinal-probe.o")
+    command[command.index("-o") + 1] = str(directory / "index-probe.o")
     result = subprocess.run(command, cwd=entry["directory"], text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-    (directory / "ordinal-probe.log").write_text(result.stdout)
+    (directory / "index-probe.log").write_text(result.stdout)
     return result
 
 
@@ -243,8 +243,8 @@ def main():
         result = subprocess.run(command, cwd=WORKSPACE, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
         (root / f"{name}.log").write_text(result.stdout)
-        if name.startswith("overlay-ordinal-") and result.returncode == 0:
-            result = compile_overlay_ordinal(root / name, int(name.rsplit("-", 1)[1]))
+        if name.startswith("overlay-index-") and result.returncode == 0:
+            result = compile_overlay_index(root / name, int(name.rsplit("-", 1)[1]))
         if (result.returncode == 0) != valid:
             raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                  + result.stdout[-12000:])

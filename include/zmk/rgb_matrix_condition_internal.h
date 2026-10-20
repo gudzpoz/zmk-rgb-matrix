@@ -5,11 +5,11 @@
 #pragma once
 
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/iterable_sections.h>
 
 /* Private declaration storage; not a provider API. */
 struct kp_rgb_condition_registration {
   const struct device *dev;
-  struct kp_rgb_condition_registration *next;
   const struct device *const *deps;
   size_t dep_count;
   size_t rank;
@@ -22,6 +22,3 @@ struct kp_rgb_condition_registration {
   bool value;
   bool dirty;
 };
-
-void kp_rgb_condition_register(const struct device *dev,
-                               struct kp_rgb_condition_registration *entry);

@@ -8,7 +8,6 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-static struct kp_rgb_condition_registration *registry;
 static struct kp_rgb_condition_registration *sampling;
 static struct k_spinlock schedule_lock;
 static atomic_t external_pending;
@@ -21,7 +20,7 @@ static void control_handler(struct k_work *work);
 static K_WORK_DEFINE(control_work, control_handler);
 
 static struct kp_rgb_condition_registration *lookup(const struct device *dev) {
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     if (e->dev == dev)
       return e;
   }
@@ -39,17 +38,6 @@ static void fault(struct kp_rgb_condition_registration *e, const char *reason) {
   if (!e->fault)
     LOG_ERR("RGB condition %s: %s", e->dev->name, reason);
   e->fault = true;
-}
-
-void kp_rgb_condition_register(const struct device *dev,
-                               struct kp_rgb_condition_registration *entry) {
-  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  __ASSERT(!started, "condition registered after startup");
-  entry->dev = dev;
-  entry->next = registry;
-  registry = entry;
-  condition_count++;
-  k_spin_unlock(&schedule_lock, key);
 }
 
 void kp_rgb_condition_invalidate(const struct device *dev) {
@@ -129,7 +117,9 @@ bool kp_rgb_condition_value(const struct device *dev) {
 }
 
 static void build_graph(void) {
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+  STRUCT_SECTION_COUNT(kp_rgb_condition_registration, &condition_count);
+
+  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     const struct kp_rgb_condition_api *api = e->dev->api;
     if (!device_is_ready(e->dev) || !api || !api->sample ||
         api->scope > KP_RGB_CONDITION_CENTRAL_ONLY) {
@@ -146,7 +136,7 @@ static void build_graph(void) {
   kp_rgb_triggers_init();
 
   for (size_t pass = 0; pass < condition_count; pass++) {
-    for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+    STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
       if (!e->live || e->fault)
         continue;
       const struct kp_rgb_condition_api *api = e->dev->api;
@@ -167,7 +157,7 @@ static void build_graph(void) {
   }
 
   for (size_t pass = 0; pass < condition_count; pass++) {
-    for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+    STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
       if (!e->live || e->resolved)
         continue;
       bool ready = true;
@@ -187,19 +177,19 @@ static void build_graph(void) {
     }
   }
 
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     if (e->live && !e->resolved)
       fault(e, "dependency cycle");
   }
 }
 
 static void evaluate(void) {
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     e->dirty = atomic_set(&e->pending, 0) || !e->sampled;
   }
 
   for (size_t rank = 0; rank < condition_count; rank++) {
-    for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+    STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
       if (!e->live || e->fault || e->rank != rank)
         continue;
       for (size_t i = 0; i < e->dep_count; i++) {
@@ -228,7 +218,7 @@ static void evaluate(void) {
 }
 
 static bool pending(void) {
-  for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     if (e->live && !e->fault && atomic_get(&e->pending))
       return true;
   }
@@ -249,7 +239,7 @@ static void control_handler(struct k_work *work) {
   refresh_requested = 0;
   k_spin_unlock(&schedule_lock, refresh_key);
   if (refresh_token) {
-    for (struct kp_rgb_condition_registration *e = registry; e; e = e->next) {
+    STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
       if (e->live && !e->fault) atomic_set(&e->pending, 1);
     }
   }

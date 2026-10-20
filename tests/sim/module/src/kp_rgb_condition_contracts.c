@@ -65,7 +65,12 @@ static const struct device *const *dependencies(const struct device *dev, size_t
 }
 #define DEFINE(inst) \
     static struct source source_##inst; \
-    static struct kp_rgb_condition_registration registration_##inst; \
+    COND_CODE_1(DT_INST_PROP(inst, unregistered), (), ( \
+        static STRUCT_SECTION_ITERABLE(kp_rgb_condition_registration, \
+            UTIL_CAT(kp_rgb_condition_, DT_DEP_ORD(DT_DRV_INST(inst)))) = { \
+                .dev = DEVICE_DT_INST_GET(inst), \
+            }; \
+    )) \
     static const struct source_config config_##inst = { \
         .selector = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, selected_selector), \
             (DEVICE_DT_GET(DT_INST_PHANDLE(inst, selected_selector))), (NULL)), \
@@ -78,8 +83,7 @@ static const struct device *const *dependencies(const struct device *dev, size_t
         .sample = sample, .dependencies = dependencies, \
     }; \
     static int init_##inst(const struct device *dev) { \
-        if (!DT_INST_PROP(inst, unregistered)) \
-            kp_rgb_condition_register(dev, &registration_##inst); \
+        ARG_UNUSED(dev); \
         return DT_INST_PROP(inst, unready) ? -ENODEV : 0; \
     } \
     DEVICE_DT_INST_DEFINE(inst, init_##inst, NULL, &source_##inst, &config_##inst, \

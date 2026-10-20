@@ -356,14 +356,13 @@ bool kp_rgb_condition_value(const struct device *condition);
  * providers must not access the registration or embed engine state in their data.
  */
 #define KP_RGB_CONDITION_DEFINE(inst, api_expr, cfg_expr, data_expr)           \
-  static struct kp_rgb_condition_registration kp_rgb_condition_##inst##_entry; \
-  static int kp_rgb_condition_##inst##_init(const struct device *dev) {        \
-    kp_rgb_condition_register(dev, &kp_rgb_condition_##inst##_entry);          \
-    return 0;                                                                  \
-  }                                                                            \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), kp_rgb_condition_##inst##_init, NULL,    \
-                   data_expr, cfg_expr, POST_KERNEL,                           \
-                   KP_RGB_DEVICE_INIT_PRIORITY, api_expr)
+  static STRUCT_SECTION_ITERABLE(                                              \
+      kp_rgb_condition_registration,                                           \
+      UTIL_CAT(kp_rgb_condition_, DT_DEP_ORD(DT_DRV_INST(inst)))) = {          \
+      .dev = DEVICE_DT_GET(DT_DRV_INST(inst)),                                 \
+  };                                                                           \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, data_expr, cfg_expr,         \
+                   POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, api_expr)
 
 /* Resolve a node's `condition` phandle, or NULL when it has none (meaning
  * "unconditionally active"). Shared by the compositor overlay and the trigger. */

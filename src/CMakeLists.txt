@@ -40,6 +40,10 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   behaviors/selector.c
 )
 
+if(CONFIG_KEYPAW_RGB_MATRIX)
+  zephyr_linker_sources(DATA_SECTIONS rgb_conditions.ld)
+endif()
+
 # Non-zero cost when there's no DTS definitions:
 # - Caps Lock pulls in ZMK_HID_INDICATORS.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/caps_lock.c)
