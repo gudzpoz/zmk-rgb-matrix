@@ -4,8 +4,6 @@
 description: |
   Concatenates RGB LED-strip devices into one logical strip. The first device
   in strips receives the first pixels, followed by each subsequent device.
-  Child devices may themselves be composites. Each physical strip must appear
-  only once within a composite's complete tree.
 
   Updates are sequential, not simultaneous. If a child fails, the remaining
   covered children are still updated and the first error is returned. A failed

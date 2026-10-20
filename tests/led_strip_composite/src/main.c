@@ -217,10 +217,9 @@ ZTEST(composite, test_black_and_fresh_retry_buffers)
 ZTEST(composite, test_runtime_init_errors)
 {
     const struct device *const devices[] = {
-        DEV(bad_ready), DEV(bad_rgb), DEV(bad_length), DEV(bad_runtime),
-        DEV(bad_overlap), DEV(bad_siblings), DEV(bad_api),
+        DEV(bad_ready), DEV(bad_rgb), DEV(bad_length), DEV(bad_runtime), DEV(bad_api),
     };
-    const int errors[] = {ENODEV, ENOTSUP, ENOTSUP, EINVAL, EINVAL, EINVAL, ENOTSUP};
+    const int errors[] = {ENODEV, ENOTSUP, ENOTSUP, EINVAL, ENOTSUP};
 
     zassert_false(device_is_ready(DEV(unready)));
     zassert_equal(DEV(unready)->state->init_res, EIO);
