@@ -19,7 +19,6 @@
 
 struct static_config {
     struct kp_rgb_overlay_common_config common;
-    size_t storage, candidates, count;
 };
 struct static_data { struct kp_rgb_overlay_common_data common; };
 static bool render(const struct device *dev, const struct kp_rgb_frame *frame);
@@ -28,9 +27,6 @@ static const struct kp_rgb_effect_callbacks callbacks __unused = {.render = rend
     KP_RGB_OVERLAY_TARGET_ARRAYS(inst, sm_##inst);                             \
     static const struct static_config sm_##inst##_cfg = {                     \
         .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                    \
-        .storage = ARRAY_SIZE(sm_##inst##_targets),                           \
-        .candidates = sm_##inst##_target_candidates,                          \
-        .count = sm_##inst##_target_count,                                    \
     };                                                                       \
     static struct static_data sm_##inst##_data = {                            \
         KP_RGB_OVERLAY_COMMON_DATA(inst, sm_##inst),                           \
@@ -48,28 +44,28 @@ DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 BUILD_ASSERT(KP_LED_COUNT == EXPECTED_LEDS);
 struct oracle {
     const struct device *dev;
-    size_t count, storage, candidates;
+    size_t count;
     size_t targets[12];
 };
 /* Physical indices and lengths are literal, independent of production macros. */
 static const struct oracle expected[] = {
-    {D(sm00), 10, 10, 10, {11, 3, 1, 4, 5, 6, 7, 8, 9, 10}},
-    {D(sm01), 4, 8, 8, {3, 1, 2, 0}},
-    {D(sm02), 0, 4, 4, {0}},
-    {D(sm03), 0, 3, 3, {0}},
-    {D(sm04), 0, 1, 0, {0}},
-    {D(sm05), 0, 1, 0, {0}},
-    {D(sm06), 0, 1, 0, {0}},
-    {D(sm07), 1, 1, 1, {2}},
-    {D(sm08), 3, 8, 8, {4, 1, 5}},
-    {D(sm09), 12, 12, 12, {11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0}},
-    {D(sm10), 1, 1, 1, {3}},
-    {D(sm11), 1, 1, 1, {0}},
-    {D(sm12), 1, 1, 1, {11}},
-    {D(sm13), 1, 2, 2, {5}},
-    {D(sm14), 1, 2, 2, {4}},
-    {D(sm15), 1, 1, 1, {10}},
-    {D(sm16), 1, 1, 1, {7}},
+    {D(sm00), 10, {11, 3, 1, 4, 5, 6, 7, 8, 9, 10}},
+    {D(sm01), 4, {3, 1, 2, 0}},
+    {D(sm02), 0, {0}},
+    {D(sm03), 0, {0}},
+    {D(sm04), 0, {0}},
+    {D(sm05), 0, {0}},
+    {D(sm06), 0, {0}},
+    {D(sm07), 1, {2}},
+    {D(sm08), 3, {4, 1, 5}},
+    {D(sm09), 12, {11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0}},
+    {D(sm10), 1, {3}},
+    {D(sm11), 1, {0}},
+    {D(sm12), 1, {11}},
+    {D(sm13), 1, {5}},
+    {D(sm14), 1, {4}},
+    {D(sm15), 1, {10}},
+    {D(sm16), 1, {7}},
 };
 BUILD_ASSERT(KP_RGB_OVERLAY_COUNT == 17);
 BUILD_ASSERT(KP_RGB_OVERLAY_WORDS == 2);
@@ -121,17 +117,9 @@ static int inspect_before_init(void) {
     bool ok = true;
 #if DT_NODE_EXISTS(DT_NODELABEL(sm00))
     for (size_t i = 0; i < ARRAY_SIZE(expected); i++) {
-        const struct static_config *cfg = expected[i].dev->config;
         const struct static_data *data = expected[i].dev->data;
-        size_t count = EXPECTED_LEDS == 0 ? 0 : expected[i].count;
         ok &= data->common.index == i && !data->common.local;
-        ok &= data->common.leds != NULL && data->common.led_count == count;
-        ok &= cfg->count == count && cfg->storage == expected[i].storage;
-        ok &= cfg->candidates == expected[i].candidates;
-        for (size_t j = 0; j < expected[i].storage; j++) {
-            size_t value = EXPECTED_LEDS == 0 ? 0 : expected[i].targets[j];
-            ok &= data->common.leds[j] == value;
-        }
+        ok &= data->common.leds != NULL && data->common.led_count == 0;
     }
 #endif
     unsigned previous_ordinal = 0;

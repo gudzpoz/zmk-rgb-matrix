@@ -11,7 +11,7 @@ from native_build import MODULE, build
 from native_process import run_logged
 
 FIXTURE = Path(__file__).resolve().parent / "config-static-metadata"
-CASES = ("dense", "zero-leds", "zero-overlays", "disabled-overlays", "large", "ordinal-boundary")
+CASES = ("dense", "zero-leds", "zero-overlays", "disabled-overlays", "ordinal-boundary")
 
 
 def main():
@@ -34,10 +34,8 @@ def main():
                 f'ordinal_{i} {{ compatible = "test,rgb-static-condition-b"; }};'
                 for i in range(128))
             fragment += '\n};\n'
-        flag = ("KEYPAW_SIM_STATIC_METADATA_LARGE_TEST" if name == "large" else
-                "KEYPAW_SIM_STATIC_METADATA_TEST")
         result = build(root, name, fragment, selectors="", extra_conf=
-                       f"\nCONFIG_{flag}=y\nCONFIG_ZMK_HID_INDICATORS=y\n")
+                       "\nCONFIG_KEYPAW_SIM_STATIC_METADATA_TEST=y\nCONFIG_ZMK_HID_INDICATORS=y\n")
         if result.returncode:
             raise AssertionError(f"Build failed: {root / (name + '-build.log')}\n"
                                  + result.stdout[-16000:])

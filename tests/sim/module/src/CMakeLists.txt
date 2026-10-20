@@ -27,8 +27,6 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_SIM_CONTROL_CONTRACTS kp_rgb_control_
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_SIM_EFFECT_CONTRACTS kp_rgb_effect_contracts.c)
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_SIM_STATIC_METADATA_TEST
   kp_rgb_static_metadata_test.c kp_rgb_static_metadata_condition.c)
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_SIM_STATIC_METADATA_LARGE_TEST
-  kp_rgb_static_metadata_large_test.c)
 if(CONFIG_KEYPAW_SIM_ENGINE_CONTRACTS)
   zephyr_ld_options(-Wl,--wrap=k_work_reschedule_for_queue)
   zephyr_ld_options(-Wl,--wrap=k_work_submit_to_queue)

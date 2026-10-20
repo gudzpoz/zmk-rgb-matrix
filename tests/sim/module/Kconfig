@@ -77,8 +77,3 @@ config KEYPAW_SIM_STATIC_METADATA_TEST
     bool "Native static overlay metadata and iterable condition test"
     default n
     depends on ARCH_POSIX && LED_STRIP
-
-config KEYPAW_SIM_STATIC_METADATA_LARGE_TEST
-    bool "Native larger static overlay metadata test"
-    default n
-    depends on ARCH_POSIX && LED_STRIP

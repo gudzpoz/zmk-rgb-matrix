@@ -378,15 +378,19 @@ struct kp_rgb_overlay_common_config {
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
   /* Use every local LED instead of the keys/leds lists. */
   bool all_leds;
+  const uint32_t *keys;
+  size_t key_count;
+  const uint32_t *leds;
+  size_t led_count;
 };
 
 /* Kind-agnostic mutable part. */
 struct kp_rgb_overlay_common_data {
-  size_t led_count;   /* resolved targets; 0 when keys and leds are both empty */
-  const size_t *leds; /* resolved constant targets */
-  uint16_t index;     /* enabled-overlay index */
-  bool local;         /* True when `local`: each half evaluates the condition */
-  bool gate;          /* worker-published local gate */
+  size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
+  size_t *leds;     /* initialized by the engine before overlay devices */
+  uint16_t index;   /* enabled-overlay index */
+  bool local;       /* True when `local`: each half evaluates the condition */
+  bool gate;        /* worker-published local gate */
 };
 
 /* Both halves must use the same enabled overlay sequence for split gate bits. */
@@ -410,21 +414,30 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength);
 
-#include <zmk/rgb_matrix_targets_internal.h>
+#define KP_RGB_OVERLAY_KEYS(node_id) \
+  UTIL_CAT(kp_rgb_overlay_keys_, DT_DEP_ORD(node_id))
+#define KP_RGB_OVERLAY_LEDS(node_id) \
+  UTIL_CAT(kp_rgb_overlay_leds_, DT_DEP_ORD(node_id))
 
-/* Declare constant resolved targets before config/data.
- * Resolved LED targets must be unique. Only the first resolved-count entries
- * are targets; storage may include padding. */
+/* Declare raw lists and target storage before config/data. Resolved LED targets
+ * must be unique. The engine resolves them before overlay device initialization. */
 #define KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg_inst)                           \
   BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
                "overlay must be a child of the keypaw,rgb-matrix node");       \
-  KP_RGB_OVERLAY_STATIC_TARGETS(DT_DRV_INST(inst), cfg_inst)
+  static const uint32_t KP_RGB_OVERLAY_KEYS(                                   \
+      DT_DRV_INST(inst))[MAX(1, DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0))] = \
+      DT_PROP_OR(DT_DRV_INST(inst), keys, {0});                                \
+  static const uint32_t KP_RGB_OVERLAY_LEDS(                                   \
+      DT_DRV_INST(inst))[MAX(1, DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0))] = \
+      DT_PROP_OR(DT_DRV_INST(inst), leds, {0});                                \
+  static size_t cfg_inst##_targets[MAX(                                        \
+      1, DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) +                          \
+             DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0))]
 
 /* Initialize the common data before device initialization. */
 #define KP_RGB_OVERLAY_COMMON_DATA(inst, cfg_inst)                             \
   .common = {                                                                  \
       .leds = cfg_inst##_targets,                                              \
-      .led_count = cfg_inst##_target_count,                                    \
       .index = KP_RGB_OVERLAY_INDEX(DT_DRV_INST(inst)),                        \
       .local =                                                                 \
           IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local),   \
@@ -433,7 +446,11 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
 /* Member-wise initializer for the common part of a kind's config. */
 #define KP_RGB_OVERLAY_COMMON(node_id)                                         \
   {.opacity = DT_PROP_OR(node_id, opacity, 100),                               \
-   .all_leds = DT_PROP(node_id, all_leds)}
+   .all_leds = DT_PROP(node_id, all_leds),                                     \
+   .keys = KP_RGB_OVERLAY_KEYS(node_id),                                       \
+   .key_count = DT_PROP_LEN_OR(node_id, keys, 0),                              \
+   .leds = KP_RGB_OVERLAY_LEDS(node_id),                                       \
+   .led_count = DT_PROP_LEN_OR(node_id, leds, 0)}
 
 /* Declare a non-behavior overlay device. Config/data must embed their
  * common headers first. render is required; other callbacks are optional. */

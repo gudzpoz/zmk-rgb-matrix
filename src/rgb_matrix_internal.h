@@ -80,6 +80,7 @@ void kp_rgb_reconcile_power_locked(void);
 void kp_rgb_request_runtime_reset_locked(void);
 
 extern const size_t kp_rgb_all_targets[MAX(1, KP_LED_COUNT)];
+void kp_rgb_overlay_targets_init(void);
 const size_t *kp_rgb_overlay_targets(const struct device *dev);
 size_t kp_rgb_overlay_target_count(const struct device *dev);
 

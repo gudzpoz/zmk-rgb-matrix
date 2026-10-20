@@ -788,6 +788,7 @@ int zmk_rgb_matrix_set_period(const struct device *fx, uint32_t period_ms) {
 
 static int kp_rgb_matrix_layout_init(void) {
   kp_resolve_layout();
+  kp_rgb_overlay_targets_init();
   return 0;
 }
 SYS_INIT(kp_rgb_matrix_layout_init, POST_KERNEL,
