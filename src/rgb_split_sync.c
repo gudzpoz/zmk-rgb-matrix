@@ -278,8 +278,8 @@ int kp_rgb_split_send_selector(uint8_t source,
                                const struct kp_rgb_selector_snapshot *snapshot,
                                uint8_t step) {
   struct zmk_behavior_binding binding;
-  int err = kp_rgb_selector_snapshot_binding(snapshot, step, &binding);
-  return err < 0 ? err : kp_rgb_sync_send_binding(source, &binding);
+  kp_rgb_selector_snapshot_binding(snapshot, step, &binding);
+  return kp_rgb_sync_send_binding(source, &binding);
 }
 
 static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {

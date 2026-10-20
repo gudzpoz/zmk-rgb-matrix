@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include <dt-bindings/keypaw/rgb_matrix.h>
+#include <zephyr/sys/__assert.h>
 #include <zmk/behavior.h>
 
 #include "rgb_selector_sync_internal.h"
@@ -53,11 +54,11 @@ int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
   return 0;
 }
 
-int kp_rgb_selector_snapshot_binding(
+void kp_rgb_selector_snapshot_binding(
     const struct kp_rgb_selector_snapshot *snapshot, uint8_t step,
     struct zmk_behavior_binding *binding) {
-  if (snapshot == NULL || binding == NULL || snapshot->control == NULL)
-    return -EINVAL;
+  __ASSERT_NO_MSG(snapshot != NULL && snapshot->control != NULL &&
+                  binding != NULL && step < 3);
   uint32_t command, argument;
   switch (step) {
   case 0:
@@ -71,18 +72,15 @@ int kp_rgb_selector_snapshot_binding(
         KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, snapshot->slot);
     argument = snapshot->period_ms;
     break;
-  case 2:
+  default:
     command = RGB_EFS_CMD;
     argument = snapshot->slot;
     break;
-  default:
-    return -EINVAL;
   }
   *binding =
       (struct zmk_behavior_binding){.behavior_dev = snapshot->control->name,
                                     .param1 = command,
                                     .param2 = argument};
-  return 0;
 }
 
 int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *selector,

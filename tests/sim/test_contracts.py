@@ -167,7 +167,10 @@ def main():
             result = build(args.build_dir, name, fragment, selectors='', extra_conf=conf)
             if result.returncode: raise AssertionError(result.stdout)
         for scenario in scenarios:
-            for _ in range(args.repeat): run(args.build_dir, name, scenario)
+            for _ in range(args.repeat):
+                result = run(args.build_dir, name, scenario)
+                if scenario in ('submit-failure', 'finish-failure'):
+                    assert result.stdout.count('RGB output queue invariant violated (-5)') == 1, result.stdout
     print('Native engine contracts passed.')
 
 

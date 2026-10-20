@@ -55,7 +55,9 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
-/* Every engine work item runs here, including behavior invocation chains. */
+/* Every engine work item runs here, including behavior invocation chains.
+ * The module owns the queue, which must remain running. Callers must not change
+ * its lifecycle or cancel engine-owned work. */
 struct k_work_q *kp_rgb_work_q(void);
 
 /* Split-shared animation clock: local uptime plus the peripheral offset, in a

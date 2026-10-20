@@ -239,11 +239,6 @@ static int kp_rgb_schedule_locked(int64_t deadline_ms) {
   int64_t delay_ms = MAX(INT64_C(0), deadline_ms - k_uptime_get());
   int err = k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_output_work,
                                       delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
-  if (err < 0) {
-    kp_rgb_pass_requested = true;
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_output_work,
-                                K_MSEC(1));
-  }
   return err;
 }
 
@@ -253,7 +248,7 @@ static void kp_rgb_request_output_pass(bool scene_changed) {
   kp_rgb_scene_requested |= scene_changed;
   int err = kp_rgb_pass_active ? 0 : kp_rgb_schedule_locked(k_uptime_get());
   k_spin_unlock(&kp_rgb_schedule_lock, key);
-  if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
+  if (err < 0) LOG_ERR("RGB output queue invariant violated (%d)", err);
 }
 
 void zmk_rgb_matrix_flush(void) { kp_rgb_request_output_pass(true); }
@@ -311,7 +306,7 @@ static void kp_rgb_finish_output_pass(int64_t deadline_ms, bool lock_retry) {
   int err = kp_rgb_schedule_locked(deadline_ms);
   kp_rgb_pass_active = false;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
-  if (err < 0) LOG_WRN("Failed to queue RGB output (%d)", err);
+  if (err < 0) LOG_ERR("RGB output queue invariant violated (%d)", err);
 }
 
 /* Prioritize key handling over RGB feedback: every event is copied here and

@@ -271,9 +271,9 @@ static void scoped_snapshot_roundtrip(void) {
   kp_rgb_matrix_unlock();
 
   struct zmk_behavior_binding color_binding, period_binding, selection_binding;
-  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 0, &color_binding) == 0);
-  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 1, &period_binding) == 0);
-  CHECK(kp_rgb_selector_snapshot_binding(&captured_a, 2, &selection_binding) == 0);
+  kp_rgb_selector_snapshot_binding(&captured_a, 0, &color_binding);
+  kp_rgb_selector_snapshot_binding(&captured_a, 1, &period_binding);
+  kp_rgb_selector_snapshot_binding(&captured_a, 2, &selection_binding);
   CHECK(color_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
                                     RGB_SELECTOR_COLOR_CMD, original_slot));
   CHECK(period_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(

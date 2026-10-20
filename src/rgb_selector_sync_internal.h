@@ -31,13 +31,15 @@ int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
 int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *selector,
                                         uint32_t command, uint32_t argument);
 /* Three absolute bindings: member color, member period, then selection.
+ * snapshot, snapshot->control and binding must be non-NULL; step must be 0–2.
  * The snapshot and returned binding contain no pointers to mutable parameters.
  */
-int kp_rgb_selector_snapshot_binding(
+void kp_rgb_selector_snapshot_binding(
     const struct kp_rgb_selector_snapshot *snapshot, uint8_t step,
     struct zmk_behavior_binding *binding);
 
 /* Central split transport only; invoke after releasing the matrix mutex.
+ * snapshot/control must be non-NULL and step must be 0–2, as for the encoder.
  * Success means local transport acceptance, not acknowledged delivery. */
 int kp_rgb_split_send_selector(uint8_t source,
                                const struct kp_rgb_selector_snapshot *snapshot,

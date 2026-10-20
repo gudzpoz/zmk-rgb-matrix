@@ -713,7 +713,6 @@ static void extended_split(void) {
 
 static void snapshot_validation(void) {
     struct kp_rgb_selector_snapshot snapshot = {0};
-    struct zmk_behavior_binding binding;
     size_t cursor = 0;
     kp_rgb_matrix_lock();
     CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), NULL) == -EINVAL);
@@ -722,10 +721,6 @@ static void snapshot_validation(void) {
     CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, NULL) == -EINVAL);
     CHECK(kp_rgb_selector_next_snapshot_locked(NULL, &cursor, &snapshot) == -ENODEV);
     kp_rgb_matrix_unlock();
-    CHECK(kp_rgb_selector_snapshot_binding(NULL, 0, &binding) == -EINVAL);
-    CHECK(kp_rgb_selector_snapshot_binding(&snapshot, 0, &binding) == -EINVAL);
-    snapshot.control = DEV(rgbs_a);
-    CHECK(kp_rgb_selector_snapshot_binding(&snapshot, 0, NULL) == -EINVAL);
 }
 static void readiness(void) {
     if (!strncmp(split_case, "ready-", 6)) {
@@ -925,10 +920,6 @@ static void test_thread(void *a, void *b, void *c) {
     CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
         KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), 0) == -EINVAL);
     struct kp_rgb_selector_snapshot snapshot;
-    kp_rgb_matrix_lock();
-    CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
-    kp_rgb_matrix_unlock();
-    CHECK(kp_rgb_split_send_selector(0, &snapshot, 3) == -EINVAL);
     k_sleep(K_MSEC(300));
     CHECK(lane(0, 0).completed == before);
     k_mutex_lock(&records_lock, K_FOREVER);

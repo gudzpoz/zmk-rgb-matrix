@@ -29,6 +29,7 @@ static struct transfer transfers[LIMIT];
 static atomic_t writes, fail_count, transfer_delay, block_transfer, block_render;
 static atomic_t transfers_active;
 static atomic_t reschedule_failures, inject_finish_failure, input_replenish;
+static atomic_t output_schedules;
 static atomic_t callback_flushes, callback_input;
 static atomic_t capture_output, finish_notify, notify_from_render;
 static struct k_work_delayable *observed_output;
@@ -230,7 +231,10 @@ int __wrap_k_work_reschedule_for_queue(struct k_work_q *q, struct k_work_delayab
     if (q == kp_rgb_work_q()) {
         if (atomic_cas(&capture_output, 1, 0)) observed_output = work;
         if (atomic_cas(&finish_notify, 1, 0)) k_sem_give(&finish_seen);
-        if (atomic_cas(&reschedule_failures, 1, 0)) return -EIO;
+        if (work == observed_output) {
+            atomic_inc(&output_schedules);
+            if (atomic_cas(&reschedule_failures, 1, 0)) return -EIO;
+        }
     }
     return __real_k_work_reschedule_for_queue(q, work, delay);
 }
@@ -950,13 +954,25 @@ void kp_test_engine_run(void) {
         settled(); KP_CHECK(paints(0) == p + (!strcmp(name, "fairness") ? 5 : 2));
         if (!strcmp(name, "input-during-render")) KP_CHECK(events(0) == 1 && obs[0].timestamp == -123);
     } else if (!strcmp(name, "submit-failure") || !strcmp(name, "finish-failure")) {
-        unsigned p = paints(0);
-        if (!strcmp(name, "submit-failure")) atomic_set(&reschedule_failures, 1);
+        bool submit = !strcmp(name, "submit-failure");
+        unsigned p = paints(0), n = atomic_get(&writes);
+        unsigned schedules = atomic_get(&output_schedules);
+        atomic_set(&capture_output, 1);
+        if (submit) atomic_set(&reschedule_failures, 1);
         else {
             kp_rgb_matrix_lock(); obs[0].animate = true; kp_rgb_matrix_unlock();
             atomic_set(&inject_finish_failure, 1);
         }
-        repaint(); settled(); KP_CHECK(!atomic_get(&reschedule_failures) && paints(0) == p + 1);
+        zmk_rgb_matrix_flush(); settled();
+        sleep_until(k_uptime_get() + 50); settled();
+        KP_CHECK(!atomic_get(&reschedule_failures) && !atomic_get(&inject_finish_failure));
+        KP_CHECK(atomic_get(&output_schedules) == schedules + (submit ? 1 : 2));
+        KP_CHECK(paints(0) == p + !submit && atomic_get(&writes) == n + !submit);
+        if (!submit) check_all(n, 17);
+        kp_rgb_matrix_lock(); obs[0].animate = false; kp_rgb_matrix_unlock();
+        repaint();
+        KP_CHECK(paints(0) == p + !submit + 1 && atomic_get(&writes) == n + !submit + 1);
+        check_all(n + !submit, 17);
     } else if (!strcmp(name, "no-active") || !strcmp(name, "empty-registry")) {
         bool logical = false; KP_CHECK(zmk_rgb_matrix_get_state(&logical) == 0 && logical);
         KP_CHECK(!paints(0) && !paints(1) && !paints(2) && !paints(3));
