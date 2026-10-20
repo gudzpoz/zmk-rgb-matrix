@@ -13,7 +13,7 @@ ARTIFACT_ROOT="$MODULE_ROOT/build/native-artifacts"
 all_suites=(
     selector selector_defaults persist_ids scoped_settings scoped_split fixed_scene documented_setup
     contracts condition_contracts control_contracts effect_contracts singleton_settings_split
-    geometry configuration composite overlay_pair ztest led_strip_composite smoke
+    static_metadata geometry configuration composite overlay_pair ztest led_strip_composite smoke
 )
 
 suites=()

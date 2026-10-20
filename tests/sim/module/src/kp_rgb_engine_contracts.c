@@ -157,7 +157,9 @@ static const struct kp_rgb_effect_callbacks provider_callbacks = {
         .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), provider_##inst), \
         .slot = DT_INST_PROP(inst, slot), \
     }; \
-    static struct provider_data provider_##inst##_data; \
+    static struct provider_data provider_##inst##_data = { \
+        KP_RGB_OVERLAY_COMMON_DATA(inst, provider_##inst), \
+    }; \
     KP_RGB_OVERLAY_DEFINE(inst, &provider_callbacks, !DT_INST_PROP(inst, filter), provider_##inst);
 DT_INST_FOREACH_STATUS_OKAY(PROVIDER)
 #undef DT_DRV_COMPAT

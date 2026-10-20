@@ -395,11 +395,11 @@ struct kp_rgb_overlay_common_config {
 
 /* Kind-agnostic mutable part. */
 struct kp_rgb_overlay_common_data {
-  size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
-  size_t *leds;     /* the overlay's own storage */
-  uint16_t index;   /* registry ordinal */
-  bool local;       /* True when `local`: each half evaluates the condition */
-  bool gate;        /* worker-published local gate */
+  size_t led_count;   /* resolved targets; 0 when keys and leds are both empty */
+  const size_t *leds; /* resolved constant targets */
+  uint16_t index;     /* enabled-overlay index */
+  bool local;         /* True when `local`: each half evaluates the condition */
+  bool gate;          /* worker-published local gate */
 };
 
 /* Both halves must use the same enabled overlay sequence for split gate bits. */
@@ -441,16 +441,31 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength);
 
-/* Declare the devicetree-derived target arrays for one overlay instance. A
- * missing property yields a one-element array whose length is read as 0, so the
- * declaration is always valid C and the array is always referenced. */
+#include <zmk/rgb_matrix_targets_internal.h>
+
+/* Declare raw DTS arrays and constant resolved targets before config/data.
+ * Resolved LED targets must be unique. Only the first resolved-count entries
+ * are targets; storage may include padding. */
 #define KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg_inst)                           \
+  BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
+               "overlay must be a child of the keypaw,rgb-matrix node");       \
   static const uint32_t cfg_inst##_keys[] =                                    \
       COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                   \
                   (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                  \
   static const uint32_t cfg_inst##_leds[] =                                    \
       COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
-                  (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
+                  (DT_PROP(DT_DRV_INST(inst), leds)), ({0}));                  \
+  KP_RGB_OVERLAY_STATIC_TARGETS(DT_DRV_INST(inst), cfg_inst)
+
+/* Initialize the common data before device initialization. */
+#define KP_RGB_OVERLAY_COMMON_DATA(inst, cfg_inst)                             \
+  .common = {                                                                  \
+      .leds = cfg_inst##_targets,                                              \
+      .led_count = cfg_inst##_target_count,                                    \
+      .index = KP_RGB_OVERLAY_INDEX(DT_DRV_INST(inst)),                        \
+      .local =                                                                 \
+          IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local),   \
+  }
 
 /* Member-wise initializer for the common part of a kind's config. */
 #define KP_RGB_OVERLAY_COMMON(node_id, cfg_inst)                               \
@@ -461,8 +476,8 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
    .opacity = DT_PROP_OR(node_id, opacity, 100),                               \
    .all_leds = DT_PROP(node_id, all_leds)}
 
-/* Declare a non-behavior overlay device and its target storage. Config/data must
- * embed their common headers first. render is required; other callbacks are optional. */
+/* Declare a non-behavior overlay device. Config/data must embed their
+ * common headers first. render is required; other callbacks are optional. */
 #define KP_RGB_OVERLAY_DEFINE(inst, callbacks_expr, replaces, cfg_inst)        \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
@@ -485,30 +500,12 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                  (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
                "`all-leds` replaces `keys`/`leds`; do not combine them");      \
-  static size_t                                                                \
-      cfg_inst##_targets[KP_RGB_OVERLAY_TARGET_CAP(DT_DRV_INST(inst))];        \
-  static int cfg_inst##_init(const struct device *dev) {                       \
-    const struct kp_rgb_overlay_common_config *cfg = dev->config;              \
-    struct kp_rgb_overlay_common_data *data = dev->data;                       \
-    data->leds = cfg_inst##_targets;                                           \
-    data->led_count =                                                          \
-        cfg->all_leds                                                          \
-            ? 0 /* paints every LED; no target list needed */                  \
-            : kp_rgb_resolve_targets(cfg->keys, cfg->keys_len, cfg->leds,      \
-                                     cfg->leds_len, data->leds,                \
-                                     ARRAY_SIZE(cfg_inst##_targets));          \
-    data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
-    data->local =                                                              \
-        IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local);     \
-    kp_rgb_overlay_register(dev);                                              \
-    return 0;                                                                  \
-  }                                                                            \
   static const struct kp_rgb_overlay_api cfg_inst##_api = {                    \
       .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .callbacks = callbacks_expr,                                             \
       .replaces_target = replaces,                                             \
   };                                                                           \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), cfg_inst##_init, NULL, &cfg_inst##_data, \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, &cfg_inst##_data,            \
                    &cfg_inst##_cfg, POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY,  \
                    &cfg_inst##_api)
 

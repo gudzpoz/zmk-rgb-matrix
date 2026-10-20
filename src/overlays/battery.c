@@ -155,7 +155,9 @@ static const struct kp_rgb_effect_callbacks kp_ovl_battery_callbacks = {
           DT_PROP_OR(DT_DRV_INST(inst), background_color, 0x000000),           \
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
-  static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
+  static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data = {           \
+      KP_RGB_OVERLAY_COMMON_DATA(inst, kp_ovl_battery_##inst),                 \
+  };                                                                           \
   KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_battery_callbacks, true,                 \
                         kp_ovl_battery_##inst)
 

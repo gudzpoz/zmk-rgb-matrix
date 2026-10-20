@@ -105,6 +105,7 @@ static const struct kp_rgb_effect_callbacks kp_rgb_pair_callbacks = {
       .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_rgb_pair_##inst),    \
   };                                                                             \
   static struct kp_rgb_pair_data kp_rgb_pair_##inst##_data = {                   \
+      KP_RGB_OVERLAY_COMMON_DATA(inst, kp_rgb_pair_##inst),                      \
       .first = KP_RGB_EFFECT_INSTANCE_INIT(                                      \
           DEVICE_DT_GET(DT_CHILD(DT_DRV_INST(inst), first))),                   \
       .second = KP_RGB_EFFECT_INSTANCE_INIT(                                     \

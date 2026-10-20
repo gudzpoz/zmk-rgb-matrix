@@ -1,0 +1,36 @@
+/* SPDX-License-Identifier: MIT */
+#include "base.overlay"
+/ {
+    rgb_conditions: static_conditions {
+        compatible = "keypaw,rgb-conditions";
+        static_cond_a: a { compatible = "test,rgb-static-condition-a"; };
+        static_cond_b: b { compatible = "test,rgb-static-condition-b"; };
+    };
+};
+&rgb_matrix {
+    disabled_before { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+    sm00: reordered { compatible = "test,rgb-static-overlay";
+        keys = <10 3 0 1 9 7 6 5 4 8>; condition = <&static_cond_a>; };
+    sm01: mixed { compatible = "test,rgb-static-overlay";
+        keys = <2 3 47 0>; leds = <99 2 12 0>; };
+    sm02: missing { compatible = "test,rgb-static-overlay"; keys = <2 11 47 KP_RGB_NO_KEY(10, 20)>; };
+    sm03: invalid { compatible = "test,rgb-static-overlay"; leds = <12 99 0xffffffff>; };
+    sm04: empty { compatible = "test,rgb-static-overlay"; keys = <>; leds = <>; };
+    sm05: omitted { compatible = "test,rgb-static-overlay"; };
+    sm06: all { compatible = "test,rgb-static-overlay"; all-leds; };
+    sm07: explicit_coord { compatible = "test,rgb-static-overlay"; leds = <2>; };
+    disabled_between { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+    sm08: padded { compatible = "test,rgb-static-overlay";
+        keys = <47 1 2 0 11>; leds = <99 5 12>; local; };
+    sm09: raw_order { compatible = "test,rgb-static-overlay";
+        leds = <11 10 9 8 7 6 5 4 3 2 1 0>; };
+    sm10: key_only { compatible = "test,rgb-static-overlay"; keys = <3>; };
+    sm11: raw_zero { compatible = "test,rgb-static-overlay"; leds = <0>; };
+    sm12: raw_last { compatible = "test,rgb-static-overlay"; leds = <11>; };
+    sm13: missing_then_key { compatible = "test,rgb-static-overlay"; keys = <47 9>; };
+    sm14: invalid_then_raw { compatible = "test,rgb-static-overlay"; leds = <99 4>; };
+    sm15: edge { compatible = "test,rgb-static-overlay"; keys = <8>; };
+    sm16: next_word { compatible = "test,rgb-static-overlay";
+        keys = <6>; condition = <&static_cond_b>; };
+    disabled_after { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+};

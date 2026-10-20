@@ -76,7 +76,9 @@ static const struct kp_rgb_effect_callbacks kp_ovl_callbacks = {
       .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_##inst),       \
       .effect = KP_RGB_OVERLAY_EFFECT(DT_DRV_INST(inst)),                      \
   };                                                                           \
-  static struct kp_ovl_data kp_ovl_##inst##_data;                              \
+  static struct kp_ovl_data kp_ovl_##inst##_data = {                           \
+      KP_RGB_OVERLAY_COMMON_DATA(inst, kp_ovl_##inst),                         \
+  };                                                                           \
   KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_callbacks, true, kp_ovl_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_DEFINE)
