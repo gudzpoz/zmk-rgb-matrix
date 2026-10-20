@@ -337,7 +337,7 @@ kp_rgb_sync_emit_global(uint8_t source, struct kp_rgb_sync_source *st) {
     argument = 0;
     break;
   case KP_RGB_SYNC_OVERLAYS:
-    if (st->mask_word >= kp_rgb_overlay_word_count())
+    if (st->mask_word >= KP_RGB_OVERLAY_WORDS)
       return KP_RGB_SYNC_EMIT_DONE;
     command = RGB_OVL_STATE_CMD;
     argument = RGB_OVL_STATE_VAL(st->mask_word,

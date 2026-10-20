@@ -67,7 +67,6 @@ struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color);
 
 /* Brightness helpers. */
 #define KP_RGB_SCALE(v, pct) ((uint8_t)((uint32_t)(v) * (pct) / 100u))
-struct kp_rgb_hsb kp_rgb_hsb_scale(struct kp_rgb_hsb color, uint8_t pct);
 struct led_rgb kp_rgb_rgb_scale(struct led_rgb rgb, uint8_t pct);
 
 /* Blend `over` into `base` by `pct` percent (0 keeps base, 100 replaces it).

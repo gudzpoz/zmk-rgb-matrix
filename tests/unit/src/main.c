@@ -65,22 +65,6 @@ ZTEST(kp_rgb_color, hsb_to_rgb_edges) {
       128, 255);
 }
 
-ZTEST(kp_rgb_color, hsb_scale_only_changes_brightness) {
-  struct kp_rgb_hsb c = {.h = 200, .s = 50, .b = 100};
-
-  struct kp_rgb_hsb half = kp_rgb_hsb_scale(c, 50);
-  zassert_equal(half.h, 200);
-  zassert_equal(half.s, 50);
-  zassert_equal(half.b, 50);
-
-  /* pct above KP_RGB_BRT_MAX clamps to 100, so brightness is unchanged. */
-  zassert_equal(kp_rgb_hsb_scale(c, 150).b, 100);
-  zassert_equal(kp_rgb_hsb_scale(c, 0).b, 0);
-  /* Rounding truncates toward zero. */
-  zassert_equal(kp_rgb_hsb_scale((struct kp_rgb_hsb){.h = 0, .s = 0, .b = 37}, 50).b,
-                18);
-}
-
 ZTEST(kp_rgb_color, rgb_scale_clamps) {
   struct led_rgb c = {.r = 200, .g = 100, .b = 50};
 

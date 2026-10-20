@@ -102,7 +102,7 @@ static const struct kp_rgb_effect_callbacks kp_rgb_pair_callbacks = {
 #define KP_RGB_PAIR_DEFINE(inst)                                                 \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_rgb_pair_##inst);                        \
   static const struct kp_rgb_pair_config kp_rgb_pair_##inst##_cfg = {            \
-      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_rgb_pair_##inst),    \
+      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                         \
   };                                                                             \
   static struct kp_rgb_pair_data kp_rgb_pair_##inst##_data = {                   \
       KP_RGB_OVERLAY_COMMON_DATA(inst, kp_rgb_pair_##inst),                      \

@@ -87,8 +87,6 @@ bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
 const struct device *const *kp_rgb_overlay_list(void);
-size_t kp_rgb_overlay_count(void);
-uint16_t kp_rgb_overlay_word_count(void);
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);
 

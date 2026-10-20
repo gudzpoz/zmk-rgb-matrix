@@ -25,7 +25,7 @@ static const struct kp_rgb_effect_callbacks callbacks __unused = {.render = rend
 #define DEFINE(inst)                                                         \
     KP_RGB_OVERLAY_TARGET_ARRAYS(inst, sm_##inst);                             \
     static const struct static_config sm_##inst##_cfg = {                     \
-        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), sm_##inst),         \
+        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                    \
         .storage = ARRAY_SIZE(sm_##inst##_targets),                           \
         .candidates = sm_##inst##_target_candidates,                          \
         .count = sm_##inst##_target_count,                                    \
@@ -114,14 +114,6 @@ static int inspect_before_init(void) {
             ok &= data->common.leds[j] == value;
         }
     }
-    const struct static_config *raw = expected[1].dev->config;
-    static const uint32_t raw_keys[] = {2, 3, 47, 0};
-    static const uint32_t raw_leds[] = {99, 2, 12, 0};
-    ok &= raw->common.keys_len == 4 && raw->common.leds_len == 4;
-    for (size_t i = 0; i < 4; i++) {
-        ok &= raw->common.keys[i] == raw_keys[i];
-        ok &= raw->common.leds[i] == raw_leds[i];
-    }
 #endif
     STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, record) {
 #if DT_NODE_EXISTS(DT_NODELABEL(static_cond_a))
@@ -204,11 +196,11 @@ static void scenario(void *a, void *b, void *c) {
     k_sleep(K_MSEC(100));
     CHECK(pre_kernel_ok && early_invalidation_ok);
     CHECK(device_is_ready(DEVICE_DT_GET(DT_NODELABEL(rgb_matrix))));
-    CHECK(kp_rgb_overlay_count() == ARRAY_SIZE(expected));
+    CHECK(KP_RGB_OVERLAY_COUNT == ARRAY_SIZE(expected));
 #if DT_NODE_EXISTS(DT_NODELABEL(sm00))
     CHECK(early_condition_count == 2);
     CHECK(atomic_get(&samples_a) > 0 && kp_rgb_static_samples_b() > 0);
-    CHECK(kp_rgb_overlay_word_count() == 2);
+    CHECK(KP_RGB_OVERLAY_WORDS == 2);
     CHECK(kp_rgb_overlay_get_word(0) == 0xffff);
     CHECK(kp_rgb_overlay_get_word(1) == 1);
     CHECK(kp_rgb_overlay_get_word(2) == 0);
@@ -233,7 +225,7 @@ static void scenario(void *a, void *b, void *c) {
     size_t linked_count;
     STRUCT_SECTION_COUNT(kp_rgb_condition_registration, &linked_count);
     CHECK(linked_count == 0);
-    CHECK(kp_rgb_overlay_word_count() == 1);
+    CHECK(KP_RGB_OVERLAY_WORDS == 1);
     CHECK(kp_rgb_overlay_get_word(0) == 0);
 #endif
     printk("PASS static_metadata overlays=%u LEDs=%u conditions=%u\n",

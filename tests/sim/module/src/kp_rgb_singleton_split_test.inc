@@ -206,7 +206,7 @@ static void singleton_masks(void) {
     while (kp_rgb_overlay_get_word(0) != 0x1234 || kp_rgb_overlay_get_word(1) != 0xabcd) {
         CHECK(k_uptime_get() < until); k_sleep(K_MSEC(1));
     }
-    CHECK(kp_rgb_overlay_word_count() == 2);
+    CHECK(KP_RGB_OVERLAY_WORDS == 2);
 }
 static void singleton_remote(uint32_t brightness, uint32_t power) {
     k_mutex_lock(&singleton_records_lock, K_FOREVER);

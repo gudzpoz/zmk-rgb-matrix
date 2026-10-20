@@ -384,10 +384,6 @@ struct kp_rgb_overlay_api {
 
 /* Kind-agnostic part of an overlay's config. */
 struct kp_rgb_overlay_common_config {
-  const uint32_t *keys; /* key positions, or NULL */
-  size_t keys_len;
-  const uint32_t *leds; /* raw chain indices, or NULL */
-  size_t leds_len;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
   /* Use every local LED instead of the keys/leds lists. */
   bool all_leds;
@@ -416,45 +412,21 @@ enum {
 };
 #endif
 
-/* The most targets an overlay can resolve. */
-#define KP_RGB_OVERLAY_TARGET_CAP(node_id)                                     \
-  MAX(1, MIN(KP_LED_COUNT, DT_PROP_LEN_OR(node_id, keys, 0) +                  \
-                               DT_PROP_LEN_OR(node_id, leds, 0)))
-
-/* Resolve an overlay's `keys`/`leds` devicetree spec into LED indices.
- * Returns the number written (never more than out_max, and always <=
- * KP_LED_COUNT); 0 when both lists are empty. Duplicate indices are dropped, so
- * each LED is painted once regardless of how the spec names it. */
-size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
-                              const uint32_t *leds, size_t leds_len,
-                              size_t *out, size_t out_max);
-
-/* Blend intrinsic color over existing pixels at strength 0..100.
+/* Blend src[led] over existing pixels at strength 0..100.
  * Pass frame->targets with frame->target_count, or a subset with its length.
  * Targets must be unique indices from frame->targets; indices are not checked. */
-void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
-                          size_t led_count, struct led_rgb color,
-                          uint8_t strength);
-
-/* As above, taking each source color from src[led] in physical-index order. */
 void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t *leds,
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength);
 
 #include <zmk/rgb_matrix_targets_internal.h>
 
-/* Declare raw DTS arrays and constant resolved targets before config/data.
+/* Declare constant resolved targets before config/data.
  * Resolved LED targets must be unique. Only the first resolved-count entries
  * are targets; storage may include padding. */
 #define KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg_inst)                           \
   BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
                "overlay must be a child of the keypaw,rgb-matrix node");       \
-  static const uint32_t cfg_inst##_keys[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                   \
-                  (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                  \
-  static const uint32_t cfg_inst##_leds[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
-                  (DT_PROP(DT_DRV_INST(inst), leds)), ({0}));                  \
   KP_RGB_OVERLAY_STATIC_TARGETS(DT_DRV_INST(inst), cfg_inst)
 
 /* Initialize the common data before device initialization. */
@@ -468,12 +440,8 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
   }
 
 /* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_OVERLAY_COMMON(node_id, cfg_inst)                               \
-  {.keys = cfg_inst##_keys,                                                    \
-   .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                               \
-   .leds = cfg_inst##_leds,                                                    \
-   .leds_len = DT_PROP_LEN_OR(node_id, leds, 0),                               \
-   .opacity = DT_PROP_OR(node_id, opacity, 100),                               \
+#define KP_RGB_OVERLAY_COMMON(node_id)                                         \
+  {.opacity = DT_PROP_OR(node_id, opacity, 100),                               \
    .all_leds = DT_PROP(node_id, all_leds)}
 
 /* Declare a non-behavior overlay device. Config/data must embed their

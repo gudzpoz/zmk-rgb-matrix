@@ -701,13 +701,11 @@ static struct led_rgb paint_expected(struct led_rgb base, struct led_rgb over, u
 static void paint_helpers(void) {
     struct kp_rgb_frame empty = frame;
     empty.pixels = NULL;
-    kp_rgb_overlay_paint(&empty, NULL, 0, (struct led_rgb){1, 2, 3}, 50);
     kp_rgb_overlay_paint_pixels(&empty, NULL, 0, NULL, 50);
     if (KP_LED_COUNT < 3) return;
 
     size_t sparse[] = {KP_LED_COUNT - 1, 1};
     const struct led_rgb base = {17, 83, 149};
-    const struct led_rgb color = {201, 37, 111};
     struct led_rgb source[CAP];
     for (size_t i = 0; i < CAP; i++)
         source[i] = (struct led_rgb){(uint8_t)(i + 10), (uint8_t)(i + 30), (uint8_t)(i + 50)};
@@ -718,24 +716,14 @@ static void paint_helpers(void) {
     for (size_t n = 0; n < ARRAY_SIZE(strengths); n++) {
         memset(pixels, 0xa5, sizeof(pixels));
         for (size_t t = 0; t < frame.target_count; t++) pixels[sparse[t]] = base;
-        kp_rgb_overlay_paint(&frame, sparse, ARRAY_SIZE(sparse), color, strengths[n]);
-        for (size_t t = 0; t < frame.target_count; t++)
-            KP_CHECK(rgb_equal(pixels[sparse[t]], paint_expected(base, color, strengths[n])));
-        sentinels();
-
-        memset(pixels, 0xa5, sizeof(pixels));
-        for (size_t t = 0; t < frame.target_count; t++) pixels[sparse[t]] = base;
         kp_rgb_overlay_paint_pixels(&frame, sparse, ARRAY_SIZE(sparse), source, strengths[n]);
         for (size_t t = 0; t < frame.target_count; t++)
             KP_CHECK(rgb_equal(pixels[sparse[t]], paint_expected(base, source[sparse[t]], strengths[n])));
         sentinels();
     }
     pixels[sparse[0]] = pixels[sparse[1]] = base;
-    kp_rgb_overlay_paint(&frame, sparse + 1, 1, color, 100);
-    KP_CHECK(rgb_equal(pixels[sparse[0]], base) && rgb_equal(pixels[sparse[1]], color));
-    sentinels();
     kp_rgb_overlay_paint_pixels(&frame, sparse, 1, source, 100);
-    KP_CHECK(rgb_equal(pixels[sparse[0]], source[sparse[0]]) && rgb_equal(pixels[sparse[1]], color));
+    KP_CHECK(rgb_equal(pixels[sparse[0]], source[sparse[0]]) && rgb_equal(pixels[sparse[1]], base));
     sentinels();
     frame.targets = all;
     frame.target_count = KP_LED_COUNT;

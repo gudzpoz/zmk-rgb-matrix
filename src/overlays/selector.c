@@ -266,7 +266,7 @@ static int kp_selector_start(const struct device *dev) {
   static bool                                                                  \
       kp_selector_##inst##_reset_pending[DT_CHILD_NUM(DT_DRV_INST(inst))];     \
   static const struct kp_selector_config kp_selector_##inst##_cfg = {          \
-      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_selector_##inst),  \
+      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                      \
   };                                                                           \
   static struct kp_selector_data kp_selector_##inst##_data = {                 \
       KP_RGB_OVERLAY_COMMON_DATA(inst, kp_selector_##inst),                    \

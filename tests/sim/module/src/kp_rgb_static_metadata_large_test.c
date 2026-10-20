@@ -36,8 +36,6 @@ BUILD_ASSERT(KP_RGB_OVERLAY_INDEX(DT_NODELABEL(sm_large)) == 0);
 BUILD_ASSERT(large_target_count == 96);
 BUILD_ASSERT(large_target_candidates == 120);
 BUILD_ASSERT(ARRAY_SIZE(large_targets) == 120);
-BUILD_ASSERT(ARRAY_SIZE(large_keys) == 72);
-BUILD_ASSERT(ARRAY_SIZE(large_leds) == 48);
 
 K_SEM_DEFINE(render_seen, 0, 1);
 static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
@@ -50,7 +48,7 @@ static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
 }
 static const struct kp_rgb_effect_callbacks callbacks = {.render = render};
 static const struct { struct kp_rgb_overlay_common_config common; } large_cfg = {
-    .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(0), large),
+    .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(0)),
 };
 static struct { struct kp_rgb_overlay_common_data common; } large_data = {
     KP_RGB_OVERLAY_COMMON_DATA(0, large),
@@ -61,9 +59,8 @@ static bool early_ok;
 static int inspect_before_init(void) {
     const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(sm_large));
     const struct kp_rgb_overlay_common_data *data = dev->data;
-    const struct kp_rgb_overlay_common_config *cfg = dev->config;
     bool ok = data->index == 0 && !data->local && data->led_count == 96;
-    ok &= data->leds == large_targets && cfg->keys_len == 72 && cfg->leds_len == 48;
+    ok &= data->leds == large_targets;
     for (size_t i = 0; i < 120; i++) ok &= data->leds[i] == expected[i];
     size_t conditions = 0;
     STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, record) {
@@ -82,8 +79,8 @@ static void scenario(void *a, void *b, void *c) {
     CHECK(device_is_ready(DEVICE_DT_GET(DT_NODELABEL(rgb_matrix))));
     const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(sm_large));
     CHECK(device_is_ready(dev));
-    CHECK(kp_rgb_overlay_count() == 1 && kp_rgb_overlay_list()[0] == dev);
-    CHECK(kp_rgb_overlay_word_count() == 1 && kp_rgb_overlay_get_word(0) == 1);
+    CHECK(KP_RGB_OVERLAY_COUNT == 1 && kp_rgb_overlay_list()[0] == dev);
+    CHECK(KP_RGB_OVERLAY_WORDS == 1 && kp_rgb_overlay_get_word(0) == 1);
     CHECK(kp_rgb_overlay_target_count(dev) == 96);
     const size_t *targets = kp_rgb_overlay_targets(dev);
     CHECK(targets != NULL);

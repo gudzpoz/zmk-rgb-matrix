@@ -462,13 +462,6 @@ static void overlay_cases(void) {
     KP_CHECK(!kp_rgb_overlay_covers_all(DEV(cc_transparent)));
     KP_CHECK(gate(DEV(cc_half)) && !kp_rgb_overlay_covers_all(DEV(cc_half)));
     KP_CHECK(kp_rgb_overlay_covers_all(DEV(preview_selector)));
-    const uint32_t keys[] = {3, 3, 99, 1}, leds[] = {1, 2, 0, 98};
-    size_t resolved[5] = {99, 99, 99, 99, 99};
-    const size_t expected[] = {3, 1, 2, 0};
-    KP_CHECK(kp_rgb_resolve_targets(keys, 4, leds, 4, resolved, 4) == 4);
-    KP_CHECK(memcmp(resolved, expected, sizeof(expected)) == 0 && resolved[4] == 99);
-    KP_CHECK(kp_rgb_resolve_targets(keys, 4, leds, 4, resolved, 1) == 1 && resolved[0] == 3);
-    KP_CHECK(kp_rgb_resolve_targets(keys, 4, leds, 4, resolved, 0) == 0);
     const struct kp_rgb_overlay_common_data *data = DEV(cc_remote)->data;
     unsigned word = data->index / 16;
     uint16_t bit = BIT(data->index % 16);
@@ -483,8 +476,8 @@ static void overlay_cases(void) {
         KP_CHECK(calls(DEV(cc_central)) == 1 && gate(DEV(cc_remote)));
         set(DEV(cc_central), false); drain(); KP_CHECK(!gate(DEV(cc_remote)));
     }
-    KP_CHECK(!kp_rgb_overlay_set_word(kp_rgb_overlay_word_count(), UINT16_MAX));
-    KP_CHECK(kp_rgb_overlay_get_word(kp_rgb_overlay_word_count()) == 0);
+    KP_CHECK(!kp_rgb_overlay_set_word(KP_RGB_OVERLAY_WORDS, UINT16_MAX));
+    KP_CHECK(kp_rgb_overlay_get_word(KP_RGB_OVERLAY_WORDS) == 0);
     set(DEV(cc_root), true); drain();
     KP_CHECK(zmk_rgb_matrix_off() == 0); drain(); KP_CHECK(gate(DEV(ordinary)));
     zmk_rgb_matrix_set_inhibited(true); drain(); KP_CHECK(gate(DEV(ordinary)));

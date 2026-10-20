@@ -149,7 +149,7 @@ static const struct kp_rgb_effect_callbacks kp_ovl_battery_callbacks = {
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_ovl_battery_##inst);                   \
   static const struct kp_ovl_battery_config kp_ovl_battery_##inst##_cfg = {    \
       .common =                                                                \
-          KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_battery_##inst),     \
+          KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                            \
       .color = DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00),                 \
       .background_color =                                                      \
           DT_PROP_OR(DT_DRV_INST(inst), background_color, 0x000000),           \

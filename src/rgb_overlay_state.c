@@ -31,10 +31,6 @@ const struct device *const *kp_rgb_overlay_list(void) {
   return kp_overlay_registry;
 }
 
-size_t kp_rgb_overlay_count(void) { return KP_RGB_OVERLAY_COUNT; }
-
-uint16_t kp_rgb_overlay_word_count(void) { return KP_RGB_OVERLAY_WORDS; }
-
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value) {
   kp_rgb_matrix_lock();
   bool changed = word < KP_RGB_OVERLAY_WORDS && kp_overlay_state[word] != value;

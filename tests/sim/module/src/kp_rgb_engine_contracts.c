@@ -154,7 +154,7 @@ static const struct kp_rgb_effect_callbacks provider_callbacks = {
 #define PROVIDER(inst) \
     KP_RGB_OVERLAY_TARGET_ARRAYS(inst, provider_##inst); \
     static const struct provider_config provider_##inst##_cfg = { \
-        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), provider_##inst), \
+        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)), \
         .slot = DT_INST_PROP(inst, slot), \
     }; \
     static struct provider_data provider_##inst##_data = { \
@@ -532,7 +532,7 @@ static void lifecycle_batch(void) {
     uint16_t gates[PROVIDERS] = {0};
     const struct device *const *registry = kp_rgb_overlay_list();
     unsigned registered = 0;
-    for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+    for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
         KP_CHECK(registry[i] != NULL);
         unsigned s = slot(registry[i]);
         const struct kp_rgb_overlay_common_data *data = registry[i]->data;
@@ -540,7 +540,7 @@ static void lifecycle_batch(void) {
         gates[s] = BIT(i);
         registered++;
     }
-    KP_CHECK(registered == PROVIDERS && kp_rgb_overlay_count() == PROVIDERS);
+    KP_CHECK(registered == PROVIDERS && KP_RGB_OVERLAY_COUNT == PROVIDERS);
 
     kp_rgb_matrix_lock();
     obs[2].animate = false;

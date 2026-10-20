@@ -331,7 +331,7 @@ static uint32_t kp_rgb_pending_take_dropped(void);
 static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev);
 
 void kp_rgb_request_runtime_reset_locked(void) {
-  for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+  for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
     kp_rgb_overlay_scenes[i].reset_pending = true;
   }
   zmk_rgb_matrix_flush();
@@ -354,7 +354,7 @@ static size_t kp_last_covering_overlay(const struct device *const *overlays,
 
 static bool kp_rgb_scene_pass_locked(int64_t now_ms, bool allowed, bool paint) {
   const struct device *const *overlays = kp_rgb_overlay_list();
-  size_t overlay_count = kp_rgb_overlay_count();
+  size_t overlay_count = KP_RGB_OVERLAY_COUNT;
   size_t first = allowed ? kp_last_covering_overlay(overlays, overlay_count) : SIZE_MAX;
   for (size_t i = 0; i < overlay_count; i++) {
     const struct device *dev = overlays[i];
@@ -557,7 +557,7 @@ static bool kp_rgb_deliver_position(const struct kp_rgb_key_event *ev) {
   if (kp_rgb_led_for_position(ev->position) == SIZE_MAX) return false;
   bool changed = false;
   const struct device *const *overlays = kp_rgb_overlay_list();
-  size_t count = kp_rgb_overlay_count();
+  size_t count = KP_RGB_OVERLAY_COUNT;
   for (size_t i = 0; i < count; i++) {
     const struct device *dev = overlays[i];
     if (!kp_rgb_overlay_gate(dev)) continue;
@@ -585,7 +585,7 @@ void kp_rgb_reconcile_power_locked(void) {
   if (allowed) {
     kp_rgb_output_pending = KP_RGB_OUTPUT_NONE;
     kp_rgb_output_urgent_black = false;
-    for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
+    for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
       kp_rgb_overlay_scenes[i].reset_pending = true;
     }
     kp_rgb_next_frame_ms = INT64_MAX;
