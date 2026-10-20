@@ -1,35 +1,51 @@
+/*
+ * Copyright (c) 2026 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #pragma once
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <zephyr/settings/settings.h>
 
-#include <zmk/rgb_color.h>
-
-/* One behavior's persisted RGB state. The format is intentionally separate from
- * devicetree declaration order; bump the version when this contract changes. */
-#define KP_RGB_PERSIST_VERSION 2
+/* ID buffers include the terminating NUL. */
 #define KP_RGB_PERSIST_MAX_ID_LENGTH 32
+#define KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH 31
+#define KP_RGB_PERSIST_GLOBAL_VERSION 3
+#define KP_RGB_PERSIST_SELECTOR_VERSION 1
+#define KP_RGB_PERSIST_SUBTREE "keypaw/rgb_matrix"
+#define KP_RGB_PERSIST_SELECTOR_PREFIX KP_RGB_PERSIST_SUBTREE "/selectors/"
 
-struct kp_rgb_persist_effect {
-  uint16_t duration_ms;
-  uint16_t h;
-  uint8_t s;
-  uint8_t reserved;
-};
-
-struct kp_rgb_persist_blob {
+struct kp_rgb_persist_global_record {
   uint8_t version;
   uint8_t user_on;
   uint8_t brightness;
-  uint8_t has_selected;
+  uint8_t reserved;
+};
+
+struct kp_rgb_persist_selector_record {
+  uint8_t version;
   char selected_id[KP_RGB_PERSIST_MAX_ID_LENGTH];
 };
 
-bool kp_rgb_persist_size_ok(size_t len);
-bool kp_rgb_persist_version_ok(uint8_t version);
-bool kp_rgb_persist_effect_valid(const struct kp_rgb_persist_effect *effect);
-uint16_t kp_rgb_persist_clamp_duration(uint16_t duration_ms, uint16_t min_ms,
-                                       uint16_t max_ms);
-void kp_rgb_persist_pack(bool user_on, uint8_t brightness, const char *selected_id,
-                         struct kp_rgb_persist_blob *out);
+struct kp_rgb_persist_global_state {
+  bool user_on;
+  uint8_t brightness;
+};
+
+/* All codecs return 0 on success or -EINVAL for an invalid record. They leave
+ * out unchanged on failure. Decoders require exact lengths and current versions,
+ * canonical Booleans and zero reserved bytes. Selected IDs must be nonempty,
+ * NUL-terminated strings of at most 31 bytes; characters and uniqueness are unchecked.
+ */
+int kp_rgb_persist_encode_global(
+    const struct kp_rgb_persist_global_state *state,
+    struct kp_rgb_persist_global_record *out);
+int kp_rgb_persist_decode_global(const void *bytes, size_t len,
+                                 struct kp_rgb_persist_global_state *out);
+int kp_rgb_persist_encode_selector(const char *selected_id,
+                                   struct kp_rgb_persist_selector_record *out);
+int kp_rgb_persist_decode_selector(const void *bytes, size_t len,
+                                   struct kp_rgb_persist_selector_record *out);

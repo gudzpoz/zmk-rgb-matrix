@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+description: Native condition refresh submission observer
+compatible: "test,rgb-condition-contract-strip"
+include: led-strip.yaml

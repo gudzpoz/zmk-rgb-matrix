@@ -6,9 +6,8 @@
  *
  * Deliberately standalone: a stock upstream 4x12 grid layout plus a 48-LED
  * strip, so the previews do not depend on the keypaw48 shield or any of the
- * real hardware bring-up. The only module-facing nodes are the ones the module
- * itself requires: keypaw,rgb-matrix, its strip phandle, and the &kprgb effect
- * registry.
+ * real hardware bring-up. Effects belong to the preview_selector overlay;
+ * rgbs is the canonical control for that selector.
  *
  * The strip is a keypaw,led-strip-capture device rather than a real WS2812: the
  * capture driver records every frame the engine paints, which is what the GIF
@@ -55,10 +54,15 @@
         color-mapping = <LED_COLOR_ID_RED LED_COLOR_ID_GREEN LED_COLOR_ID_BLUE>;
     };
 
-    rgb_matrix: rgb-matrix {
+    rgb_matrix: rgb {
         compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
         strip = <&led_strip_capture>;
         physical-layout = <&layout_ortho_4x12_all1u>;
+        initial-on;
+        initial-brightness = <100>;
+        max-brightness = <100>;
+        idle-brightness = <100>;
 
         /* Chain index N sits under key position N. Must have exactly
          * chain-length entries (BUILD_ASSERT in the module). */
@@ -68,68 +72,319 @@
            24 25 26 27 28 29 30 31 32 33 34 35
            36 37 38 39 40 41 42 43 44 45 46 47
         >;
-    };
+        preview_selector: preview_selector {
+            compatible = "keypaw,rgb-overlay-selector";
+            all-leds;
+            initial-effect = <0>;
+            initial-duration-ms = <4000>;
+            /* --- static fields ------------------------------------------- */
 
-    /* Conditions are reusable predicates consumed by overlays and triggers.
-     * The fixture instantiates one of each built-in kind so their sources are
-     * compiled and the DT-to-config mapping is exercised; nothing consumes them
-     * yet (the compositor overlay and generic trigger come next), so they are
-     * inert here. */
-    rgb_conditions: rgb_conditions {
-        compatible = "keypaw,rgb-conditions";
+            fx_solid: fx_solid {
+                compatible = "keypaw,rgb-matrix-solid";
+                color = <0xFF0000>;
+            };
 
-        fixture_caps: fixture_caps {
-            compatible = "keypaw,rgb-condition-caps-lock";
-        };
+            fx_solid_v: fx_solid_v {
+                compatible = "keypaw,rgb-matrix-solid";
+                axis = "vertical";
+                color = <0xFF0000>;
+            };
 
-        fixture_layer: fixture_layer {
-            compatible = "keypaw,rgb-condition-layer";
-            layer = <1>;
-        };
+            fx_solid_h: fx_solid_h {
+                compatible = "keypaw,rgb-matrix-solid";
+                axis = "horizontal";
+                color = <0xFF0000>;
+            };
 
-        fixture_always: fixture_always {
-            compatible = "keypaw,rgb-condition-always";
-        };
+            fx_static: fx_static {
+                compatible = "keypaw,rgb-matrix-static";
+                /* One hue per column, repeated down the board. */
+                led-colors = <
+                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
+                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
+                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
+                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
+                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
+                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
+                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
+                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
+                >;
+            };
 
-        /* A stateful latch with its nested toggle behavior. Nothing presses
-         * ovl_tog here (the harness has no behavior-injection option), so the
-         * latch stays off and no preview pixel changes; this exercises the
-         * driver, binding, Kconfig and DT path at compile/link time. The
-         * behavior name must be <=8 characters. */
-        fixture_latch: fixture_latch {
-            compatible = "keypaw,rgb-condition-latch";
+            /* --- global oscillators -------------------------------------- */
 
-            ovl_tog: ovl_tog {
-                compatible = "keypaw,behavior-rgb-overlay-toggle";
-                #binding-cells = <0>;
+            fx_breathe: fx_breathe {
+                compatible = "keypaw,rgb-matrix-breathe";
+                mode = "brightness";
+                color = <0x0000FF>;
+            };
+
+            fx_breathe_river: fx_breathe_river {
+                compatible = "keypaw,rgb-matrix-breathe";
+                mode = "river";
+                color = <0x0000FF>;
+            };
+
+            fx_breathe_hue: fx_breathe_hue {
+                compatible = "keypaw,rgb-matrix-breathe";
+                mode = "hue";
+                color = <0x0000FF>;
+            };
+
+            fx_breathe_pendulum: fx_breathe_pendulum {
+                compatible = "keypaw,rgb-matrix-breathe";
+                mode = "pendulum";
+                color = <0x0000FF>;
+            };
+
+            fx_breathe_wave: fx_breathe_wave {
+                compatible = "keypaw,rgb-matrix-breathe";
+                mode = "wave";
+                color = <0x0000FF>;
+            };
+
+            fx_spectrum: fx_spectrum {
+                compatible = "keypaw,rgb-matrix-spectrum";
+            };
+
+            /* --- moving spatial fields ----------------------------------- */
+
+            fx_rainbow: fx_rainbow {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "x";
+            };
+
+            fx_rainbow_y: fx_rainbow_y {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "y";
+            };
+
+            fx_rainbow_radial: fx_rainbow_radial {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "radial";
+            };
+
+            fx_rainbow_pinwheel: fx_rainbow_pinwheel {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "pinwheel";
+            };
+
+            fx_rainbow_spiral: fx_rainbow_spiral {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "spiral";
+            };
+
+            fx_rainbow_chevron: fx_rainbow_chevron {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "chevron";
+            };
+
+            fx_rainbow_flag: fx_rainbow_flag {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "flag";
+            };
+
+            fx_rainbow_in: fx_rainbow_in {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "x";
+                direction = "in";
+            };
+
+            fx_rainbow_dual: fx_rainbow_dual {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                /* `dual` picks two centres, so it only reads against a radial
+                 * basis; with basis x it renders exactly like plain x. */
+                basis = "radial";
+                direction = "dual";
+            };
+
+            fx_rainbow_bloom: fx_rainbow_bloom {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "x";
+                direction = "bloom";
+            };
+
+            fx_rainbow_solid: fx_rainbow_solid {
+                compatible = "keypaw,rgb-matrix-rainbow";
+                basis = "x";
+                palette = "solid";
+                color = <0x00FFFF>;
+            };
+
+            fx_band: fx_band {
+                compatible = "keypaw,rgb-matrix-band";
+                channel = "sat";
+                shape = "linear";
+                color = <0x00FF00>;
+            };
+
+            fx_band_pinwheel: fx_band_pinwheel {
+                compatible = "keypaw,rgb-matrix-band";
+                channel = "sat";
+                shape = "pinwheel";
+                color = <0x00FF00>;
+            };
+
+            fx_band_spiral: fx_band_spiral {
+                compatible = "keypaw,rgb-matrix-band";
+                channel = "sat";
+                shape = "spiral";
+                color = <0x00FF00>;
+            };
+
+            fx_band_val: fx_band_val {
+                compatible = "keypaw,rgb-matrix-band";
+                channel = "val";
+                shape = "linear";
+                color = <0x00FF00>;
+            };
+
+            /* --- reactive ------------------------------------------------ */
+
+            fx_reactive: fx_reactive {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "point";
+                color = <0xFFFFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_disc: fx_reactive_disc {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "disc";
+                spread-radius = <250>;
+                color = <0xFFFFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_cross: fx_reactive_cross {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "cross";
+                color = <0xFFFFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_nexus: fx_reactive_nexus {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "nexus";
+                spread-radius = <250>;
+                color = <0xFFFFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_gradient: fx_reactive_gradient {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "disc";
+                palette = "gradient";
+                /* The palette only overrides hue (reactive.c keeps saturation
+                 * from the preset), so an unsaturated preset renders every
+                 * position hue as white. */
+                color = <0x00FFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_complement: fx_reactive_complement {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "disc";
+                palette = "complement";
+                color = <0x00FFFF>;
+                duration = <500>;
+            };
+
+            fx_reactive_multi: fx_reactive_multi {
+                compatible = "keypaw,rgb-matrix-reactive";
+                spread = "disc";
+                multi;
+                color = <0xFFFFFF>;
+                duration = <500>;
+            };
+
+            fx_ripple: fx_ripple {
+                compatible = "keypaw,rgb-matrix-ripple";
+                color = <0x00FFFF>;
+                duration = <2000>;
+            };
+
+            /* --- stochastic ---------------------------------------------- */
+
+            fx_rain: fx_rain {
+                compatible = "keypaw,rgb-matrix-rain";
+                mode = "pixel";
+                /* Hue is randomised per LED but saturation comes from the
+                 * preset, so an unsaturated preset would fade every random hue
+                 * to white. */
+                color = <0xFF0000>;
+            };
+
+            fx_rain_flow: fx_rain_flow {
+                compatible = "keypaw,rgb-matrix-rain";
+                mode = "flow";
+                color = <0xFF0000>;
+            };
+
+            fx_rain_drops: fx_rain_drops {
+                compatible = "keypaw,rgb-matrix-rain";
+                /* QMK's RAINDROPS: one random key's hue is nudged each step and
+                 * the board never goes dark, so this preview is a lit mosaic
+                 * drifting in hue rather than the flashes of Rain (pixel). */
+                mode = "drops";
+                color = <0xFF0000>;
+            };
+
+            fx_rain_jellybean: fx_rain_jellybean {
+                compatible = "keypaw,rgb-matrix-rain";
+                mode = "jellybean";
+                color = <0xFF0000>;
+            };
+
+            fx_rain_fractal: fx_rain_fractal {
+                compatible = "keypaw,rgb-matrix-rain";
+                mode = "fractal";
+                color = <0xFF0000>;
+            };
+
+            fx_starlight: fx_starlight {
+                compatible = "keypaw,rgb-matrix-starlight";
+                color = <0xFFFFFF>;
+            };
+
+            fx_starlight_smooth: fx_starlight_smooth {
+                compatible = "keypaw,rgb-matrix-starlight";
+                smooth;
+                color = <0xFFFFFF>;
+            };
+
+            fx_starlight_dual_hue: fx_starlight_dual_hue {
+                compatible = "keypaw,rgb-matrix-starlight";
+                dual-hue;
+                /* Hue jitter is invisible on an unsaturated preset. */
+                color = <0x00FFFF>;
+            };
+
+            fx_starlight_dual_sat: fx_starlight_dual_sat {
+                compatible = "keypaw,rgb-matrix-starlight";
+                dual-sat;
+                color = <0x00FFFF>;
+            };
+
+            fx_heatmap: fx_heatmap {
+                compatible = "keypaw,rgb-matrix-heatmap";
+                spread = <300>;
+            };
+
+            fx_heatmap_no_spread: fx_heatmap_no_spread {
+                compatible = "keypaw,rgb-matrix-heatmap";
+                spread = <0>;
+            };
+
+            fx_digital_rain: fx_digital_rain {
+                compatible = "keypaw,rgb-matrix-digital-rain";
+                color = <0x00FF00>;
             };
         };
-
-        /* Combinators over the conditions above, to compile their operand-list
-         * plumbing. `conditions` is a plain phandles list, so sibling
-         * references are a DAG and need no #*-cells. */
-        fixture_and: fixture_and {
-            compatible = "keypaw,rgb-condition-and";
-            conditions = <&fixture_always &fixture_layer>;
-        };
-
-        fixture_or: fixture_or {
-            compatible = "keypaw,rgb-condition-or";
-            conditions = <&fixture_caps &fixture_latch>;
-        };
-    };
-
-    /* Container of all overlays.
-     * Overlays are tested and rendered in declaration order. */
-    rgb_overlays: rgb_overlays {
-        compatible = "keypaw,rgb-overlays";
-
         fixture_overlay: fixture_overlay {
             compatible = "keypaw,rgb-overlay";
-            condition = <&fixture_always>;
             fx_fixture {
                 compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
                 color = <0x102030>;
                 duration = <500>;
             };
@@ -160,420 +415,44 @@
         };
     };
 
+    rgb_conditions: rgb_conditions {
+        compatible = "keypaw,rgb-conditions";
+
+        fixture_caps: fixture_caps {
+            compatible = "keypaw,rgb-condition-caps-lock";
+        };
+
+        fixture_layer: fixture_layer {
+            compatible = "keypaw,rgb-condition-layer";
+            layer = <1>;
+        };
+
+        /* A stateful latch with its nested toggle behavior. Nothing presses
+         * ovl_tog here (the harness has no behavior-injection option), so the
+         * latch stays off and no preview pixel changes; this exercises the
+         * driver, binding, Kconfig and DT path at compile/link time. The
+         * behavior name must be <=8 characters. */
+        fixture_latch: fixture_latch {
+            compatible = "keypaw,rgb-condition-latch";
+
+            ovl_tog: ovl_tog {
+                compatible = "keypaw,behavior-rgb-overlay-toggle";
+                #binding-cells = <0>;
+            };
+        };
+
+        fixture_or: fixture_or {
+            compatible = "keypaw,rgb-condition-or";
+            conditions = <&fixture_caps &fixture_latch>;
+        };
+    };
+
+
     behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
+        rgbs: rgbs {
+            compatible = "keypaw,behavior-rgb-selector";
             #binding-cells = <2>;
-
-            initial-effect = <0>;
-            initial-on;
-
-            /* The real shield caps brightness to limit current draw, which
-             * means nothing while recording. Previews read much better lit. */
-            max-brightness = <100>;
-            initial-brightness = <100>;
-
-            /* Shared animation period. 4 s matches the default capture length,
-             * so a GIF shows at least one full cycle. Effects that need a
-             * different speed override `duration` below. */
-            initial-duration-ms = <4000>;
-
-            /* In declaration order: an effect's position here is its identity.
-             * `display-name` becomes the preview's filename. */
-
-            /* --- static fields ------------------------------------------- */
-
-            fx_solid: fx_solid {
-                compatible = "keypaw,rgb-matrix-solid";
-                #binding-cells = <0>;
-                display-name = "Solid";
-                color = <0xFF0000>;
-            };
-
-            fx_solid_v: fx_solid_v {
-                compatible = "keypaw,rgb-matrix-solid";
-                #binding-cells = <0>;
-                display-name = "Solid (vertical)";
-                axis = "vertical";
-                color = <0xFF0000>;
-            };
-
-            fx_solid_h: fx_solid_h {
-                compatible = "keypaw,rgb-matrix-solid";
-                #binding-cells = <0>;
-                display-name = "Solid (horizontal)";
-                axis = "horizontal";
-                color = <0xFF0000>;
-            };
-
-            fx_static: fx_static {
-                compatible = "keypaw,rgb-matrix-static";
-                #binding-cells = <0>;
-                display-name = "Static";
-                /* One hue per column, repeated down the board. */
-                led-colors = <
-                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
-                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
-                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
-                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
-                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
-                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
-                    0xFF0000 0xFF8000 0xFFFF00 0x80FF00 0x00FF00 0x00FF80
-                    0x00FFFF 0x0080FF 0x0000FF 0x8000FF 0xFF00FF 0xFF0080
-                >;
-            };
-
-            /* --- global oscillators -------------------------------------- */
-
-            fx_breathe: fx_breathe {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                display-name = "Breathe (brightness)";
-                mode = "brightness";
-                color = <0x0000FF>;
-            };
-
-            fx_breathe_river: fx_breathe_river {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                display-name = "Breathe (river)";
-                mode = "river";
-                color = <0x0000FF>;
-            };
-
-            fx_breathe_hue: fx_breathe_hue {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                display-name = "Breathe (hue)";
-                mode = "hue";
-                color = <0x0000FF>;
-            };
-
-            fx_breathe_pendulum: fx_breathe_pendulum {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                display-name = "Breathe (pendulum)";
-                mode = "pendulum";
-                color = <0x0000FF>;
-            };
-
-            fx_breathe_wave: fx_breathe_wave {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                display-name = "Breathe (wave)";
-                mode = "wave";
-                color = <0x0000FF>;
-            };
-
-            fx_spectrum: fx_spectrum {
-                compatible = "keypaw,rgb-matrix-spectrum";
-                #binding-cells = <0>;
-                display-name = "Spectrum";
-            };
-
-            /* --- moving spatial fields ----------------------------------- */
-
-            fx_rainbow: fx_rainbow {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (x)";
-                basis = "x";
-            };
-
-            fx_rainbow_y: fx_rainbow_y {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (y)";
-                basis = "y";
-            };
-
-            fx_rainbow_radial: fx_rainbow_radial {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (radial)";
-                basis = "radial";
-            };
-
-            fx_rainbow_pinwheel: fx_rainbow_pinwheel {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (pinwheel)";
-                basis = "pinwheel";
-            };
-
-            fx_rainbow_spiral: fx_rainbow_spiral {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (spiral)";
-                basis = "spiral";
-            };
-
-            fx_rainbow_chevron: fx_rainbow_chevron {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (chevron)";
-                basis = "chevron";
-            };
-
-            fx_rainbow_flag: fx_rainbow_flag {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (flag)";
-                basis = "flag";
-            };
-
-            fx_rainbow_in: fx_rainbow_in {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (in)";
-                basis = "x";
-                direction = "in";
-            };
-
-            fx_rainbow_dual: fx_rainbow_dual {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (dual)";
-                /* `dual` picks two centres, so it only reads against a radial
-                 * basis; with basis x it renders exactly like plain x. */
-                basis = "radial";
-                direction = "dual";
-            };
-
-            fx_rainbow_bloom: fx_rainbow_bloom {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (bloom)";
-                basis = "x";
-                direction = "bloom";
-            };
-
-            fx_rainbow_solid: fx_rainbow_solid {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                display-name = "Rainbow (solid)";
-                basis = "x";
-                palette = "solid";
-                color = <0x00FFFF>;
-            };
-
-            fx_band: fx_band {
-                compatible = "keypaw,rgb-matrix-band";
-                #binding-cells = <0>;
-                display-name = "Band (saturation, linear)";
-                channel = "sat";
-                shape = "linear";
-                color = <0x00FF00>;
-            };
-
-            fx_band_pinwheel: fx_band_pinwheel {
-                compatible = "keypaw,rgb-matrix-band";
-                #binding-cells = <0>;
-                display-name = "Band (saturation, pinwheel)";
-                channel = "sat";
-                shape = "pinwheel";
-                color = <0x00FF00>;
-            };
-
-            fx_band_spiral: fx_band_spiral {
-                compatible = "keypaw,rgb-matrix-band";
-                #binding-cells = <0>;
-                display-name = "Band (saturation, spiral)";
-                channel = "sat";
-                shape = "spiral";
-                color = <0x00FF00>;
-            };
-
-            fx_band_val: fx_band_val {
-                compatible = "keypaw,rgb-matrix-band";
-                #binding-cells = <0>;
-                display-name = "Band (value, linear)";
-                channel = "val";
-                shape = "linear";
-                color = <0x00FF00>;
-            };
-
-            /* --- reactive ------------------------------------------------ */
-
-            fx_reactive: fx_reactive {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (point)";
-                spread = "point";
-                color = <0xFFFFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_disc: fx_reactive_disc {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (disc)";
-                spread = "disc";
-                spread-radius = <250>;
-                color = <0xFFFFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_cross: fx_reactive_cross {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (cross)";
-                spread = "cross";
-                color = <0xFFFFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_nexus: fx_reactive_nexus {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (nexus)";
-                spread = "nexus";
-                spread-radius = <250>;
-                color = <0xFFFFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_gradient: fx_reactive_gradient {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (gradient)";
-                spread = "disc";
-                palette = "gradient";
-                /* The palette only overrides hue (reactive.c keeps saturation
-                 * from the preset), so an unsaturated preset renders every
-                 * position hue as white. */
-                color = <0x00FFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_complement: fx_reactive_complement {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (complement)";
-                spread = "disc";
-                palette = "complement";
-                color = <0x00FFFF>;
-                duration = <500>;
-            };
-
-            fx_reactive_multi: fx_reactive_multi {
-                compatible = "keypaw,rgb-matrix-reactive";
-                #binding-cells = <0>;
-                display-name = "Reactive (multi)";
-                spread = "disc";
-                multi;
-                color = <0xFFFFFF>;
-                duration = <500>;
-            };
-
-            fx_ripple: fx_ripple {
-                compatible = "keypaw,rgb-matrix-ripple";
-                #binding-cells = <0>;
-                display-name = "Ripple";
-                color = <0x00FFFF>;
-                duration = <2000>;
-            };
-
-            /* --- stochastic ---------------------------------------------- */
-
-            fx_rain: fx_rain {
-                compatible = "keypaw,rgb-matrix-rain";
-                #binding-cells = <0>;
-                display-name = "Rain (pixel)";
-                mode = "pixel";
-                /* Hue is randomised per LED but saturation comes from the
-                 * preset, so an unsaturated preset would fade every random hue
-                 * to white. */
-                color = <0xFF0000>;
-            };
-
-            fx_rain_flow: fx_rain_flow {
-                compatible = "keypaw,rgb-matrix-rain";
-                #binding-cells = <0>;
-                display-name = "Rain (flow)";
-                mode = "flow";
-                color = <0xFF0000>;
-            };
-
-            fx_rain_drops: fx_rain_drops {
-                compatible = "keypaw,rgb-matrix-rain";
-                #binding-cells = <0>;
-                display-name = "Rain (drops)";
-                /* QMK's RAINDROPS: one random key's hue is nudged each step and
-                 * the board never goes dark, so this preview is a lit mosaic
-                 * drifting in hue rather than the flashes of Rain (pixel). */
-                mode = "drops";
-                color = <0xFF0000>;
-            };
-
-            fx_rain_jellybean: fx_rain_jellybean {
-                compatible = "keypaw,rgb-matrix-rain";
-                #binding-cells = <0>;
-                display-name = "Rain (jellybean)";
-                mode = "jellybean";
-                color = <0xFF0000>;
-            };
-
-            fx_rain_fractal: fx_rain_fractal {
-                compatible = "keypaw,rgb-matrix-rain";
-                #binding-cells = <0>;
-                display-name = "Rain (fractal)";
-                mode = "fractal";
-                color = <0xFF0000>;
-            };
-
-            fx_starlight: fx_starlight {
-                compatible = "keypaw,rgb-matrix-starlight";
-                #binding-cells = <0>;
-                display-name = "Starlight";
-                color = <0xFFFFFF>;
-            };
-
-            fx_starlight_smooth: fx_starlight_smooth {
-                compatible = "keypaw,rgb-matrix-starlight";
-                #binding-cells = <0>;
-                display-name = "Starlight (smooth)";
-                smooth;
-                color = <0xFFFFFF>;
-            };
-
-            fx_starlight_dual_hue: fx_starlight_dual_hue {
-                compatible = "keypaw,rgb-matrix-starlight";
-                #binding-cells = <0>;
-                display-name = "Starlight (dual hue)";
-                dual-hue;
-                /* Hue jitter is invisible on an unsaturated preset. */
-                color = <0x00FFFF>;
-            };
-
-            fx_starlight_dual_sat: fx_starlight_dual_sat {
-                compatible = "keypaw,rgb-matrix-starlight";
-                #binding-cells = <0>;
-                display-name = "Starlight (dual sat)";
-                dual-sat;
-                color = <0x00FFFF>;
-            };
-
-            fx_heatmap: fx_heatmap {
-                compatible = "keypaw,rgb-matrix-heatmap";
-                #binding-cells = <0>;
-                display-name = "Heatmap";
-                spread = <300>;
-            };
-
-            fx_heatmap_slim: fx_heatmap_slim {
-                compatible = "keypaw,rgb-matrix-heatmap";
-                #binding-cells = <0>;
-                display-name = "Heatmap (slim)";
-                slim;
-            };
-
-            fx_digital_rain: fx_digital_rain {
-                compatible = "keypaw,rgb-matrix-digital-rain";
-                #binding-cells = <0>;
-                display-name = "Digital Rain";
-                color = <0x00FF00>;
-            };
+            selector = <&preview_selector>;
         };
     };
 };

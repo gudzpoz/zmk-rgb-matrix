@@ -97,11 +97,8 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
   const struct kp_eff_rain_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
   struct kp_rgb_hsb base = data->common.color;
-  uint16_t bl = MAX(f->board_length, 1u);
+  uint16_t bl = f->board_length;
 
-  if (f->count == 0) {
-    return true;
-  }
   if (cfg->mode == DT_ENUM_CONST(mode, drops) && !data->drops_seeded) {
     for (size_t i = 0; i < f->count; i++) {
       data->val[i] = 255;

@@ -1,0 +1,14 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Common RGB condition dependencies
+
+properties:
+  conditions:
+    type: phandles
+    description: |
+      All conditions whose cached values this provider may read, including
+      short-circuited operands. Omit for providers that read no other conditions.
+      Targets must be enabled condition providers and the dependency graph must
+      be acyclic. Dependencies are sampled before their consumers; independent
+      providers have no sampling-order guarantee.

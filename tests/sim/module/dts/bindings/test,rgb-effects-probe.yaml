@@ -1,0 +1,7 @@
+description: Native effect-dispatch observation device
+compatible: "test,rgb-effects-probe"
+include: "keypaw,rgb-matrix-effect-common.yaml"
+properties:
+  optional-callbacks:
+    type: boolean
+    description: Omit all callbacks except render.

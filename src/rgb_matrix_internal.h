@@ -17,45 +17,23 @@
 
 #include <dt-bindings/keypaw/rgb_matrix.h>
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_persist.h>
 
-struct kp_rgb_tuning {
+#include "rgb_selector_internal.h"
+
+struct kp_rgb_config {
+  bool initial_on;
+  uint8_t initial_brightness;
   uint8_t max_brightness;
   uint8_t idle_brightness;
 };
 
-struct kp_rgb_state {
+struct kp_rgb_global {
   bool user_on;
-  const struct device *active_fx;
-};
-
-struct kp_rgb_effect_defaults {
-  struct kp_rgb_hsb color;
-  uint32_t duration_ms;    /* 0 -> initial_duration_ms */
-};
-
-struct kp_rgb_controller {
-  const struct device *dev;
-  struct kp_rgb_state state;
-  struct kp_rgb_tuning tuning;
   uint8_t brightness;
-  const struct device *const *effects;
-  const struct kp_rgb_effect_defaults *effect_defaults;
-  size_t effect_count;
-  size_t effect_index;
-  bool initial_on;
-  int32_t initial_brightness;
-  int64_t initial_duration_ms;
-  uint16_t initial_effect;
 };
 
-extern struct kp_rgb_controller kp_rgb_controller;
-
-struct kp_rgb_scene_runtime {
-  struct kp_rgb_callback_state state;
-  bool wanted;
-  bool reset_pending;
-};
+extern const struct kp_rgb_config kp_rgb_config;
+extern struct kp_rgb_global kp_rgb_global;
 
 void kp_rgb_callbacks_set_active(const struct device *dev,
                                 const struct kp_rgb_effect_callbacks *callbacks,
@@ -77,7 +55,9 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 void kp_rgb_matrix_lock(void);
 void kp_rgb_matrix_unlock(void);
 
-/* Every engine work item runs here, including behavior invocation chains. */
+/* Every engine work item runs here, including behavior invocation chains.
+ * The module owns the queue, which must remain running. Callers must not change
+ * its lifecycle or cancel engine-owned work. */
 struct k_work_q *kp_rgb_work_q(void);
 
 /* Split-shared animation clock: local uptime plus the peripheral offset, in a
@@ -89,13 +69,15 @@ void kp_rgb_set_clock_offset(int32_t offset_ms);
 void kp_rgb_conditions_request_refresh(uint64_t token);
 void kp_rgb_conditions_refreshed(uint64_t token);
 
+/* Caller holds the matrix lock. A hold defers refresh completion until source
+ * notifications have run; release after all synchronous consumers invalidate. */
+void kp_rgb_control_refresh_locked(void);
+void kp_rgb_control_refresh_hold_locked(void);
+void kp_rgb_control_refresh_release_locked(void);
+
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);
 void kp_rgb_request_runtime_reset_locked(void);
-
-int kp_rgb_resolve_active(void);
-uint16_t kp_rgb_calc_effect_index(uint16_t current, int16_t delta);
-int kp_rgb_select_effect(uint16_t index);
 
 extern const size_t kp_rgb_all_targets[MAX(1, KP_LED_COUNT)];
 const size_t *kp_rgb_overlay_targets(const struct device *dev);
@@ -107,8 +89,6 @@ bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
 const struct device *const *kp_rgb_overlay_list(void);
-size_t kp_rgb_overlay_count(void);
-uint16_t kp_rgb_overlay_word_count(void);
 bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
 uint16_t kp_rgb_overlay_get_word(uint16_t word);
 
@@ -120,17 +100,18 @@ void kp_rgb_overlay_conditions_init(void);
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_TRIGGERS)
 void kp_rgb_triggers_init(void);
 void kp_rgb_triggers_begin(void);
-bool kp_rgb_triggers_evaluate(int64_t now_ms);
+void kp_rgb_triggers_evaluate(int64_t now_ms);
 void kp_rgb_triggers_quarantine(void);
 #else
 static inline void kp_rgb_triggers_init(void) {}
 static inline void kp_rgb_triggers_begin(void) {}
-static inline bool kp_rgb_triggers_evaluate(int64_t now_ms) {
+static inline void kp_rgb_triggers_evaluate(int64_t now_ms) {
   ARG_UNUSED(now_ms);
-  return false;
 }
 static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
+
+#define RGB_BRT_SET_CMD 0x107
 
 /* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word. */
 #define RGB_OVL_STATE_VAL(word, value)                                         \
@@ -138,29 +119,10 @@ static inline void kp_rgb_triggers_quarantine(void) {}
 #define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
 #define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
 
-#if IS_ENABLED(CONFIG_SETTINGS)
-#define KP_RGB_MAX_REGISTRY_EFFECTS KP_RGB_PERSIST_MAX_EFFECTS
-#else
-#define KP_RGB_MAX_REGISTRY_EFFECTS UINT8_MAX
-#endif
-
-size_t kp_rgb_effect_count(void);
-const struct device *kp_rgb_effect_at(size_t index);
-size_t kp_rgb_selected_effect(void);
 int kp_rgb_save_state(void);
-int kp_rgb_select_effect_locked(uint16_t index);
+int kp_rgb_save_selector_state(const struct device *selector, bool reset);
+int kp_rgb_settings_commit(void);
 
-/* Restore presets and user intent, then reconcile local output permission. */
-int kp_rgb_apply_defaults(void);
+/* Restore global defaults and reconcile local output permission. */
+void kp_rgb_apply_defaults(void);
 void kp_rgb_reset_state(void);
-
-int kp_rgb_calc_effect(int16_t direction);
-struct kp_rgb_hsb kp_rgb_calc_hue(int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_sat(int8_t direction);
-struct kp_rgb_hsb kp_rgb_calc_brt(int8_t direction);
-int kp_rgb_change_hue(int8_t direction);
-int kp_rgb_change_sat(int8_t direction);
-int kp_rgb_change_brt(int8_t direction);
-int kp_rgb_set_hsb(struct kp_rgb_hsb color);
-int kp_rgb_change_duration(int16_t direction);
-int kp_rgb_set_duration(uint32_t duration_ms);

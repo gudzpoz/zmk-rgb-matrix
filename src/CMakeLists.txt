@@ -11,8 +11,14 @@ zephyr_library_include_directories(${APPLICATION_SOURCE_DIR}/include)
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   # Engine
   rgb_matrix.c
+  behavior_rgb_matrix.c
   rgb_utils.c
+  rgb_overlay_state.c
   rgb_instance.c
+  rgb_selector.c
+  rgb_settings.c
+  rgb_selector_sync.c
+  rgb_selector_api.c
   rgb_workqueue.c
   rgb_conditions.c
   rgb_control_start.c
@@ -23,14 +29,20 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
 
   # Built-in stuff: zero cost when there's no DTS definitions
   conditions/layer.c
-  conditions/always.c
+  conditions/effect_selected.c
   conditions/latch.c
   conditions/and.c
   conditions/or.c
   overlays/overlay.c
+  overlays/selector.c
   overlays/battery.c
   behaviors/overlay_toggle.c
+  behaviors/selector.c
 )
+
+if(CONFIG_KEYPAW_RGB_MATRIX)
+  zephyr_linker_sources(DATA_SECTIONS rgb_conditions.ld)
+endif()
 
 # Non-zero cost when there's no DTS definitions:
 # - Caps Lock pulls in ZMK_HID_INDICATORS.
@@ -39,11 +51,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_CAPS_LOCK conditions/ca
 # BLE host-profile state exists only on the central.
 zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_CONDITION_BLE conditions/ble.c)
 
-zephyr_library_sources_ifdef(CONFIG_KEYPAW_BEHAVIOR_RGB_MATRIX
-  # controller and effect persistence
-  behavior_rgb_matrix.c
-  rgb_settings.c
-  # global oscillators and static fields
+zephyr_library_sources_ifdef(CONFIG_KEYPAW_RGB_MATRIX
   effects/solid.c
   effects/breathe.c
   effects/spectrum.c

@@ -10,6 +10,7 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
+#include <errno.h>
 #include <string.h>
 
 #include <zmk/rgb_color.h>
@@ -62,22 +63,6 @@ ZTEST(kp_rgb_color, hsb_to_rgb_edges) {
   assert_rgb(
       kp_rgb_hsb_to_rgb((struct kp_rgb_hsb){.h = 210, .s = 100, .b = 100}), 0,
       128, 255);
-}
-
-ZTEST(kp_rgb_color, hsb_scale_only_changes_brightness) {
-  struct kp_rgb_hsb c = {.h = 200, .s = 50, .b = 100};
-
-  struct kp_rgb_hsb half = kp_rgb_hsb_scale(c, 50);
-  zassert_equal(half.h, 200);
-  zassert_equal(half.s, 50);
-  zassert_equal(half.b, 50);
-
-  /* pct above KP_RGB_BRT_MAX clamps to 100, so brightness is unchanged. */
-  zassert_equal(kp_rgb_hsb_scale(c, 150).b, 100);
-  zassert_equal(kp_rgb_hsb_scale(c, 0).b, 0);
-  /* Rounding truncates toward zero. */
-  zassert_equal(kp_rgb_hsb_scale((struct kp_rgb_hsb){.h = 0, .s = 0, .b = 37}, 50).b,
-                18);
 }
 
 ZTEST(kp_rgb_color, rgb_scale_clamps) {
@@ -161,75 +146,36 @@ ZTEST(kp_rgb_math, arm_phase) {
   zassert_equal(kp_rgb_arm_phase(100, 4), 25);
 }
 
-ZTEST(kp_rgb_persist, rejects_wrong_size) {
-  zassert_true(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob)));
-  zassert_false(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob) - 1));
-  zassert_false(kp_rgb_persist_size_ok(0));
+ZTEST(kp_rgb_persist, current_global_codec) {
+  struct kp_rgb_persist_global_state state = {.user_on = true, .brightness = 88};
+  struct kp_rgb_persist_global_record record = {0};
+  const uint8_t expected[] = {3, 1, 88, 0};
+  zassert_ok(kp_rgb_persist_encode_global(&state, &record));
+  zassert_equal(sizeof(record), sizeof(expected));
+  zassert_mem_equal(&record, expected, sizeof(expected));
+  struct kp_rgb_persist_global_state decoded = {0};
+  zassert_ok(kp_rgb_persist_decode_global(expected, sizeof(expected), &decoded));
+  zassert_true(decoded.user_on);
+  zassert_equal(decoded.brightness, 88);
+  uint8_t invalid[] = {3, 2, 88, 0};
+  zassert_equal(kp_rgb_persist_decode_global(invalid, sizeof(invalid), &decoded), -EINVAL);
+  uint8_t raw_legacy[36] = {2, 1, 50, 1};
+  zassert_equal(kp_rgb_persist_decode_global(raw_legacy, sizeof(raw_legacy), &decoded), -EINVAL);
 }
 
-ZTEST(kp_rgb_persist, rejects_wrong_version) {
-  zassert_true(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION));
-  zassert_false(kp_rgb_persist_version_ok(0));
-  zassert_false(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION + 1));
+ZTEST(kp_rgb_persist, current_selector_codec) {
+  struct kp_rgb_persist_selector_record record = {0};
+  zassert_ok(kp_rgb_persist_encode_selector("breathe", &record));
+  zassert_equal(record.version, 1);
+  zassert_str_equal(record.selected_id, "breathe");
+  zassert_equal(sizeof(record), 33);
+  struct kp_rgb_persist_selector_record decoded = {0};
+  zassert_ok(kp_rgb_persist_decode_selector(&record, sizeof(record), &decoded));
+  zassert_str_equal(decoded.selected_id, "breathe");
+  uint8_t raw_legacy[33] = {2};
+  zassert_equal(kp_rgb_persist_decode_selector(raw_legacy, sizeof(raw_legacy), &decoded), -EINVAL);
 }
 
-ZTEST(kp_rgb_persist, effect_range_check) {
-  zassert_true(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX,
-                                      .s = KP_RGB_SAT_MAX}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.s = KP_RGB_SAT_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(NULL));
-}
-
-ZTEST(kp_rgb_persist, duration_clamp) {
-  zassert_equal(kp_rgb_persist_clamp_duration(50, 100, 10000), 100);
-  zassert_equal(kp_rgb_persist_clamp_duration(20000, 100, 10000), 10000);
-  zassert_equal(kp_rgb_persist_clamp_duration(500, 100, 10000), 500);
-}
-
-ZTEST(kp_rgb_persist, pack_records_selection) {
-  struct kp_rgb_persist_blob blob;
-
-  kp_rgb_persist_pack(true, 88, "breathe", &blob);
-  zassert_equal(blob.version, KP_RGB_PERSIST_VERSION);
-  zassert_equal(blob.user_on, 1);
-  zassert_equal(blob.brightness, 88);
-  zassert_equal(blob.has_selected, 1);
-  zassert_str_equal(blob.selected_id, "breathe");
-  zassert_true(kp_rgb_persist_size_ok(sizeof(blob)));
-  zassert_true(kp_rgb_persist_version_ok(blob.version));
-
-  /* A missing or empty id clears the selection rather than naming one. */
-  kp_rgb_persist_pack(false, 0, NULL, &blob);
-  zassert_equal(blob.user_on, 0);
-  zassert_equal(blob.brightness, 0);
-  zassert_equal(blob.has_selected, 0);
-  zassert_equal(blob.selected_id[0], '\0');
-  kp_rgb_persist_pack(false, 0, "", &blob);
-  zassert_equal(blob.has_selected, 0);
-}
-
-ZTEST(kp_rgb_persist, pack_clamps_and_truncates) {
-  struct kp_rgb_persist_blob blob;
-
-  kp_rgb_persist_pack(true, 200, NULL, &blob);
-  zassert_equal(blob.brightness, KP_RGB_BRT_MAX);
-
-  /* An over-long id is truncated to fit and stays null-terminated. */
-  char long_id[KP_RGB_PERSIST_MAX_ID_LENGTH + 8];
-  memset(long_id, 'x', sizeof(long_id) - 1);
-  long_id[sizeof(long_id) - 1] = '\0';
-  kp_rgb_persist_pack(true, 50, long_id, &blob);
-  zassert_equal(blob.has_selected, 1);
-  zassert_equal(blob.selected_id[sizeof(blob.selected_id) - 1], '\0');
-  zassert_equal(strlen(blob.selected_id), sizeof(blob.selected_id) - 1);
-  for (size_t i = 0; i < sizeof(blob.selected_id) - 1; i++) {
-    zassert_equal(blob.selected_id[i], 'x');
-  }
-}
 
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(kp_rgb_math, NULL, NULL, NULL, NULL, NULL);

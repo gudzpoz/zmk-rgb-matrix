@@ -16,14 +16,16 @@
 
 #include <zmk/rgb_color.h>
 
-#include <drivers/behavior.h>
-#include <zmk/behavior.h>
-#include <zmk/event_manager.h>
-#include <zmk/events/position_state_changed.h>
-#include <zmk/keymap.h>
-
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util_macro.h>
+
+/* RGB devices initialize at POST_KERNEL after strips. Devices with RGB phandle
+ * dependencies must use this priority or later; equal priorities follow DTS
+ * dependency order. The definition helpers below use it automatically. */
+#define KP_RGB_DEVICE_INIT_PRIORITY 99
+
+BUILD_ASSERT(CONFIG_KERNEL_INIT_PRIORITY_OBJECTS < KP_RGB_DEVICE_INIT_PRIORITY,
+             "RGB geometry/workqueue initialization must precede RGB devices");
 
 /* The engine's devicetree node, spelled out so an effect TU can size its state
  * from the real LED count: DT_DRV_INST() would resolve to the effect's node. */
@@ -118,8 +120,6 @@ struct kp_rgb_frame {
    * (never 0). Needed by vertical-basis effects (gradient up/down, cycle
    * up/down, chevron, radial extent). */
   uint16_t board_height;
-  /* The keyboard is not ZMK_ACTIVITY_ACTIVE. */
-  bool is_idle;
 };
 
 struct kp_rgb_key_event {
@@ -205,65 +205,27 @@ bool kp_rgb_effect_instance_render(struct kp_rgb_effect_instance *instance,
  * rendering any child, including helpers whose render callback will be skipped. */
 void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instance);
 
-/* Sentinel list meaning "this effect wants no overlays at all"; it is never
- * dereferenced, since the accompanying length is 0. */
-extern const struct device *const kp_rgb_no_overlays[];
-
-struct kp_rgb_effect_api {
-  const struct behavior_driver_api behavior;
-  const struct kp_rgb_effect_callbacks *callbacks;
-  /* Per-effect overlay override, filled in by KP_RGB_EFFECT_DEFINE from the
-   * effect node's devicetree:
-   *   overlays = <&a &b>;  -> exactly those, in order
-   *   no-overlays;         -> kp_rgb_no_overlays (non-NULL, length 0)
-   *   neither                -> NULL, every registered overlay in
-   *                             keypaw,rgb-overlays declaration order
-   */
-  const struct device *const *overlays;
-  size_t overlays_len;
-};
-
-BUILD_ASSERT(offsetof(struct kp_rgb_effect_api, behavior) == 0,
-             "kp_rgb_effect_api.behavior must be first: the effect api is "
-             "reached as a struct behavior_driver_api *");
-
 /* Call from owner callbacks for independently owned effects. Supply black targets,
  * NULL scratch and the intended timing. This dispatches render unchanged: it does
  * not clear pixels, manage clocks or check engine activity. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 
-/* Notify after a synchronized source update changes pixels or animation demand.
- * Any-context, non-blocking and coalescing; does not enable output, reset clocks
- * or sample conditions. Suppressed output is recomposed when eligible again.
- * Supply a valid RGB effect device; composition membership is not required.
- * Early notifications are retained or subsumed by the first fresh composition. */
-void kp_rgb_effect_invalidate(const struct device *effect);
-
-int kp_rgb_effect_convert_central_state_dependent_params(
-    struct zmk_behavior_binding *binding,
-    struct zmk_behavior_binding_event event);
-
 #define KP_RGB_EFFECT_COMMON_CONFIG(inst)                                      \
   .common = {                                                                  \
-      .index = KP_RGB_EFFECT_INDEX(inst),                                      \
-      .persist_id = DT_PROP_OR(DT_DRV_INST(inst), persist_id,                  \
-                               DT_NODE_FULL_NAME(DT_DRV_INST(inst))),          \
-      .persist_parameters = DT_NODE_HAS_PROP(DT_DRV_INST(inst), persist_id),   \
+      .owner = KP_RGB_EFFECT_OWNER(DT_DRV_INST(inst)),                         \
+      .slot = KP_RGB_EFFECT_SLOT(inst),                                        \
   }
 #define KP_RGB_EFFECT_COMMON_DATA(inst, default_color_, default_duration_)     \
   .common = {                                                                  \
-      .color =                                                                 \
-          KP_RGB_HSB_FROM_HEX(                                                 \
-              DT_PROP_OR(DT_DRV_INST(inst), color, default_color_)),           \
-      .duration_ms = MIN(                                                      \
-          DT_PROP_OR(DT_DRV_INST(inst), duration, default_duration_),          \
-          UINT16_MAX),                                                         \
+      .color = KP_RGB_HSB_FROM_HEX(                                            \
+          DT_PROP_OR(DT_DRV_INST(inst), color, default_color_)),               \
+      .duration_ms =                                                           \
+          KP_RGB_EFFECT_INITIAL_PERIOD(DT_DRV_INST(inst), default_duration_),  \
   }
 
 struct kp_rgb_effect_common_config {
-  uint16_t index; /* registry slot; the effect's child position */
-  const char *persist_id;
-  bool persist_parameters;
+  const struct device *owner; /* Selector device, or NULL for a non-selectable effect. */
+  uint16_t slot; /* Child position within its parent, including disabled siblings. */
 };
 struct kp_rgb_effect_common_data {
   uint16_t duration_ms;    /* single cycle animation duration */
@@ -293,51 +255,55 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 
-/* Expand one entry of an `overlays = <&a &b>;` list. */
-#define KP_RGB_OVERLAYS_AT_IDX(idx, node_id)                                   \
-  DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, overlays, idx))
+#define KP_RGB_EFFECT_SLOT(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
 
-/* Repeated phandles produce duplicate enumerators and fail the build. */
-#define KP_RGB_OVERLAY_UNIQUE(idx, node_id, cfg_inst)                          \
-  CONCAT(cfg_inst, _overlay_,                                                  \
-         DT_DEP_ORD(DT_PROP_BY_IDX(node_id, overlays, idx)))
-#define KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                          \
+#define KP_RGB_EFFECT_HAS_OWNER(node_id)                                       \
+  UTIL_AND(DT_NODE_HAS_STATUS(DT_PARENT(node_id), okay),                       \
+           DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_overlay_selector))
+
+#define KP_RGB_EFFECT_OWNER(node_id)                                           \
+  COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
+              (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
+
+#define KP_RGB_EFFECT_CLAMP_PERIOD(duration_)                                  \
+  CLAMP((duration_), CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,                 \
+        CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
+
+#define KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id, default_duration_)             \
+  ((uint16_t)MIN(DT_PROP_OR(node_id, duration, default_duration_), UINT16_MAX))
+
+#define KP_RGB_EFFECT_INITIAL_PERIOD(node_id, default_duration_)               \
   COND_CODE_1(                                                                 \
-      DT_NODE_HAS_PROP(node_id, overlays),                                     \
-      (enum {LISTIFY(DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAY_UNIQUE,    \
-                     (, ), node_id, cfg_inst)};                                \
-       static const struct device *const cfg_inst##_overlays[] = {LISTIFY(     \
-           DT_PROP_LEN(node_id, overlays), KP_RGB_OVERLAYS_AT_IDX, (, ),       \
-           node_id)};),                                                        \
-      ())
-
-#define KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst)                           \
-  COND_CODE_1(DT_PROP(node_id, no_overlays), (kp_rgb_no_overlays),             \
-              (COND_CODE_1(DT_NODE_HAS_PROP(node_id, overlays),                \
-                           (cfg_inst##_overlays), (NULL))))
-
-/* An effect's registry slot: its position among the owning behavior's children.
- * Declaration order is the identity; the shared convert hook reads the baked
- * copy, since it has no `inst` in scope. */
-#define KP_RGB_EFFECT_INDEX(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
-
-/* Only controller children are selectable, persisted and split-addressed.
- * Effects under other parents belong to their owners and retain their own defaults. */
-#define KP_RGB_EFFECT_IS_REGISTRY(node_id)                                     \
-  DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_behavior_rgb_matrix)
+      KP_RGB_EFFECT_HAS_OWNER(node_id),                                        \
+      (KP_RGB_EFFECT_CLAMP_PERIOD(                                             \
+          (uint32_t)DT_PROP_OR(node_id, duration, default_duration_) != 0U     \
+              ? (uint32_t)DT_PROP_OR(node_id, duration, default_duration_)     \
+              : (uint32_t)DT_PROP(DT_PARENT(node_id), initial_duration_ms))),  \
+      (KP_RGB_EFFECT_CLAMP_PERIOD(                                             \
+          (uint32_t)DT_PROP_OR(node_id, duration, 0) != 0U                     \
+              ? (uint32_t)DT_PROP_OR(node_id, duration, 0)                     \
+              : (KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id, default_duration_)    \
+                     ? KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id,                 \
+                                                      default_duration_)       \
+                     : KP_RGB_EFFECT_PERIOD_FALLBACK_MS))))
 
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id), (),                          \
-              (BUILD_ASSERT(                                                   \
-                   !DT_NODE_HAS_PROP(node_id, overlays) &&                     \
-                       !DT_PROP(node_id, no_overlays),                         \
-                   "overlays/no-overlays are registry-only; overlays are not " \
-                   "composed onto a nested effect");))
+  BUILD_ASSERT(!DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_matrix),     \
+               "matrix children must be overlays, not effects");               \
+  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, overlays) &&                         \
+                   !DT_NODE_HAS_PROP(node_id, no_overlays),                    \
+               "effect overlays/no-overlays properties have been removed");
 
-#define KP_RGB_EFFECT_CONVERT_HOOK(node_id)                                    \
-  COND_CODE_1(KP_RGB_EFFECT_IS_REGISTRY(node_id),                              \
-              (kp_rgb_effect_convert_central_state_dependent_params), (NULL))
-
+/* Registers an ordinary device. callbacks_expr must point to a lifetime-long,
+ * immutable struct kp_rgb_effect_callbacks table, exposed directly as dev->api.
+ * Select effects through their selector control, not as keymap behaviors.
+ *
+ * Initialize mutable common data with KP_RGB_EFFECT_COMMON_DATA. Color and
+ * duration properties take precedence over its fallback arguments. For an enabled
+ * selector's children, zero duration uses the parent's initial-duration-ms;
+ * private effects use the 1000 ms fallback when their stored default is zero.
+ * Initial periods are clamped to configured bounds before device initialization.
+ * Selector preparation preserves accepted parameter changes. */
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
   KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                      \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
@@ -352,75 +318,30 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                        (const void *)&cfg_inst##_data.common,                  \
                "effect data must embed struct kp_rgb_effect_common_data "      \
                "as the first field");                                          \
-  BUILD_ASSERT(DT_PROP_LEN_OR(node_id, overlays, 1) > 0,                       \
-               "an empty `overlays` list is not expressible; use "             \
-               "`no-overlays;` for an effect that wants none");                \
-  KP_RGB_EFFECT_OVERLAY_LIST(node_id, cfg_inst)                                \
-  static int cfg_inst##_init(const struct device *dev) {                       \
-    uint32_t duration = DT_PROP_OR(node_id, duration, 0);                      \
-    kp_rgb_effect_data(dev)->duration_ms =                                     \
-        duration ? CLAMP(duration, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,   \
-                         CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)             \
-                 : kp_rgb_effect_period(dev);                                  \
-    return 0;                                                                  \
-  }                                                                            \
-  IF_ENABLED(                                                                  \
-      CONFIG_ZMK_BEHAVIOR_METADATA,                                            \
-      (static const struct behavior_parameter_metadata cfg_inst##_metadata = { \
-           .sets_len = 0,                                                      \
-       };))                                                                    \
-  static const struct kp_rgb_effect_api cfg_inst##_api = {                     \
-      .behavior = {.locality = BEHAVIOR_LOCALITY_GLOBAL,                       \
-                   .binding_convert_central_state_dependent_params =           \
-                       KP_RGB_EFFECT_CONVERT_HOOK(node_id),                    \
-                   .binding_pressed = NULL,                                    \
-                   .binding_released = NULL,                                   \
-                   IF_ENABLED(                                                 \
-                       CONFIG_ZMK_BEHAVIOR_METADATA,                           \
-                       (.parameter_metadata = &cfg_inst##_metadata, ))},       \
-      .callbacks = callbacks_expr,                                             \
-      .overlays = KP_RGB_EFFECT_OVERLAY_PTR(node_id, cfg_inst),                \
-      .overlays_len = DT_PROP_LEN_OR(node_id, overlays, 0),                    \
-  };                                                                           \
-  BEHAVIOR_DT_DEFINE(node_id, cfg_inst##_init, NULL, &cfg_inst##_data,         \
-                     &cfg_inst##_cfg, POST_KERNEL,                             \
-                     CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
+  DEVICE_DT_DEFINE(node_id, NULL, NULL, &cfg_inst##_data, &cfg_inst##_cfg,     \
+                   POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, callbacks_expr)
 
 /* Conditions are sampled on the control worker, never by a renderer. A variable
  * source must invalidate after a synchronized update; there is no polling fallback.
- * Deadlines use the supplied monotonic uptime and must be > now_ms or NEVER.
- * Dependencies are immutable, lifetime-long metadata; samples may only read their
- * declared children's cached values, and must not execute actions or LED I/O.
+ * Timed providers must arrange their own wakeups and invalidate when due.
  */
 enum kp_rgb_condition_scope {
   KP_RGB_CONDITION_ANY_SIDE = 0,
   KP_RGB_CONDITION_CENTRAL_ONLY,
 };
-#define KP_RGB_CONDITION_NEVER INT64_MAX
 
 struct kp_rgb_condition_api {
   enum kp_rgb_condition_scope scope;
-  /* Returns current activity. Assign to next_wakeup_ms to set a deadline for
-   * next sample call.
-   */
-  bool (*sample)(const struct device *dev, int64_t now_ms,
-                 int64_t *next_wakeup_ms);
-  const struct device *const *(*dependencies)(const struct device *dev,
-                                              size_t *count);
+  /* Return true when active. Must not synchronously invalidate any condition. */
+  bool (*sample)(const struct device *dev);
 };
-/* Start control once defaults, all settings, and all provider sources are ready.
- * Idempotent, thread-context only. Required when CONTROL_AUTO_START is disabled;
- * otherwise called by the late settings commit or APPLICATION startup hook.
- */
-void zmk_rgb_matrix_start(void);
 
 /* Any-context, non-blocking notification. NULL/unregistered devices are errors.
  * Notifications coalesce: intermediate source transitions need not be observed.
  * Early notifications are subsumed by mandatory initial sampling.
  */
 void kp_rgb_condition_invalidate(const struct device *condition);
-/* Control-worker only. Returns a declared child's cache during sampling, or a
- * consumer root's cache after evaluation. Never invokes a provider.
+/* Control-worker only. Returns the cached value without invoking a provider.
  */
 bool kp_rgb_condition_value(const struct device *condition);
 
@@ -430,14 +351,9 @@ bool kp_rgb_condition_value(const struct device *condition);
  * providers must not access the registration or embed engine state in their data.
  */
 #define KP_RGB_CONDITION_DEFINE(inst, api_expr, cfg_expr, data_expr)           \
-  static struct kp_rgb_condition_registration kp_rgb_condition_##inst##_entry; \
-  static int kp_rgb_condition_##inst##_init(const struct device *dev) {        \
-    kp_rgb_condition_register(dev, &kp_rgb_condition_##inst##_entry);          \
-    return 0;                                                                  \
-  }                                                                            \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), kp_rgb_condition_##inst##_init, NULL,    \
-                   data_expr, cfg_expr, POST_KERNEL,                           \
-                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, api_expr)
+  KP_RGB_CONDITION_REGISTRATION_DEFINE(DT_DRV_INST(inst))                      \
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, data_expr, cfg_expr,         \
+                   POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, api_expr)
 
 /* Resolve a node's `condition` phandle, or NULL when it has none (meaning
  * "unconditionally active"). Shared by the compositor overlay and the trigger. */
@@ -445,8 +361,8 @@ bool kp_rgb_condition_value(const struct device *condition);
   COND_CODE_1(DT_NODE_HAS_PROP(node_id, condition),                            \
               (DEVICE_DT_GET(DT_PROP(node_id, condition))), (NULL))
 
-/* Overlays composite in declaration order unless the selected effect overrides
- * the list. They consume cached condition gates and own any embedded effects. */
+/* Overlays composite in declaration order, consume cached condition gates and
+ * own any embedded effects. */
 
 struct kp_rgb_overlay_api {
   const struct device *condition; /* NULL = unconditional */
@@ -459,10 +375,6 @@ struct kp_rgb_overlay_api {
 
 /* Kind-agnostic part of an overlay's config. */
 struct kp_rgb_overlay_common_config {
-  const uint32_t *keys; /* key positions, or NULL */
-  size_t keys_len;
-  const uint32_t *leds; /* raw chain indices, or NULL */
-  size_t leds_len;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
   /* Use every local LED instead of the keys/leds lists. */
   bool all_leds;
@@ -470,71 +382,61 @@ struct kp_rgb_overlay_common_config {
 
 /* Kind-agnostic mutable part. */
 struct kp_rgb_overlay_common_data {
-  size_t led_count; /* resolved targets; 0 when keys and leds are both empty */
-  size_t *leds;     /* the overlay's own storage */
-  uint16_t index;   /* registry ordinal */
-  bool local;       /* True when `local`: each half evaluates the condition */
-  bool gate;        /* worker-published local gate */
+  size_t led_count;   /* resolved targets; 0 when keys and leds are both empty */
+  const size_t *leds; /* resolved constant targets */
+  uint16_t index;     /* enabled-overlay index */
+  bool local;         /* True when `local`: each half evaluates the condition */
+  bool gate;          /* worker-published local gate */
 };
 
-/* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
- * devicetree, so there is no fixed cap on the overlay count. */
-#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_overlays)
-#define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM(DT_INST(0, keypaw_rgb_overlays))
-#else
-#define KP_RGB_OVERLAY_COUNT 0
-#endif
+/* Both halves must use the same enabled overlay sequence for split gate bits. */
+#define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM_STATUS_OKAY(KP_RGB_NODE)
 #define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
+#define KP_RGB_OVERLAY_INDEX(node_id)                                          \
+  UTIL_CAT(kp_rgb_overlay_index_, DT_DEP_ORD(node_id))
+#define KP_RGB_OVERLAY_INDEX_ENTRY(node_id) KP_RGB_OVERLAY_INDEX(node_id),
 
-/* Add a device to the engine's overlay registry, where `index` places it. */
-void kp_rgb_overlay_register(const struct device *dev);
+#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_matrix)
+enum {
+  DT_FOREACH_CHILD_STATUS_OKAY(KP_RGB_NODE, KP_RGB_OVERLAY_INDEX_ENTRY)
+  kp_rgb_overlay_index_count,
+};
+#endif
 
-/* The most targets an overlay can resolve. */
-#define KP_RGB_OVERLAY_TARGET_CAP(node_id)                                     \
-  MAX(1, MIN(KP_LED_COUNT, DT_PROP_LEN_OR(node_id, keys, 0) +                  \
-                               DT_PROP_LEN_OR(node_id, leds, 0)))
-
-/* Resolve an overlay's `keys`/`leds` devicetree spec into LED indices.
- * Returns the number written (never more than out_max, and always <=
- * KP_LED_COUNT); 0 when both lists are empty. Duplicate indices are dropped, so
- * each LED is painted once regardless of how the spec names it. */
-size_t kp_rgb_resolve_targets(const uint32_t *keys, size_t keys_len,
-                              const uint32_t *leds, size_t leds_len,
-                              size_t *out, size_t out_max);
-
-/* Blend intrinsic color over existing pixels at strength 0..100. Pass
- * frame->targets and frame->target_count, or a subset of those targets. */
-void kp_rgb_overlay_paint(const struct kp_rgb_frame *frame, const size_t *leds,
-                          size_t led_count, struct led_rgb color,
-                          uint8_t strength);
-
-/* As above, taking each source color from src[led] in physical-index order. */
+/* Blend src[led] over existing pixels at strength 0..100.
+ * Pass frame->targets with frame->target_count, or a subset with its length.
+ * Targets must be unique indices from frame->targets; indices are not checked. */
 void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t *leds,
                                  size_t led_count, const struct led_rgb *src,
                                  uint8_t strength);
 
-/* Declare the devicetree-derived target arrays for one overlay instance. A
- * missing property yields a one-element array whose length is read as 0, so the
- * declaration is always valid C and the array is always referenced. */
+#include <zmk/rgb_matrix_targets_internal.h>
+
+/* Declare constant resolved targets before config/data.
+ * Resolved LED targets must be unique. Only the first resolved-count entries
+ * are targets; storage may include padding. */
 #define KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg_inst)                           \
-  static const uint32_t cfg_inst##_keys[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), keys),                   \
-                  (DT_PROP(DT_DRV_INST(inst), keys)), ({0}));                  \
-  static const uint32_t cfg_inst##_leds[] =                                    \
-      COND_CODE_1(DT_NODE_HAS_PROP(DT_DRV_INST(inst), leds),                   \
-                  (DT_PROP(DT_DRV_INST(inst), leds)), ({0}))
+  BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
+               "overlay must be a child of the keypaw,rgb-matrix node");       \
+  KP_RGB_OVERLAY_STATIC_TARGETS(DT_DRV_INST(inst), cfg_inst)
+
+/* Initialize the common data before device initialization. */
+#define KP_RGB_OVERLAY_COMMON_DATA(inst, cfg_inst)                             \
+  .common = {                                                                  \
+      .leds = cfg_inst##_targets,                                              \
+      .led_count = cfg_inst##_target_count,                                    \
+      .index = KP_RGB_OVERLAY_INDEX(DT_DRV_INST(inst)),                        \
+      .local =                                                                 \
+          IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local),   \
+  }
 
 /* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_OVERLAY_COMMON(node_id, cfg_inst)                               \
-  {.keys = cfg_inst##_keys,                                                    \
-   .keys_len = DT_PROP_LEN_OR(node_id, keys, 0),                               \
-   .leds = cfg_inst##_leds,                                                    \
-   .leds_len = DT_PROP_LEN_OR(node_id, leds, 0),                               \
-   .opacity = DT_PROP_OR(node_id, opacity, 100),                               \
+#define KP_RGB_OVERLAY_COMMON(node_id)                                         \
+  {.opacity = DT_PROP_OR(node_id, opacity, 100),                               \
    .all_leds = DT_PROP(node_id, all_leds)}
 
-/* Declare a non-behavior overlay device and its target storage. Config/data must
- * embed their common headers first. render is required; other callbacks are optional. */
+/* Declare a non-behavior overlay device. Config/data must embed their
+ * common headers first. render is required; other callbacks are optional. */
 #define KP_RGB_OVERLAY_DEFINE(inst, callbacks_expr, replaces, cfg_inst)        \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
@@ -548,42 +450,23 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                        (const void *)&cfg_inst##_data.common,                  \
                "overlay data must embed struct kp_rgb_overlay_common_data "    \
                "as the first field");                                          \
-  BUILD_ASSERT(                                                                \
-      DT_NODE_HAS_COMPAT(DT_PARENT(DT_DRV_INST(inst)), keypaw_rgb_overlays),   \
-      "overlay must be a child of a keypaw,rgb-overlays node");                \
+  BUILD_ASSERT(KP_RGB_OVERLAY_INDEX(DT_DRV_INST(inst)) <= UINT16_MAX,          \
+               "overlay index must fit uint16_t");                             \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) >= 0 &&             \
+                   DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) <= 100,         \
+               "overlay opacity must be 0..100");                              \
   BUILD_ASSERT(!(DT_PROP(DT_DRV_INST(inst), all_leds) &&                       \
                  (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
                "`all-leds` replaces `keys`/`leds`; do not combine them");      \
-  static size_t                                                                \
-      cfg_inst##_targets[KP_RGB_OVERLAY_TARGET_CAP(DT_DRV_INST(inst))];        \
-  static int cfg_inst##_init(const struct device *dev) {                       \
-    const struct kp_rgb_overlay_common_config *cfg = dev->config;              \
-    struct kp_rgb_overlay_common_data *data = dev->data;                       \
-    data->leds = cfg_inst##_targets;                                           \
-    data->led_count =                                                          \
-        cfg->all_leds                                                          \
-            ? 0 /* paints every LED; no target list needed */                  \
-            : kp_rgb_resolve_targets(cfg->keys, cfg->keys_len, cfg->leds,      \
-                                     cfg->leds_len, data->leds,                \
-                                     ARRAY_SIZE(cfg_inst##_targets));          \
-    data->index = (uint16_t)DT_NODE_CHILD_IDX(DT_DRV_INST(inst));              \
-    data->local =                                                              \
-        IS_ENABLED(CONFIG_ZMK_SPLIT) && DT_PROP(DT_DRV_INST(inst), local);     \
-    kp_rgb_overlay_register(dev);                                              \
-    return 0;                                                                  \
-  }                                                                            \
   static const struct kp_rgb_overlay_api cfg_inst##_api = {                    \
       .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
       .callbacks = callbacks_expr,                                             \
       .replaces_target = replaces,                                             \
   };                                                                           \
-  /* Init resolves `keys` through the engine's key -> LED table, which the     \
-   * engine fills from its own POST_KERNEL init at the OBJECTS priority, ahead \
-   * of these devices' DEFAULT priority. */                                    \
-  DEVICE_DT_DEFINE(DT_DRV_INST(inst), cfg_inst##_init, NULL, &cfg_inst##_data, \
-                   &cfg_inst##_cfg, POST_KERNEL,                               \
-                   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &cfg_inst##_api)
+  DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, &cfg_inst##_data,            \
+                   &cfg_inst##_cfg, POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY,  \
+                   &cfg_inst##_api)
 
 /* The generic keypaw,rgb-overlay composites exactly one enabled nested effect. */
 
@@ -606,26 +489,26 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
  * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
  * colored submissions until released. Release preserves outstanding transfer
  * backoff and resumes current logical intent without advancing animation time
- * spent inhibited. Event/deadline control and
- * overlay synchronization remain live even while logically OFF. Pending key
- * feedback is discarded while inhibited. An in-flight render or feedback pass
- * may finish computing. */
+ * spent inhibited. Event-driven control and overlay synchronization remain live
+ * even while logically OFF. Pending key feedback is discarded while inhibited.
+ * An in-flight render or feedback pass may finish computing. */
 int zmk_rgb_matrix_set_inhibited(bool inhibited);
 /* Returns the current gate state, not hardware settlement; safe from any context. */
 bool zmk_rgb_matrix_is_inhibited(void);
 
 /* Set or toggle local user intent; toggle inverts intent even while idle or
- * inhibited. Idle suppression and inhibition may still prevent output.
+ * inhibited. Activity suppression and inhibition may still prevent output.
  * Thread context only. Return 0 on success or a negative lock error; success
  * does not promise hardware settlement. These calls neither save settings nor
  * send split commands. */
 int zmk_rgb_matrix_toggle(void);
 int zmk_rgb_matrix_on(void);
 int zmk_rgb_matrix_off(void);
-/* Returns logical ON after idle suppression; external inhibition does not alter it. */
+/* Returns user intent after activity suppression: false during SLEEP and during
+ * IDLE with idle-brightness=0. Inhibition and brightness scaling do not alter it. */
 int zmk_rgb_matrix_get_state(bool *on_off);
 
-/* Return retained user intent before idle suppression. Thread context only;
+/* Return retained user intent before activity suppression. Thread context only;
  * NULL returns -EINVAL, ISR calls return -EWOULDBLOCK. */
 int zmk_rgb_matrix_get_user_state(bool *user_on);
 
@@ -640,9 +523,7 @@ int zmk_rgb_matrix_get_user_state(bool *user_on);
 int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hsb *color);
 int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
-int zmk_rgb_matrix_select_effect(uint16_t effect);
-int zmk_rgb_matrix_cycle_effect(int16_t direction);
-
 /* Request a scene pass: reconcile activity and repaint if output is eligible.
- * Any-context; does not sample conditions or grant output permission. */
+ * Notify after a synchronized source update changes pixels or animation demand.
+ * Any-context, non-blocking and coalescing. */
 void zmk_rgb_matrix_flush(void);

@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: MIT */
+#include "base.overlay"
+&rgb_matrix {
+    disabled_before { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+    disabled_between { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+    disabled_after { compatible = "test,rgb-static-overlay"; status = "disabled"; };
+};

@@ -1,0 +1,3 @@
+/* SPDX-License-Identifier: MIT */
+#include "different.overlay"
+&geometry_layout { status = "disabled"; };

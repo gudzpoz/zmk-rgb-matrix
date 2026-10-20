@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+description: Second translation unit static condition
+compatible: "test,rgb-static-condition-b"
+include: keypaw,rgb-condition-common.yaml

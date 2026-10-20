@@ -64,7 +64,7 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
   case DT_ENUM_CONST(spread, disc): { /* disc: filled circle, brightness falls off to the radius */
     uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
     int32_t r = cfg->radius;
-    if (r <= 0 || (int32_t)dist >= r) {
+    if ((int32_t)dist >= r) {
       return 0;
     }
     return (uint8_t)(255u * (r - (int32_t)dist) / r);
@@ -84,7 +84,7 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
      * below the key pitch times sqrt(2) would silence the effect entirely. */
     int32_t reach = MIN(ax, ay) - (int32_t)tol;
     int32_t r = cfg->radius;
-    if (r <= 0 || reach >= r) {
+    if (reach >= r) {
       return 0;
     }
     return (uint8_t)(255u * (r - reach) / r);
@@ -136,7 +136,7 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
   bool evolving = false;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
-  uint16_t span = MAX(f->board_length, 1u);
+  uint16_t span = f->board_length;
 
   for (size_t i = 0; i < f->count; i++) {
     evolving |= data->levels[i] != 0;
@@ -181,9 +181,6 @@ static void kp_eff_reactive_apply(const struct device *dev,
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
-    if (c == NULL) {
-      continue;
-    }
     uint8_t contrib = kp_reactive_shape(cfg, origin->x, origin->y, c->x, c->y);
     if (contrib == 0) {
       continue;
@@ -234,6 +231,10 @@ static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
 };
 
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) >= 0 &&       \
+                   DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) <=        \
+                       UINT16_MAX,                                             \
+               "reactive spread-radius must be in 0..65535");                  \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
       KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
       .background_brightness = (uint8_t)CLAMP(                                 \

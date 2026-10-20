@@ -5,7 +5,7 @@ description: |
   Randomly lit keys with random colours, covering QMK's PIXEL_RAIN, PIXEL_FLOW,
   RAINDROPS, JELLYBEAN_RAINDROPS and PIXEL_FRACTAL via the `mode` attribute.
 compatible: "keypaw,rgb-matrix-rain"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   mode:

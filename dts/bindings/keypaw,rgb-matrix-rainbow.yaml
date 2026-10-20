@@ -10,7 +10,7 @@ description: |
   distinct cycle entries (e.g. one node per desired animation).
 
 compatible: "keypaw,rgb-matrix-rainbow"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   basis:

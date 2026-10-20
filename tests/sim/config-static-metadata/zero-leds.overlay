@@ -1,0 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+#include "dense.overlay"
+&led_strip_capture { chain-length = <0>; };
+&rgb_matrix { mapping = <>; };
+&sm00 { zero-local-leds; };

@@ -40,7 +40,7 @@ static uint32_t kp_band_spatial(kp_band_shape_t shape, uint16_t x, uint16_t y, u
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   if (shape == DT_ENUM_CONST(shape, linear)) {
-    return (uint32_t)x * 65536u / MAX(bl, 1u);
+    return (uint32_t)x * 65536u / bl;
   }
   int32_t dx = (int32_t)x - cx;
   int32_t dy = (int32_t)y - cy;
@@ -63,8 +63,8 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
    * front at a single-wrap rate. */
   uint32_t phase_eff = kp_rgb_arm_phase(
       phase01, cfg->shape == DT_ENUM_CONST(shape, spiral) ? 2u : 1u);
-  uint16_t bl = MAX(f->board_length, 1u);
-  uint16_t bh = MAX(f->board_height, 1u);
+  uint16_t bl = f->board_length;
+  uint16_t bh = f->board_height;
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   uint32_t max_r = MAX(kp_rgb_isqrt((uint32_t)cx * cx + (uint32_t)cy * cy), 1u);

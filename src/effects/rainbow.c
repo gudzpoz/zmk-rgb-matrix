@@ -47,8 +47,8 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = f->clock_ms % period;
   uint32_t phase01 = phase * 65536u / period;
-  uint16_t bl = MAX(f->board_length, 1u);
-  uint16_t bh = MAX(f->board_height, 1u);
+  uint16_t bl = f->board_length;
+  uint16_t bh = f->board_height;
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   bool dual = cfg->direction == DT_ENUM_CONST(direction, dual);

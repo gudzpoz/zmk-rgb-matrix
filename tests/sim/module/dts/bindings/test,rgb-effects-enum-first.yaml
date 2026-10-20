@@ -1,0 +1,7 @@
+description: Native first effect enum namespace fixture
+compatible: "test,rgb-effects-enum-first"
+properties:
+  mode:
+    type: string
+    required: true
+    enum: [idle, pulse, sweep]

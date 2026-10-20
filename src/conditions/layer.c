@@ -23,10 +23,7 @@ struct layer_cfg {
   bool only_topmost;
 };
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
+static bool sample(const struct device *dev) {
 #if HAS_KEYMAP
   const struct layer_cfg *c = dev->config;
   return c->only_topmost
@@ -42,22 +39,21 @@ static bool sample(const struct device *dev, int64_t now_ms,
 #define INVALIDATE(inst)                                                       \
   kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
 static int listener(const zmk_event_t *eh) {
-  if (as_zmk_layer_state_changed(eh)) {
-    DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
-  }
+  ARG_UNUSED(eh);
+  DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
   return ZMK_EV_EVENT_BUBBLE;
 }
 ZMK_LISTENER(kp_cond_layer_state, listener);
 ZMK_SUBSCRIPTION(kp_cond_layer_state, zmk_layer_state_changed);
 #endif
 
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};
 #define DEFINE(inst)                                                           \
   static const struct layer_cfg cfg_##inst = {                                 \
       DT_PROP(DT_DRV_INST(inst), layer),                                       \
       DT_PROP(DT_DRV_INST(inst), only_topmost)};                               \
-  static const struct kp_rgb_condition_api api_##inst = {                      \
-      .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};               \
-  KP_RGB_CONDITION_DEFINE(inst, &api_##inst, &cfg_##inst, NULL)
+  KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 #endif

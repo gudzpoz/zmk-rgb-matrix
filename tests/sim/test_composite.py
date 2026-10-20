@@ -24,7 +24,7 @@ def main():
                    f"-DZMK_CONFIG={SIM / 'config-composite'}",
                    f"-DZMK_EXTRA_MODULES={MODULE};{SIM / 'module'}"]
         result = subprocess.run(command, cwd=WORKSPACE, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
         if result.returncode:
             raise AssertionError(result.stdout[-16000:])
         result = subprocess.run([str(build / "zephyr/zmk.exe"), "--stop_at=5", "-no-rt"],

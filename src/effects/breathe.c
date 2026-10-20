@@ -36,7 +36,6 @@ struct kp_eff_breathe_data {
  * minimum at phase 0, so the envelope matches the triangle ramp this replaced,
  * but the fade eases into and out of the peaks instead of reversing sharply. */
 static uint32_t kp_breathe_wave(uint32_t phase, uint32_t period) {
-  period = MAX(period, 1u);
   return kp_rgb_sin8((uint8_t)(phase * 256u / period + 192u));
 }
 
@@ -48,7 +47,6 @@ static uint16_t kp_breathe_hue_offset(uint32_t phase, uint32_t period,
     return (uint16_t)(kp_breathe_wave(phase, period) * hue_amplitude / 255u);
   }
 
-  span = MAX(span, 1u);
   if (mode == DT_ENUM_CONST(mode, pendulum)) {
     uint32_t travel = kp_breathe_wave(phase, period); /* 0..255, eased */
     uint32_t target = travel * span / 255u;
@@ -70,7 +68,7 @@ static bool kp_eff_breathe_render(const struct device *dev,
   if (cfg->mode == DT_ENUM_CONST(mode, hue) ||
       cfg->mode == DT_ENUM_CONST(mode, pendulum) ||
       cfg->mode == DT_ENUM_CONST(mode, wave)) {
-    uint16_t span = MAX(f->board_length, 1u);
+    uint16_t span = f->board_length;
     for (size_t t = 0; t < f->target_count; t++) {
       size_t i = f->targets[t];
       uint16_t offset = kp_breathe_hue_offset(phase, period, f->coords[i].x,
@@ -85,7 +83,7 @@ static bool kp_eff_breathe_render(const struct device *dev,
 
   if (cfg->mode == DT_ENUM_CONST(mode, river)) {
     /* RIVERFLOW: brightness wave offset by x position, so the pulse travels. */
-    uint16_t span = MAX(f->board_length, 1u);
+    uint16_t span = f->board_length;
     for (size_t t = 0; t < f->target_count; t++) {
       size_t i = f->targets[t];
       uint32_t local = (phase + (uint32_t)f->coords[i].x * period / span) % period;

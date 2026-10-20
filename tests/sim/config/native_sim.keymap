@@ -4,7 +4,7 @@
  *
  * Minimal 4x12 keymap for the preview harness. The module animates on its own
  * and the harness picks the effect with --effect, so no binding needs to invoke
- * &kprgb: a layer of &none is enough to satisfy ZMK.
+ * &rgb_matrix: a layer of &none is enough to satisfy ZMK.
  */
 
 #include <behaviors.dtsi>

@@ -1,9 +1,8 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 #
-# Unit tests (host ztest for the pure helpers) and the native_sim smoke tests.
-# The module is not a ZMK user config, so this job fetches ZMK itself and points
-# the harnesses at it; the module is passed in via ZMK_EXTRA_MODULES.
+# Host tests are independent of a ZMK checkout. Native integration runs through
+# one inventory runner against a fetched ZMK west workspace.
 
 name: Tests
 
@@ -36,11 +35,25 @@ permissions:
   contents: read
 
 jobs:
-  tests:
-    name: Unit and smoke tests
+  host:
+    name: Host tests
     runs-on: ubuntu-latest
     container:
       image: docker.io/zmkfirmware/zmk-build-arm:4.1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Host tests
+        run: bash tests/unit_run.sh
+
+  native:
+    name: Native integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    container:
+      image: docker.io/zmkfirmware/zmk-build-arm:4.1
+    env:
+      ZMK_WS: ${{ github.workspace }}/zmk-ws
+      ZEPHYR_TOOLCHAIN_VARIANT: host
     steps:
       - uses: actions/checkout@v7
 
@@ -51,7 +64,7 @@ jobs:
           ZMK_REF: ${{ github.event.inputs.zmk_ref || 'main' }}
         run: |
           git clone --quiet --depth 1 --branch "$ZMK_REF" \
-            https://github.com/zmkfirmware/zmk.git "$GITHUB_WORKSPACE/zmk-ws"
+            https://github.com/zmkfirmware/zmk.git "$ZMK_WS"
 
       # Keyed on the manifest, so it is only refetched when ZMK's project list
       # actually changes. Best effort: a cache miss just costs time.
@@ -74,33 +87,17 @@ jobs:
           west init -l app
           west update --fetch-opt=--filter=tree:0
 
-      - name: Unit tests (host)
-        run: bash tests/unit_run.sh
+      - name: Native integration suite inventory
+        run: bash tests/sim/run-native.sh
 
-      - name: Unit tests
-        working-directory: zmk-ws
-        run: |
-          west build -s "$GITHUB_WORKSPACE/tests/unit" -b native_sim/native/64 \
-            -d "$GITHUB_WORKSPACE/build/unit" -p
-          west build -d "$GITHUB_WORKSPACE/build/unit" -t run
-
-      - name: Composite strip driver contracts
-        env:
-          ZMK_WS: ${{ github.workspace }}/zmk-ws
-        run: python3 tests/run-led-strip-composite.py --build-dir "$GITHUB_WORKSPACE/build/composite"
-
-      - name: Composite strip engine integration
-        env:
-          ZMK_WS: ${{ github.workspace }}/zmk-ws
-        run: python3 tests/sim/test_composite.py
-
-      - name: Smoke tests
-        env:
-          ZMK_WS: ${{ github.workspace }}/zmk-ws
-        # Invoked through bash so the executable bit is not load-bearing.
-        run: bash tests/sim/run-smoke.sh
-
-      - name: Configuration contracts
-        env:
-          ZMK_WS: ${{ github.workspace }}/zmk-ws
-        run: python3 tests/sim/test_configuration.py
+      - name: Retain native artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-test-artifacts
+          if-no-files-found: warn
+          path: |
+            build/**
+            tests/sim/out*/**
+            tests/sim/build*/**
+            tests/led_strip_composite/build/**

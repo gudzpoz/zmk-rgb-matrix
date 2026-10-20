@@ -21,9 +21,10 @@ from fractions import Fraction
 import math
 import shutil
 import struct
-import subprocess
+from pathlib import Path
 import sys
 import tempfile
+from native_process import run_logged
 
 MAGIC = b"KPRC"
 VERSION = 1
@@ -157,7 +158,8 @@ def rasterize(coords, frames, cell, tile, gap):
     return width, height, images()
 
 
-def encode_gif(raw_path, width, height, fps, out_path):
+def encode_gif(raw_path, width, height, fps, out_path, *, log_path=None):
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     # Single pass: split the stream so palettegen sees every frame before
     # paletteuse quantizes against it. A plain GIF encode looks muddy on the
     # saturated colours these effects produce.
@@ -166,7 +168,7 @@ def encode_gif(raw_path, width, height, fps, out_path):
         "[a]palettegen=stats_mode=diff[p];"
         "[b][p]paletteuse=dither=bayer:bayer_scale=3"
     )
-    subprocess.run(
+    run_logged(
         [
             "ffmpeg",
             "-y",
@@ -190,6 +192,7 @@ def encode_gif(raw_path, width, height, fps, out_path):
             out_path,
         ],
         check=True,
+        log_path=log_path or str(out_path) + ".ffmpeg.log",
     )
 
 

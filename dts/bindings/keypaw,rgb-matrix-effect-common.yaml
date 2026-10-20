@@ -1,6 +1,7 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
+include: [base.yaml]
 properties:
   color:
     type: int
@@ -14,29 +15,5 @@ properties:
     default: 0
     description: |
       Animation period in milliseconds; shorter means faster. Zero (the default)
-      uses the controller's `initial-duration-ms` for selectable effects, or
-      1000 ms for effects owned by other providers.
-
-  persist-id:
-    type: string
-    required: false
-    description: |
-      Opts this selectable effect into persistence. The value is the stable
-      settings identity and must be a unique identifier-compatible token.
-
-  overlays:
-    type: phandles
-    required: false
-    description: |
-      Selectable effects only. Overlay list to paint while this effect is
-      active, replacing the default of every registered overlay in
-      `rgb_overlays` declaration order. A devicetree array cannot be empty, so
-      use `no-overlays;` for an effect that wants none. Entries must be unique
-      within this list. The same overlay may be included in different selectable
-      effects' lists.
-
-  no-overlays:
-    type: boolean
-    description: |
-      Draw no overlays at all for this effect. Allowed only on selectable
-      effects, not effects owned by other providers.
+      uses the owning selector's `initial-duration-ms` for selectable effects,
+      or 1000 ms for effects owned by other providers.

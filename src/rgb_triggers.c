@@ -19,9 +19,6 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) && \
-    (!IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL))
-
 struct kp_trig_action {
   struct zmk_behavior_binding binding;
 };
@@ -85,21 +82,16 @@ static struct {
   bool previous;
   bool participant;
 } kp_trigger_state[ARRAY_SIZE(kp_triggers)];
-static bool kp_triggers_ready;
 
 void kp_rgb_triggers_init(void) {
-  if (kp_triggers_ready) {
-    return;
-  }
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];
-    bool valid = t->condition == NULL || kp_rgb_condition_require(t->condition);
+    bool valid = kp_rgb_condition_require(t->condition);
     kp_trigger_state[i].disabled = !valid;
     if (!valid) {
       LOG_ERR("RGB trigger %s disabled: invalid condition", t->name);
     }
   }
-  kp_triggers_ready = true;
 }
 
 void kp_rgb_triggers_begin(void) {
@@ -120,10 +112,7 @@ static void kp_triggers_run(const struct kp_trig *t,
   }
 }
 
-bool kp_rgb_triggers_evaluate(int64_t now_ms) {
-  if (!kp_triggers_ready) {
-    return false;
-  }
+void kp_rgb_triggers_evaluate(int64_t now_ms) {
   int8_t edges[MAX(1, ARRAY_SIZE(kp_triggers))] = {0};
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];
@@ -147,7 +136,6 @@ bool kp_rgb_triggers_evaluate(int64_t now_ms) {
     kp_trigger_state[i].previous = active;
   }
 
-  bool dispatched = false;
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     if (edges[i] == 0) {
       continue;
@@ -159,10 +147,8 @@ bool kp_rgb_triggers_evaluate(int64_t now_ms) {
       continue;
     }
     kp_trigger_state[i].participant = true;
-    dispatched = true;
     kp_triggers_run(t, actions, len, now_ms);
   }
-  return dispatched;
 }
 
 void kp_rgb_triggers_quarantine(void) {
@@ -173,13 +159,3 @@ void kp_rgb_triggers_quarantine(void) {
     }
   }
 }
-
-#else
-void kp_rgb_triggers_init(void) {}
-void kp_rgb_triggers_begin(void) {}
-bool kp_rgb_triggers_evaluate(int64_t now_ms) {
-  ARG_UNUSED(now_ms);
-  return false;
-}
-void kp_rgb_triggers_quarantine(void) {}
-#endif

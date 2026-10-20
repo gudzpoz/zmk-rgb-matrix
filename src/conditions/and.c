@@ -11,11 +11,8 @@
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-static bool sample(const struct device *dev, int64_t now_ms,
-                   int64_t *next_wakeup_ms) {
+static bool sample(const struct device *dev) {
   const struct kp_rgb_condition_list_config *cfg = dev->config;
-  ARG_UNUSED(now_ms);
-  ARG_UNUSED(next_wakeup_ms);
   for (size_t i = 0; i < cfg->count; ++i) {
     if (!kp_rgb_condition_value(cfg->conditions[i])) {
       return false;
@@ -24,7 +21,9 @@ static bool sample(const struct device *dev, int64_t now_ms,
   return true;
 }
 
-#define DEFINE(inst) KP_RGB_CONDITION_LIST_DEFINE(inst, sample)
+static const struct kp_rgb_condition_api api = {
+    .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample};
+#define DEFINE(inst) KP_RGB_CONDITION_LIST_DEFINE(inst, api)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 #endif

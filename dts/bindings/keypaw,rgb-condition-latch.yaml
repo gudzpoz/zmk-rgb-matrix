@@ -14,3 +14,4 @@ description: |
   with `local;` so each half gates on its own latch).
 
 compatible: "keypaw,rgb-condition-latch"
+include: keypaw,rgb-condition-common.yaml

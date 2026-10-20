@@ -37,7 +37,7 @@ config KEYPAW_RGB_WORKQUEUE_STACK_SIZE
       Stack for the module's dedicated low-priority work queue, which runs all
       engine work: render passes, condition and trigger evaluation, split sync
       and the settings reset. Size it for the deepest chain, not just rendering:
-      a fired trigger invokes an effect behavior, which on the split central
+      a fired trigger invokes a selector control, which on the split central
       reaches the BLE transport. Keep it above the observed high-water mark with
       margin.
 
@@ -47,17 +47,6 @@ config KEYPAW_RGB_WORKQUEUE_PRIORITY
     help
       Priority of the module's work queue thread. The default matches ZMK's
       low-priority work queue so RGB work never preempts typing.
-
-config KEYPAW_RGB_CONTROL_AUTO_START
-    bool "Start RGB control automatically after source/settings initialization"
-    default y
-    help
-      With settings enabled, start from a commit callback at priority INT_MAX,
-      after all source commits at lower priorities and all settings keys load.
-      Without settings, start at APPLICATION priority 99; the matrix application
-      init priority must be lower. Providers must be ready at this boundary.
-      Disable this if sources become ready later or settings are loaded in
-      subtrees; call zmk_rgb_matrix_start() explicitly after full restoration.
 
 config KEYPAW_RGB_MATRIX_TICK_MS
     int "Animation tick period (ms)"
@@ -99,14 +88,6 @@ config KEYPAW_RGB_MATRIX_DURATION_MAX_MS
     default 10000
     range 1 60000
 
-
-config KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE
-    bool "Turn the matrix off when the keyboard goes idle"
-    default y
-    help
-      Without this the strip might latch at its last color through deep sleep
-      and keeps drawing current.
-
 # Caps Lock will pull in a HID-indicator event dependency. Disable it if you
 # don't need that.
 config KEYPAW_RGB_CONDITION_CAPS_LOCK
@@ -133,16 +114,11 @@ config KEYPAW_RGB_CONDITION_BLE
 
 endif # KEYPAW_RGB_MATRIX
 
-config KEYPAW_BEHAVIOR_RGB_MATRIX
-    bool "RGB matrix control behavior"
-    default y
-    depends on DT_HAS_KEYPAW_BEHAVIOR_RGB_MATRIX_ENABLED
-    select KEYPAW_RGB_MATRIX
-
 config KEYPAW_RGB_TRIGGERS
     bool "RGB matrix trigger table"
     default y
-    depends on KEYPAW_BEHAVIOR_RGB_MATRIX
+    depends on KEYPAW_RGB_MATRIX
+    depends on DT_HAS_KEYPAW_RGB_TRIGGER_TABLE_ENABLED
     depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
     help
       Edge-triggered condition -> RGB command rules, declared as the children of
@@ -158,24 +134,23 @@ config KEYPAW_RGB_TRIGGERS
 config KEYPAW_RGB_SPLIT_SYNC
     bool "Push the RGB state to a split peripheral when it connects"
     default y
-    depends on KEYPAW_BEHAVIOR_RGB_MATRIX
+    depends on KEYPAW_RGB_MATRIX
     depends on ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
     help
-      A &kprgb command is BEHAVIOR_LOCALITY_GLOBAL, so it is forwarded to the
-      peripheral and persisted there. A peripheral that was powered off while
-      the settings changed therefore keeps stale flash defaults and reloads them
-      on the next power-up. This pushes the selected effect, its colour and
-      period, and the user on/off intent to a peripheral whenever it newly
-      connects; the peripheral's own command handler applies and persists them.
+      Reconnect and transport changes push global user power, brightness,
+      overlay gates and every selector's selected member, color and period.
+      Successful selector control commands also request a fresh snapshot, even
+      when the selected member is unchanged. Local selector/parameter APIs do
+      not request synchronization. Selector snapshots use independent retries
+      per source/selector so one failed target cannot block the others.
 
-      The forward of a switch carries only the effect index, so the peripheral
-      would apply the new effect with its own colour and period. This also
-      re-pushes the full snapshot when the active effect changes to one the
-      peripheral has not received, keeping only the marker of the last effect
-      pushed, so effects never selected on the central are still not synced.
-
-      Built for the split central only. The trigger polls the transport's in-RAM
-      connected-source list, which transmits nothing until a peripheral appears.
+      Built for the split central only; control remains live while output is
+      off, inhibited, hidden or has no local LEDs. Both halves must use matching
+      canonical behavior names and member slots. Transport success means local
+      acceptance, not acknowledged delivery or an atomic scene transaction.
+      The keypaw,rgb-matrix node is the global endpoint on both halves for
+      power, brightness, overlay gates and shared-clock commands, even when
+      no selectors are configured.
 
 if KEYPAW_RGB_SPLIT_SYNC
 
@@ -184,10 +159,9 @@ config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
     default 1000
     range 1 60000
     help
-      How often the connected-source set is sampled. The sample is an in-RAM
-      array read with no radio traffic, and a peripheral reboot cannot finish
-      inside one period, so a disconnect is always observed before the
-      reconnect that follows it. Raise this to save one wakeup per period.
+      How often the connected-source set is sampled without radio traffic.
+      Disconnects shorter than this period may be missed. Observed reconnects
+      and transport changes request fresh snapshots after the settle delay.
 
 config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
     int "Delay before pushing to a newly connected peripheral (ms)"

@@ -1,0 +1,9 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+description: Scripted private child for native generic-overlay composition contracts.
+compatible: "keypaw,native-engine-effect"
+include: keypaw,rgb-matrix-effect-common.yaml
+properties:
+  slot:
+    type: int
+    required: true

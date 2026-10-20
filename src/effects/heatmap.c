@@ -25,7 +25,6 @@ struct kp_eff_heatmap_config {
   uint16_t spread;            /* layout-unit radius for neighbour heating */
   uint8_t area_limit;         /* cap on neighbour heat contribution */
   uint8_t increase_step;      /* shades added per keypress */
-  bool slim;                  /* skip neighbour spread */
 };
 
 struct kp_eff_heatmap_data {
@@ -49,7 +48,7 @@ static void kp_eff_heatmap_advance(const struct device *dev,
   }
   struct kp_eff_heatmap_data *data = dev->data;
   const struct kp_eff_heatmap_config *cfg = dev->config;
-  uint32_t delay = MAX(cfg->decrease_delay_ms, 1u);
+  uint32_t delay = cfg->decrease_delay_ms;
   uint64_t elapsed = MIN(elapsed_ms, 255u * delay);
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
     uint64_t total = elapsed + data->remainder[i];
@@ -121,7 +120,7 @@ static void kp_eff_heatmap_apply(const struct device *dev,
   }
 
   data->temp[led] = MIN(255u, (uint32_t)data->temp[led] + cfg->increase_step);
-  if (cfg->slim || cfg->spread == 0) {
+  if (cfg->spread == 0) {
     return;
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -129,9 +128,6 @@ static void kp_eff_heatmap_apply(const struct device *dev,
       continue;
     }
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
-    if (c == NULL) {
-      continue;
-    }
     int32_t dx = (int32_t)c->x - origin->x;
     int32_t dy = (int32_t)c->y - origin->y;
     uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
@@ -206,11 +202,10 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
   static const struct kp_eff_heatmap_config kp_eff_heatmap_##inst##_cfg = {    \
       KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
       .decrease_delay_ms =                                                     \
-          DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25),                \
+          MAX(DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25), 1),        \
       .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
       .area_limit = DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16),             \
       .increase_step = DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32),       \
-      .slim = DT_PROP_OR(DT_DRV_INST(inst), slim, 0),                          \
   };                                                                           \
   static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {           \
       KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \

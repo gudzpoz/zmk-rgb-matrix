@@ -1,0 +1,3 @@
+/* SPDX-License-Identifier: MIT */
+&geometry_strip { chain-length = <1>; };
+&rgb_matrix { mapping = <3>; };

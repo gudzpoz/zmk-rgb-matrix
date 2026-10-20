@@ -5,7 +5,7 @@ description: Brightness breathing RGB matrix effect (BREATHING), extended with
   position-offset "river" flow (RIVERFLOW) and hue variants (HUE_BREATHING,
   HUE_PENDULUM, HUE_WAVE).
 compatible: "keypaw,rgb-matrix-breathe"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   mode:

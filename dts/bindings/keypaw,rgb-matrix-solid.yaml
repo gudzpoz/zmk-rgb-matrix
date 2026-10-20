@@ -4,7 +4,7 @@
 description: Static single-colour RGB matrix effect (SOLID_COLOR), extended with a
   static gradient mode (GRADIENT_UP_DOWN / GRADIENT_LEFT_RIGHT).
 compatible: "keypaw,rgb-matrix-solid"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   axis:

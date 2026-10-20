@@ -6,13 +6,6 @@
 
 #include "rgb_matrix_internal.h"
 
-static const struct kp_rgb_effect_callbacks *kp_rgb_instance_callbacks(
-    const struct kp_rgb_effect_instance *instance) {
-  const struct kp_rgb_effect_api *api =
-      (const struct kp_rgb_effect_api *)instance->effect->api;
-  return api->callbacks;
-}
-
 void kp_rgb_callbacks_reset(const struct device *dev,
                             const struct kp_rgb_effect_callbacks *callbacks,
                             struct kp_rgb_callback_state *state, int64_t now_ms) {
@@ -75,27 +68,25 @@ bool kp_rgb_callbacks_render(const struct device *dev,
 
 void kp_rgb_effect_instance_set_active(struct kp_rgb_effect_instance *instance,
                                        bool active, int64_t now_ms) {
-  kp_rgb_callbacks_set_active(instance->effect, kp_rgb_instance_callbacks(instance),
+  kp_rgb_callbacks_set_active(instance->effect, instance->effect->api,
                                &instance->state, active, now_ms);
 }
 
 void kp_rgb_effect_instance_reset(struct kp_rgb_effect_instance *instance,
                                   int64_t now_ms) {
-  kp_rgb_callbacks_reset(instance->effect, kp_rgb_instance_callbacks(instance),
+  kp_rgb_callbacks_reset(instance->effect, instance->effect->api,
                          &instance->state, now_ms);
 }
 
 bool kp_rgb_effect_instance_on_event(struct kp_rgb_effect_instance *instance,
                                      const struct kp_rgb_key_event *event) {
-  return kp_rgb_callbacks_on_event(instance->effect,
-                                   kp_rgb_instance_callbacks(instance),
+  return kp_rgb_callbacks_on_event(instance->effect, instance->effect->api,
                                    &instance->state, event);
 }
 
 bool kp_rgb_effect_instance_render(struct kp_rgb_effect_instance *instance,
                                    const struct kp_rgb_frame *frame) {
-  return kp_rgb_callbacks_render(instance->effect,
-                                 kp_rgb_instance_callbacks(instance),
+  return kp_rgb_callbacks_render(instance->effect, instance->effect->api,
                                  &instance->state, frame);
 }
 
@@ -104,7 +95,6 @@ void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instanc
 }
 
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame) {
-  const struct kp_rgb_effect_api *api =
-      (const struct kp_rgb_effect_api *)dev->api;
-  return api->callbacks->render(dev, frame);
+  const struct kp_rgb_effect_callbacks *callbacks = dev->api;
+  return callbacks->render(dev, frame);
 }

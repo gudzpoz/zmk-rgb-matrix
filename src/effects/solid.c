@@ -41,7 +41,6 @@ static bool kp_eff_solid_render(const struct device *dev, const struct kp_rgb_fr
   /* Gradient: the hue sweeps the full wheel across one board axis. */
   uint16_t span = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->board_height
                                                              : f->board_length;
-  span = MAX(span, 1u);
   for (size_t t = 0; t < f->target_count; t++) {
     size_t i = f->targets[t];
     uint32_t pos = cfg->axis == DT_ENUM_CONST(axis, vertical) ? f->coords[i].y
