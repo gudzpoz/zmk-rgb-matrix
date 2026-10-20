@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import tempfile
 
-from native_build import build, run, SIM
+from native_build import build, run, SIM, SELECTORS
 
 SCENARIOS = {
     "control-early": "controls",
@@ -20,6 +20,9 @@ SCENARIOS = {
     "control-validation": "controls",
     "control-global-commands": "controls",
     "control-reset": "controls",
+    "control-reset-fallback-noop": "reset-fallback",
+    "control-reset-fallback-notify": "reset-fallback",
+    "control-reset-prestart": "reset-fallback",
     "control-publication": "controls",
     "control-isr": "controls",
     "control-large-step": "large-step",
@@ -50,6 +53,19 @@ def main():
     fixture = (SIM / "config/control_contracts.overlay").read_text()
     for image in dict.fromkeys(SCENARIOS[s] for s in selected):
         fragment, selectors, conf = fixture, None, CONF
+        if image == "reset-fallback":
+            selectors = SELECTORS.replace('''        disabled { compatible = "keypaw,rgb-matrix-solid";
+            status = "disabled"; };
+        probe_a: a_static { compatible = "keypaw,rgb-matrix-selector-probe";
+            color = <0x00ff00>; };
+        probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
+            color = <0x0000ff>; animate; };''', '''        probe_a: a_static { compatible = "keypaw,rgb-matrix-selector-probe";
+            color = <0x00ff00>; };
+        disabled { compatible = "keypaw,rgb-matrix-solid";
+            status = "disabled"; };
+        probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
+            color = <0x0000ff>; animate; };''')
+            fragment += "&selector_a { initial-effect = <1>; };"
         if image == "controls-metadata-off":
             conf += "CONFIG_ZMK_BEHAVIOR_METADATA=n\n"
             fragment += "&probe_a { #binding-cells = <0>; };\n"

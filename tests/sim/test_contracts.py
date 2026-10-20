@@ -10,7 +10,7 @@ SCENARIOS = (
     'periodic', 'inhibited', 'off', 'coalesce', 'starved', 'reentrant',
     'black-retry', 'feedback', 'color-failure', 'rollover', 'input-during-render',
     'idle-policy', 'idempotent', 'intent', 'purge', 'stale', 'resume',
-    'slow-render', 'slow-driver', 'black-slow', 'boundary', 'lock-retry',
+    'slow-render', 'slow-driver', 'black-slow', 'boundary', 'lock-retry', 'lock-fairness',
     'black-resume', 'stale-early', 'submit-failure', 'finish-failure',
     'settled', 'slow-early', 'fairness', 'ignored-release', 'source-invalidate',
     'color-backoff', 'latest-scene', 'urgent-black', 'coalesced-gates',

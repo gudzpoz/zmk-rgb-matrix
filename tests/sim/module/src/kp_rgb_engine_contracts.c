@@ -927,6 +927,19 @@ void kp_test_engine_run(void) {
         unsigned n = atomic_get(&writes); kp_rgb_matrix_lock(); zmk_rgb_matrix_flush();
         sleep_until(k_uptime_get() + 20); KP_CHECK(atomic_get(&writes) == n);
         kp_rgb_matrix_unlock(); wait_writes(n + 1);
+    } else if (!strcmp(name, "lock-fairness")) {
+        unsigned n = atomic_get(&writes), p = paints(0), e = events(0);
+        unsigned schedules = atomic_get(&output_schedules);
+        kp_rgb_matrix_lock();
+        obs[0].color = (struct led_rgb){.r = 99};
+        position(true, -321); zmk_rgb_matrix_flush();
+        barrier();
+        KP_CHECK(atomic_get(&output_schedules) >= schedules + 2);
+        KP_CHECK(atomic_get(&writes) == n && paints(0) == p && events(0) == e);
+        kp_rgb_matrix_unlock(); wait_writes(n + 1); settled();
+        KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + 1);
+        KP_CHECK(events(0) == e + 1 && obs[0].timestamp == -321);
+        check_all(n, 99);
     } else if (!strcmp(name, "feedback") || !strcmp(name, "purge") || !strcmp(name, "ignored-release")) {
         unsigned p = paints(0), n = atomic_get(&writes);
         if (!strcmp(name, "purge")) {

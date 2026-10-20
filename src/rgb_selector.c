@@ -53,7 +53,7 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector) {
   return selector->active_fx == NULL ? -ENOENT : 0;
 }
 
-int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
+void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
   for (size_t i = 0; i < selector->effect_count; i++) {
     const struct device *fx = kp_rgb_selector_at(selector, i);
     if (fx == NULL) {
@@ -64,8 +64,6 @@ int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
     data->color = def->color;
     data->duration_ms = def->duration_ms;
   }
-  selector->effect_index = selector->initial_effect;
-  return kp_rgb_selector_resolve_locked(selector);
 }
 
 int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,

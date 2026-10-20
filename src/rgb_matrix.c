@@ -216,19 +216,8 @@ void kp_rgb_set_clock_offset(int32_t offset_ms) {
   atomic_set(&kp_rgb_clock_offset_ms, (atomic_val_t)offset_ms);
 }
 
-/* The lock is never held across flash I/O. Bound the wait so a stuck holder
- * warns instead of hanging the queue. */
+#define KP_RGB_LOCK_WAIT_MS 8
 #define KP_RGB_LOCK_RETRY_MS 1
-#define KP_RGB_LOCK_RETRIES 8
-
-static bool kp_rgb_matrix_lock_patiently(void) {
-  for (int attempt = 0; attempt < KP_RGB_LOCK_RETRIES; attempt++) {
-    if (k_mutex_lock(&kp_rgb_lock, K_MSEC(KP_RGB_LOCK_RETRY_MS)) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
 
 static void kp_rgb_output_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(kp_output_work, kp_rgb_output_handler);
@@ -488,7 +477,7 @@ static void kp_rgb_attempt_output_locked(void) {
 static void kp_rgb_output_handler(struct k_work *work) {
   ARG_UNUSED(work);
   kp_rgb_begin_output_pass();
-  if (!kp_rgb_matrix_lock_patiently()) {
+  if (k_mutex_lock(&kp_rgb_lock, K_MSEC(KP_RGB_LOCK_WAIT_MS)) != 0) {
     LOG_WRN("Failed to obtain RGB matrix lock");
     kp_rgb_finish_output_pass(k_uptime_get() + KP_RGB_LOCK_RETRY_MS, true);
     return;

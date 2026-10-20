@@ -162,11 +162,12 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
   if (selector == NULL)
     return -ENODEV;
   struct kp_selector_data *data = dev->data;
-  int err = kp_rgb_selector_apply_defaults_locked(selector);
-  if (kp_rgb_selector_at(selector, selector->initial_effect) == NULL) {
-    selector->effect_index = 0;
-    err = kp_rgb_selector_resolve_locked(selector);
-  }
+  kp_rgb_selector_apply_defaults_locked(selector);
+  selector->effect_index =
+      kp_rgb_selector_at(selector, selector->initial_effect) != NULL
+          ? selector->initial_effect
+          : 0;
+  int err = kp_rgb_selector_resolve_locked(selector);
   data->reset_requested = true;
   zmk_rgb_matrix_flush();
   return err;
@@ -325,9 +326,7 @@ static void kp_selector_defaults_locked(const struct device *dev) {
     (void)kp_rgb_selector_overlay_reset_locked(dev);
     return;
   }
-  struct kp_rgb_selector defaults = data->selector;
-  defaults.publish_changes = false;
-  kp_rgb_selector_apply_defaults_locked(&defaults);
+  kp_rgb_selector_apply_defaults_locked(&data->selector);
   data->selector.effect_index = data->selector.initial_effect;
   data->selector.active_fx = NULL;
   data->reset_requested = true;

@@ -57,7 +57,7 @@ int kp_rgb_selector_member_slot(const struct kp_rgb_selector *selector,
 void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,
                                     const struct device *previous);
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector);
-int kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector);
+void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector);
 /* Returns 1 when selection changed, 0 when unchanged, or a negative error. */
 int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,
                                   uint16_t slot);

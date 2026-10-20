@@ -569,6 +569,72 @@ static void scoped_reset(void) {
     kp_rgb_matrix_unlock();
 }
 static atomic_t events_a, events_b;
+static void check_reset_parameters(void) {
+    const struct kp_rgb_effect_common_data *a = kp_rgb_effect_data(DEV(probe_a));
+    const struct kp_rgb_effect_common_data *c = kp_rgb_effect_data(DEV(probe_c));
+    KP_CHECK(a->color.h == 120 && a->color.s == 100 && a->color.b == 100);
+    KP_CHECK(c->color.h == 240 && c->color.s == 100 && c->color.b == 100);
+    KP_CHECK(a->duration_ms == 1000 && c->duration_ms == 1000);
+}
+static void prestart_reset_prepare(void) {
+    struct kp_rgb_selector *a = NULL;
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+        struct kp_rgb_selector *candidate = kp_rgb_selector_registry_at(i);
+        if (candidate->owner == DEV(selector_a)) a = candidate;
+    }
+    KP_CHECK(a != NULL && a->effect_count == 3 && a->initial_effect == 1);
+    kp_rgb_matrix_lock();
+    unsigned callbacks = callback_count();
+    unsigned publications = atomic_get(&events_a);
+    KP_CHECK(kp_rgb_selector_select_locked(a, 2) == 1);
+    struct kp_rgb_hsb changed = {31, 41, 51};
+    kp_rgb_effect_data(DEV(probe_a))->color = changed;
+    kp_rgb_effect_data(DEV(probe_c))->color = changed;
+    kp_rgb_effect_data(DEV(probe_a))->duration_ms = 4321;
+    kp_rgb_effect_data(DEV(probe_c))->duration_ms = 4321;
+    kp_rgb_selector_overlays_defaults_locked();
+    KP_CHECK(a->effect_index == a->initial_effect && a->active_fx == NULL);
+    check_reset_parameters();
+    KP_CHECK(!a->publish_changes && zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    KP_CHECK(!a->notification_pending && callback_count() == callbacks);
+    KP_CHECK(atomic_get(&events_a) == publications);
+    kp_rgb_matrix_unlock();
+}
+static void reset_fallback(void) {
+    wait_ready();
+    KP_CHECK(zmk_rgb_matrix_off() == 0);
+    uint16_t start = kp_test_case("control-reset-fallback-noop") ? 0 : 2;
+    kp_rgb_matrix_lock();
+    struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
+    KP_CHECK(a != NULL && a->initial_effect == 1);
+    KP_CHECK(kp_rgb_selector_select_locked(a, start) >= 0);
+    kp_rgb_matrix_unlock();
+    k_sleep(K_MSEC(50));
+    kp_rgb_matrix_lock();
+    KP_CHECK(!a->notification_pending);
+    unsigned callbacks = callback_count();
+    unsigned publications = atomic_get(&events_a);
+    struct kp_rgb_hsb changed = {31, 41, 51};
+    kp_rgb_effect_data(DEV(probe_a))->color = changed;
+    kp_rgb_effect_data(DEV(probe_c))->color = changed;
+    kp_rgb_effect_data(DEV(probe_a))->duration_ms = 4321;
+    kp_rgb_effect_data(DEV(probe_c))->duration_ms = 4321;
+    KP_CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
+    KP_CHECK(a->active_fx == DEV(probe_a) && a->effect_index == 0);
+    check_reset_parameters();
+    KP_CHECK(callback_count() == callbacks && atomic_get(&events_a) == publications);
+    KP_CHECK(a->notification_pending == (start == 2));
+    kp_rgb_matrix_unlock();
+    k_sleep(K_MSEC(50));
+    KP_CHECK(atomic_get(&events_a) == publications + (start == 2 ? 1 : 0));
+}
+static void reset_prestart_result(void) {
+    wait_ready();
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    check_reset_parameters();
+    KP_CHECK(atomic_get(&events_a) == 1);
+}
+
 static bool reenter;
 static int listener(const zmk_event_t *eh) {
     const struct zmk_rgb_selector_selection_changed *ev = as_zmk_rgb_selector_selection_changed(eh);
@@ -720,6 +786,7 @@ static void deferred_prepare(void) {
 }
 static int control_prepare(void) {
     if (kp_test_case("control-early")) early_prepare();
+    if (kp_test_case("control-reset-prestart")) prestart_reset_prepare();
     if (kp_test_case("control-deferred") || kp_test_case("control-unready")) deferred_prepare();
     return 0;
 }
@@ -754,6 +821,8 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-validation")) validation();
     else if (kp_test_case("control-global-commands")) global_commands();
     else if (kp_test_case("control-reset")) scoped_reset();
+    else if (kp_test_case("control-reset-fallback-noop") || kp_test_case("control-reset-fallback-notify")) reset_fallback();
+    else if (kp_test_case("control-reset-prestart")) reset_prestart_result();
     else if (kp_test_case("control-publication")) publication();
     else if (kp_test_case("control-deferred") || kp_test_case("control-unready")) deferred();
     else if (kp_test_case("control-owner")) owner_callbacks();
