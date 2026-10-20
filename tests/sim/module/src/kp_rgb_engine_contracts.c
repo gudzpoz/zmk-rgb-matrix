@@ -529,16 +529,16 @@ static void lifecycle_batch(void) {
     enum { PROVIDERS = 4 };
     uint16_t gates[PROVIDERS] = {0};
     const struct device *const *registry = kp_rgb_overlay_list();
-    unsigned registered = 0, holes = 0;
+    unsigned registered = 0;
     for (size_t i = 0; i < kp_rgb_overlay_count(); i++) {
-        if (!registry[i]) { holes++; continue; }
+        KP_CHECK(registry[i] != NULL);
         unsigned s = slot(registry[i]);
         const struct kp_rgb_overlay_common_data *data = registry[i]->data;
         KP_CHECK(s < PROVIDERS && i < 16 && !gates[s] && data->index == i);
         gates[s] = BIT(i);
         registered++;
     }
-    KP_CHECK(registered == PROVIDERS && holes > 0);
+    KP_CHECK(registered == PROVIDERS && kp_rgb_overlay_count() == PROVIDERS);
 
     kp_rgb_matrix_lock();
     obs[2].animate = false;

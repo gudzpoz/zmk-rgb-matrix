@@ -13,7 +13,9 @@
  */
 #define KP_OVERLAY_SLOTS MAX(1, KP_RGB_OVERLAY_COUNT)
 
-static const struct device *kp_overlay_registry[KP_OVERLAY_SLOTS];
+#define KP_OVERLAY_ENTRY(node_id) DEVICE_DT_GET(node_id),
+static const struct device *const kp_overlay_registry[KP_OVERLAY_SLOTS] = {
+    DT_FOREACH_CHILD_STATUS_OKAY(KP_RGB_NODE, KP_OVERLAY_ENTRY)};
 static uint16_t kp_overlay_state[KP_RGB_OVERLAY_WORDS];
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -25,13 +27,6 @@ static uint16_t kp_overlay_sent[KP_RGB_OVERLAY_WORDS];
 
 #endif
 
-void kp_rgb_overlay_register(const struct device *dev) {
-  const struct kp_rgb_overlay_common_data *data = dev->data;
-  kp_overlay_registry[data->index] = dev;
-}
-
-/* Every registered overlay, in container order; slots not yet registered are
- * NULL and skipped by the callers. */
 const struct device *const *kp_rgb_overlay_list(void) {
   return kp_overlay_registry;
 }
@@ -80,9 +75,8 @@ bool kp_rgb_overlay_gate(const struct device *dev) {
 }
 
 void kp_rgb_overlay_conditions_init(void) {
-  for (size_t i = 0; i < ARRAY_SIZE(kp_overlay_registry); i++) {
+  for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
     const struct device *dev = kp_overlay_registry[i];
-    if (!dev) continue;
     const struct kp_rgb_overlay_api *api = dev->api;
     const struct kp_rgb_overlay_common_data *data = dev->data;
     if (data->local || !IS_ENABLED(CONFIG_ZMK_SPLIT) ||
@@ -97,9 +91,8 @@ bool kp_rgb_overlay_refresh(void) {
   bool changed = false;
   uint16_t next[KP_RGB_OVERLAY_WORDS] = {0};
 
-  for (size_t i = 0; i < ARRAY_SIZE(kp_overlay_registry); i++) {
+  for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
     const struct device *dev = kp_overlay_registry[i];
-    if (!dev) continue;
     const struct kp_rgb_overlay_api *api = dev->api;
     struct kp_rgb_overlay_common_data *data = dev->data;
     if (!data->local && IS_ENABLED(CONFIG_ZMK_SPLIT) &&

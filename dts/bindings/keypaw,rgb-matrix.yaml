@@ -13,10 +13,9 @@ description: |
   brightness and reset. Its effective device name must be at most eight
   characters and match on both split halves.
 
-  Direct children are overlays in composition order. Their child indices,
-  including disabled children, address gate bits on the split link. Keep the
-  same child order on both halves. Conditions, triggers and selector controls
-  belong outside this node; effects belong under their overlay owners.
+  Enabled direct children are overlays in composition order. Disabled children
+  reserve no holes. For split keyboards, both halves should have the same
+  enabled overlay sequence.
 
 compatible: "keypaw,rgb-matrix"
 

@@ -403,17 +403,19 @@ struct kp_rgb_overlay_common_data {
   bool gate;        /* worker-published local gate */
 };
 
-/* One state bit per ordinal, in ceil(count / 16) uint16_t words. Sized from the
- * devicetree, so there is no fixed cap on the overlay count. */
-#define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM(KP_RGB_NODE)
+/* Both halves must use the same enabled overlay sequence for split gate bits. */
+#define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM_STATUS_OKAY(KP_RGB_NODE)
 #define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
+#define KP_RGB_OVERLAY_INDEX(node_id)                                          \
+  UTIL_CAT(kp_rgb_overlay_index_, DT_DEP_ORD(node_id))
+#define KP_RGB_OVERLAY_INDEX_ENTRY(node_id) KP_RGB_OVERLAY_INDEX(node_id),
 
-/* Register during device initialization, before automatic control startup.
- * dev must have non-NULL data beginning with kp_rgb_overlay_common_data.
- * Manual registrants must set index to their direct-child ordinal under
- * KP_RGB_NODE, representable in uint16_t and below KP_RGB_OVERLAY_COUNT.
- * KP_RGB_OVERLAY_DEFINE supplies these guarantees. */
-void kp_rgb_overlay_register(const struct device *dev);
+#if DT_HAS_COMPAT_STATUS_OKAY(keypaw_rgb_matrix)
+enum {
+  DT_FOREACH_CHILD_STATUS_OKAY(KP_RGB_NODE, KP_RGB_OVERLAY_INDEX_ENTRY)
+  kp_rgb_overlay_index_count,
+};
+#endif
 
 /* The most targets an overlay can resolve. */
 #define KP_RGB_OVERLAY_TARGET_CAP(node_id)                                     \
@@ -475,10 +477,8 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
                        (const void *)&cfg_inst##_data.common,                  \
                "overlay data must embed struct kp_rgb_overlay_common_data "    \
                "as the first field");                                          \
-  BUILD_ASSERT(DT_SAME_NODE(DT_PARENT(DT_DRV_INST(inst)), KP_RGB_NODE),        \
-               "overlay must be a child of the keypaw,rgb-matrix node");       \
-  BUILD_ASSERT(DT_NODE_CHILD_IDX(DT_DRV_INST(inst)) <= UINT16_MAX,             \
-               "overlay ordinal must fit uint16_t");                           \
+  BUILD_ASSERT(KP_RGB_OVERLAY_INDEX(DT_DRV_INST(inst)) <= UINT16_MAX,          \
+               "overlay index must fit uint16_t");                             \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) >= 0 &&             \
                    DT_PROP_OR(DT_DRV_INST(inst), opacity, 100) <= 100,         \
                "overlay opacity must be 0..100");                              \
