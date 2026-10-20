@@ -11,7 +11,7 @@ from native_build import MODULE, build
 from native_process import run_logged
 
 FIXTURE = Path(__file__).resolve().parent / "config-static-metadata"
-CASES = ("dense", "zero-leds", "zero-overlays", "disabled-overlays", "large")
+CASES = ("dense", "zero-leds", "zero-overlays", "disabled-overlays", "large", "ordinal-boundary")
 
 
 def main():
@@ -26,7 +26,14 @@ def main():
     print(f"Static metadata artifacts: {root}", flush=True)
     cases = list(dict.fromkeys(args.case or CASES))
     for name in cases:
-        fragment = f'#include "{FIXTURE / (name + ".overlay")}"\n'
+        fixture = 'dense' if name == 'ordinal-boundary' else name
+        fragment = f'#include "{FIXTURE / (fixture + ".overlay")}"\n'
+        if name == 'ordinal-boundary':
+            fragment += '/ { ordinal_boundary: ordinal_boundary {}; };\n&rgb_conditions {\n'
+            fragment += '\n'.join(
+                f'ordinal_{i} {{ compatible = "test,rgb-static-condition-b"; }};'
+                for i in range(128))
+            fragment += '\n};\n'
         flag = ("KEYPAW_SIM_STATIC_METADATA_LARGE_TEST" if name == "large" else
                 "KEYPAW_SIM_STATIC_METADATA_TEST")
         result = build(root, name, fragment, selectors="", extra_conf=

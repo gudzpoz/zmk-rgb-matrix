@@ -23,13 +23,6 @@ struct kp_rgb_condition_list_config {
 #define KP_RGB_CONDITION_AT_IDX(idx, node_id)                                  \
   DEVICE_DT_GET(DT_PROP_BY_IDX(node_id, conditions, idx))
 
-static inline const struct device *const *
-kp_rgb_condition_list_dependencies(const struct device *dev, size_t *count) {
-  const struct kp_rgb_condition_list_config *cfg = dev->config;
-  *count = cfg->count;
-  return cfg->conditions;
-}
-
 #define KP_RGB_CONDITION_LIST_DEFINE(inst, api)                                \
   KP_RGB_CONDITION_LIST_ASSERT_NON_EMPTY(DT_DRV_INST(inst));                   \
   static const struct device *const kp_rgb_cond_##inst##_conditions[] = {      \

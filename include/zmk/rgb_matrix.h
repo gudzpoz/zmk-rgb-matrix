@@ -324,8 +324,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 /* Conditions are sampled on the control worker, never by a renderer. A variable
  * source must invalidate after a synchronized update; there is no polling fallback.
  * Timed providers must arrange their own wakeups and invalidate when due.
- * Dependencies are immutable, lifetime-long metadata; samples may only read their
- * declared children's cached values, and must not execute actions or LED I/O.
  */
 enum kp_rgb_condition_scope {
   KP_RGB_CONDITION_ANY_SIDE = 0,
@@ -336,8 +334,6 @@ struct kp_rgb_condition_api {
   enum kp_rgb_condition_scope scope;
   /* Return true when active. Must not synchronously invalidate any condition. */
   bool (*sample)(const struct device *dev);
-  const struct device *const *(*dependencies)(const struct device *dev,
-                                              size_t *count);
 };
 
 /* Any-context, non-blocking notification. NULL/unregistered devices are errors.
@@ -355,11 +351,7 @@ bool kp_rgb_condition_value(const struct device *condition);
  * providers must not access the registration or embed engine state in their data.
  */
 #define KP_RGB_CONDITION_DEFINE(inst, api_expr, cfg_expr, data_expr)           \
-  static STRUCT_SECTION_ITERABLE(                                              \
-      kp_rgb_condition_registration,                                           \
-      UTIL_CAT(kp_rgb_condition_, DT_DEP_ORD(DT_DRV_INST(inst)))) = {          \
-      .dev = DEVICE_DT_GET(DT_DRV_INST(inst)),                                 \
-  };                                                                           \
+  KP_RGB_CONDITION_REGISTRATION_DEFINE(DT_DRV_INST(inst))                      \
   DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, data_expr, cfg_expr,         \
                    POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, api_expr)
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 description: Test condition invalidated by selector selection events
 compatible: "test,rgb-selector-event-condition"
-include: base.yaml
+include: keypaw,rgb-condition-common.yaml
 properties:
   selector:
     type: phandle

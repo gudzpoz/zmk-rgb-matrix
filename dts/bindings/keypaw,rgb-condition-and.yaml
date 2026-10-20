@@ -12,6 +12,7 @@ description: |
   not reference a central-only source, including through nested combinators.
 
 compatible: "keypaw,rgb-condition-and"
+include: keypaw,rgb-condition-common.yaml
 
 properties:
   conditions:

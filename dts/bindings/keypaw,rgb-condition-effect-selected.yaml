@@ -15,6 +15,7 @@ description: |
   sharing the condition between sibling overlays are supported.
 
 compatible: "keypaw,rgb-condition-effect-selected"
+include: keypaw,rgb-condition-common.yaml
 
 properties:
   selector:

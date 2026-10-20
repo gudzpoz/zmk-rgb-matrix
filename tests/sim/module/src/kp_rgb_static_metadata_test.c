@@ -3,6 +3,8 @@
  */
 #define DT_DRV_COMPAT test_rgb_static_overlay
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <zmk/rgb_matrix.h>
@@ -96,6 +98,23 @@ BUILD_ASSERT(KP_RGB_OVERLAY_COUNT == 0);
 BUILD_ASSERT(KP_RGB_OVERLAY_WORDS == 1);
 #endif
 
+#if DT_NODE_EXISTS(DT_NODELABEL(static_cond_b))
+extern struct kp_rgb_condition_registration
+    KP_RGB_CONDITION_REGISTRATION(DT_NODELABEL(static_cond_b));
+#endif
+#define CONDITION_ORDINAL(node_id) {DEVICE_DT_GET(node_id), DT_DEP_ORD(node_id)},
+static const struct { const struct device *dev; unsigned ordinal; } condition_ordinals[] = {
+    DT_FOREACH_STATUS_OKAY(test_rgb_static_condition_a, CONDITION_ORDINAL)
+    DT_FOREACH_STATUS_OKAY(test_rgb_static_condition_b, CONDITION_ORDINAL)
+};
+#if DT_NODE_EXISTS(DT_NODELABEL(ordinal_boundary))
+BUILD_ASSERT(ARRAY_SIZE(condition_ordinals) == 130);
+#elif DT_NODE_EXISTS(DT_NODELABEL(static_cond_a))
+BUILD_ASSERT(ARRAY_SIZE(condition_ordinals) == 2);
+#else
+BUILD_ASSERT(ARRAY_SIZE(condition_ordinals) == 0);
+#endif
+
 static bool pre_kernel_ok;
 static size_t early_condition_count;
 static int inspect_before_init(void) {
@@ -115,22 +134,46 @@ static int inspect_before_init(void) {
         }
     }
 #endif
+    unsigned previous_ordinal = 0;
+    bool unpadded_order_wrong = false;
+    char previous_text[16] = "";
     STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, record) {
 #if DT_NODE_EXISTS(DT_NODELABEL(static_cond_a))
-        ok &= record->dev == DEVICE_DT_GET(DT_NODELABEL(static_cond_a)) ||
-              record->dev == DEVICE_DT_GET(DT_NODELABEL(static_cond_b));
+        unsigned ordinal = 0;
+        for (size_t i = 0; i < ARRAY_SIZE(condition_ordinals); i++)
+            if (condition_ordinals[i].dev == record->dev) ordinal = condition_ordinals[i].ordinal;
+        ok &= ordinal > previous_ordinal;
+        char text[16];
+        snprintf(text, sizeof(text), "%u", ordinal);
+        unpadded_order_wrong |= previous_ordinal && strcmp(previous_text, text) > 0;
+        strcpy(previous_text, text);
+        previous_ordinal = ordinal;
+        if (record->dev == DEVICE_DT_GET(DT_NODELABEL(static_cond_a))) {
+            ok &= record->dep_count == 1 && record->deps != NULL;
+            if (record->deps) ok &= record->deps[0] ==
+                &KP_RGB_CONDITION_REGISTRATION(DT_NODELABEL(static_cond_b));
+            if (record->deps) ok &= record->deps[0]->dev == DEVICE_DT_GET(DT_NODELABEL(static_cond_b));
+        } else {
+            ok &= record->dep_count == 0 && record->deps == NULL;
+        }
 #else
         ok = false;
 #endif
-        ok &= record->rank == 0 && record->dep_count == 0 && record->deps == NULL;
-        ok &= !record->pending && !record->live && !record->resolved;
+        ok &= !record->pending && !record->live;
         ok &= !record->fault && !record->sampled && !record->value && !record->dirty;
         /* Exercise writable iterable storage without leaving engine state altered. */
-        record->rank = 73;
-        ok &= record->rank == 73;
-        record->rank = 0;
+        record->dirty = true;
+        ok &= record->dirty;
+        record->dirty = false;
         early_condition_count++;
     }
+#if DT_NODE_EXISTS(DT_NODELABEL(ordinal_boundary))
+    ok &= unpadded_order_wrong;
+#else
+    ARG_UNUSED(unpadded_order_wrong);
+    ARG_UNUSED(previous_ordinal);
+    ARG_UNUSED(previous_text);
+#endif
     pre_kernel_ok = ok;
     return 0;
 }
@@ -158,6 +201,7 @@ static atomic_t samples_a;
 static bool sample_a(const struct device *dev) {
     ARG_UNUSED(dev);
     atomic_inc(&samples_a);
+    CHECK(kp_rgb_condition_value(DEVICE_DT_GET(DT_NODELABEL(static_cond_b))));
     return true;
 }
 static const struct kp_rgb_condition_api condition_api = {
@@ -198,7 +242,7 @@ static void scenario(void *a, void *b, void *c) {
     CHECK(device_is_ready(DEVICE_DT_GET(DT_NODELABEL(rgb_matrix))));
     CHECK(KP_RGB_OVERLAY_COUNT == ARRAY_SIZE(expected));
 #if DT_NODE_EXISTS(DT_NODELABEL(sm00))
-    CHECK(early_condition_count == 2);
+    CHECK(early_condition_count == ARRAY_SIZE(condition_ordinals));
     CHECK(atomic_get(&samples_a) > 0 && kp_rgb_static_samples_b() > 0);
     CHECK(KP_RGB_OVERLAY_WORDS == 2);
     CHECK(kp_rgb_overlay_get_word(0) == 0xffff);

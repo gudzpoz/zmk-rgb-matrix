@@ -19,11 +19,13 @@
     "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
 struct source {
     atomic_t value, calls, notify, pause;
-    const struct device *deps[3];
-    size_t dep_count;
-    bool bad_metadata, short_circuit;
+    bool short_circuit;
 };
-struct source_config { const struct device *selector, *effect; };
+struct source_config {
+    const struct device *selector, *effect;
+    const struct device *const *deps;
+    size_t dep_count;
+};
 K_SEM_DEFINE(sample_entered, 0, 1);
 K_SEM_DEFINE(sample_release, 0, 1);
 static atomic_t notifications, notifications_b, reenter, irq_calls;
@@ -48,28 +50,26 @@ static bool sample(const struct device *dev) {
     }
     if (cfg->selector)
         value = zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
-    for (size_t i = 0; i < s->dep_count; i++) {
+    for (size_t i = 0; i < cfg->dep_count; i++) {
         if (s->short_circuit && !value) break;
-        value &= kp_rgb_condition_value(s->deps[i]);
+        value &= kp_rgb_condition_value(cfg->deps[i]);
     }
     if (atomic_cas(&s->notify, 1, 0))
         kp_rgb_condition_invalidate(dev);
     return value;
 }
-static const struct device *const *dependencies(const struct device *dev, size_t *count) {
-    struct source *s = dev->data;
-    *count = s->dep_count;
-    return s->bad_metadata ? NULL : s->deps;
-}
+#define DEP_DEVICE(node_id, prop, idx) DEVICE_DT_GET(DT_PHANDLE_BY_IDX(node_id, prop, idx)),
 #define DEFINE(inst) \
-    static struct source source_##inst; \
     COND_CODE_1(DT_INST_PROP(inst, unregistered), (), ( \
-        static STRUCT_SECTION_ITERABLE(kp_rgb_condition_registration, \
-            UTIL_CAT(kp_rgb_condition_, DT_DEP_ORD(DT_DRV_INST(inst)))) = { \
-                .dev = DEVICE_DT_INST_GET(inst), \
-            }; \
+        KP_RGB_CONDITION_REGISTRATION_DEFINE(DT_DRV_INST(inst)); \
     )) \
+    static struct source source_##inst; \
+    static const struct device *const deps_##inst[] = { \
+        COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, conditions), \
+            (DT_INST_FOREACH_PROP_ELEM(inst, conditions, DEP_DEVICE)), ()) \
+    }; \
     static const struct source_config config_##inst = { \
+        .deps = deps_##inst, .dep_count = ARRAY_SIZE(deps_##inst), \
         .selector = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, selected_selector), \
             (DEVICE_DT_GET(DT_INST_PHANDLE(inst, selected_selector))), (NULL)), \
         .effect = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, selected_effect), \
@@ -78,7 +78,7 @@ static const struct device *const *dependencies(const struct device *dev, size_t
     static const struct kp_rgb_condition_api api_##inst = { \
         .scope = DT_INST_PROP(inst, invalid_scope) ? 99 : \
             (DT_INST_PROP(inst, central_only) ? KP_RGB_CONDITION_CENTRAL_ONLY : KP_RGB_CONDITION_ANY_SIDE), \
-        .sample = sample, .dependencies = dependencies, \
+        .sample = sample, \
     }; \
     static int init_##inst(const struct device *dev) { \
         ARG_UNUSED(dev); \
@@ -87,13 +87,6 @@ static const struct device *const *dependencies(const struct device *dev, size_t
     DEVICE_DT_INST_DEFINE(inst, init_##inst, NULL, &source_##inst, &config_##inst, \
         POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, &api_##inst);
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
-
-/* Deliberately a real device without condition registration. */
-static const struct kp_rgb_condition_api missing_api = {
-    .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample,
-};
-DEVICE_DEFINE(cc_missing, "cc_missing", NULL, NULL, NULL, NULL,
-              POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, &missing_api);
 
 static struct source *src(const struct device *dev) { return dev->data; }
 static unsigned calls(const struct device *dev) { return atomic_get(&src(dev)->calls); }
@@ -106,11 +99,6 @@ static bool gate(const struct device *dev) {
     bool value = kp_rgb_overlay_gate(dev);
     kp_rgb_matrix_unlock();
     return value;
-}
-static void link(const struct device *parent, const struct device *child) {
-    struct source *s = src(parent);
-    KP_CHECK(s->dep_count < ARRAY_SIZE(s->deps));
-    s->deps[s->dep_count++] = child;
 }
 K_SEM_DEFINE(drained, 0, 1);
 static void drain_handler(struct k_work *work) { ARG_UNUSED(work); k_sem_give(&drained); }
@@ -215,19 +203,8 @@ static void resume(void) { k_sem_give(&sample_release); drain(); }
 
 static void graph_prepare(void) {
     const struct device *root = DEV(cc_root), *left = DEV(cc_left), *right = DEV(cc_right), *leaf = DEV(cc_leaf);
-    if (kp_test_case("cycle")) { link(root, left); link(left, right); link(right, left); }
-    else if (kp_test_case("missing")) link(root, DEVICE_GET(cc_missing));
-    else if (kp_test_case("metadata")) { src(root)->dep_count = 1; src(root)->bad_metadata = true; }
-    else if (kp_test_case("unready")) link(root, DEV(cc_unready));
-    else if (kp_test_case("invalid-scope")) link(root, DEV(cc_bad));
-    else if (kp_test_case("scope")) { link(root, left); link(left, DEV(cc_central)); }
-    else if (kp_test_case("sample-notification")) atomic_set(&src(root)->notify, 1);
-    else {
-        link(root, left); link(root, right); link(left, leaf); link(right, leaf);
-        if (kp_test_case("short-circuit")) {
-            src(root)->short_circuit = true;
-        }
-    }
+    if (kp_test_case("sample-notification")) atomic_set(&src(root)->notify, 1);
+    if (kp_test_case("short-circuit")) src(root)->short_circuit = true;
     for (size_t i = 0; i < 4; i++) {
         const struct device *devs[] = {root, left, right, leaf};
         atomic_set(&src(devs[i])->value, true);
@@ -238,12 +215,11 @@ static void graph_prepare(void) {
 static void graph_cases(void) {
     const struct device *root = DEV(cc_root), *left = DEV(cc_left), *right = DEV(cc_right), *leaf = DEV(cc_leaf);
     wait_ready();
-    bool good = kp_test_case("dag") || kp_test_case("short-circuit") || (kp_test_case("scope") && !peripheral());
+    bool good = kp_test_case("dag") || kp_test_case("chain") || kp_test_case("combinators") || kp_test_case("short-circuit") || (kp_test_case("scope") && !peripheral());
     KP_CHECK(kp_rgb_condition_valid(root) == good);
     if (!good) {
         KP_CHECK(!gate(DEV(ordinary)));
-        if (kp_test_case("cycle") || kp_test_case("missing") || kp_test_case("metadata") ||
-            kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope"))
+        if (kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope"))
             KP_CHECK(calls(root) == 0);
         if (kp_test_case("scope")) KP_CHECK(calls(DEV(cc_central)) == 0);
         for (unsigned n = 0; n < action_count; n++)
@@ -268,13 +244,15 @@ static void graph_cases(void) {
         set(leaf, false); drain();
         KP_CHECK(calls(root) == 2 && calls(left) == 2 && calls(right) == 2 && calls(leaf) == 2);
         KP_CHECK(!gate(DEV(ordinary)));
+        kp_rgb_condition_invalidate(leaf); drain();
+        KP_CHECK(calls(root) == 3 && calls(left) == 3 && calls(right) == 3 && calls(leaf) == 3);
+        KP_CHECK(!gate(DEV(ordinary)));
     }
 }
 
 static void timing_prepare(void) {
     const struct device *root = DEV(cc_root);
     if (kp_test_case("external-timer")) {
-        link(root, DEV(cc_leaf));
         atomic_set(&src(root)->value, true);
         atomic_set(&src(DEV(cc_leaf))->value, false);
     }
@@ -483,7 +461,7 @@ static void overlay_cases(void) {
 }
 
 static int auto_prepare(void) {
-    const char *graphs[] = {"dag", "cycle", "missing", "metadata", "unready", "invalid-scope",
+    const char *graphs[] = {"dag", "chain", "combinators", "unready", "invalid-scope",
         "scope", "sample-notification", "short-circuit"};
     const char *timings[] = {"startup", "same-value", "isr", "refresh", "refresh-interrupted",
         "early-refresh", "external-timer"};
@@ -695,8 +673,8 @@ void kp_test_conditions_run(void) {
         kp_test_case("startup-settings-staged") ||
         kp_test_case("overlay-zero") || kp_test_case("trigger-no-table") ||
         kp_test_case("trigger-actions") || kp_test_case("trigger-unregistered-root")) special_cases();
-    else if (kp_test_case("dag") || kp_test_case("cycle") || kp_test_case("missing") ||
-        kp_test_case("metadata") || kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
+    else if (kp_test_case("dag") || kp_test_case("chain") || kp_test_case("combinators") ||
+        kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
         kp_test_case("sample-notification") ||
         kp_test_case("short-circuit")) graph_cases();
     else if (kp_test_case("startup") || kp_test_case("same-value") || kp_test_case("isr") ||

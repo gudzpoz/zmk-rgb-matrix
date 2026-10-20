@@ -16,5 +16,6 @@ unsigned kp_rgb_static_samples_b(void) { return atomic_get(&samples); }
 static const struct kp_rgb_condition_api api = {
     .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample,
 };
-KP_RGB_CONDITION_DEFINE(0, &api, NULL, NULL);
+#define DEFINE(inst) KP_RGB_CONDITION_DEFINE(inst, &api, NULL, NULL);
+DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 #endif

@@ -3,7 +3,7 @@
 / {
     rgb_conditions: static_conditions {
         compatible = "keypaw,rgb-conditions";
-        static_cond_a: a { compatible = "test,rgb-static-condition-a"; };
+        static_cond_a: a { compatible = "test,rgb-static-condition-a"; conditions = <&static_cond_b>; };
         static_cond_b: b { compatible = "test,rgb-static-condition-b"; };
     };
 };

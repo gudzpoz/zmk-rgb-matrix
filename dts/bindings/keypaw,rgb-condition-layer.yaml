@@ -11,6 +11,7 @@ description: |
   on both halves (a `local` overlay would call it there).
 
 compatible: "keypaw,rgb-condition-layer"
+include: keypaw,rgb-condition-common.yaml
 
 properties:
   layer:

@@ -9,8 +9,8 @@ from native_build import SELECTORS, build, run
 
 SCENARIOS = (
     'startup', 'dag', 'same-value', 'isr', 'external-timer', 'event-only',
-    'cycle', 'missing', 'scope', 'unused-scope',
-    'unready', 'metadata', 'invalid-scope', 'short-circuit', 'sample-notification',
+    'scope', 'unused-scope',
+    'unready', 'chain', 'combinators', 'invalid-scope', 'short-circuit', 'sample-notification',
     'refresh', 'refresh-interrupted', 'early-refresh', 'self-feedback', 'multi-feedback',
     'trigger-startup', 'trigger-capture', 'trigger-fault', 'trigger-errors',
     'initial-shared', 'scoped-listener', 'third-party', 'coalesced', 'reentrant',
@@ -130,21 +130,84 @@ VARIANTS = {
 ''', ''),
 }
 VARIANTS['held-source-refresh'] = VARIANTS['stale-source-refresh']
+VARIANTS.update({
+    'dag': ('diamond', '''
+&cc_root { conditions = <&cc_left &cc_right>; };
+&cc_left { conditions = <&cc_leaf>; };
+&cc_right { conditions = <&cc_leaf>; };
+''', ''),
+    'combinators': ('combinators', '''
+&cc_root { conditions = <&cc_all>; };
+&cc_left { conditions = <&cc_leaf>; };
+&cc_right { conditions = <&cc_leaf>; };
+&rgb_conditions {
+    cc_all: cc_all {
+        compatible = "keypaw,rgb-condition-and";
+        conditions = <&cc_left &cc_any>;
+    };
+    cc_any: cc_any {
+        compatible = "keypaw,rgb-condition-or";
+        conditions = <&cc_right &cc_leaf>;
+    };
+};
+''', ''),
+    'chain': ('chain', '''
+&cc_root { conditions = <&cc_left>; };
+&cc_left { conditions = <&cc_right>; };
+&cc_right { conditions = <&cc_leaf>; };
+''', ''),
+    'scope': ('scope', '&cc_root { conditions = <&cc_left>; }; &cc_left { conditions = <&cc_central>; };', ''),
+    'unready': ('unready', '&cc_root { conditions = <&cc_unready>; };', ''),
+    'invalid-scope': ('invalid-scope', '&cc_root { conditions = <&cc_bad>; };', ''),
+    'external-timer': ('timer', '&cc_root { conditions = <&cc_leaf>; };', ''),
+})
+VARIANTS['short-circuit'] = VARIANTS['dag']
 
 DIAGNOSTICS = {
-    'cycle': 'dependency cycle', 'missing': 'unregistered dependency',
-    'metadata': 'missing dependency metadata',
     'sample-notification': 'notification from sample callback',
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
     'startup-unready-selector': 'canonical control is not ready',
 }
 
+REJECTIONS = {
+    'cycle': ('&cc_root { conditions = <&cc_left>; }; &cc_left { conditions = <&cc_right>; }; &cc_right { conditions = <&cc_left>; };',
+              ('cycle in devicetree involving', 'cc_left', 'cc_right')),
+    'self': ('&cc_root { conditions = <&cc_root>; };',
+             ('condition dependency must precede its consumer',)),
+    'missing': ('&cc_root { conditions = <&cc_missing>; };',
+                ('undefined node label', 'cc_missing')),
+    'disabled': ('&cc_root { conditions = <&cc_leaf>; }; &cc_leaf { status = "disabled"; };',
+                 ('condition dependency must be enabled',)),
+    'noncondition': ('&cc_root { conditions = <&probe_a>; };',
+                     ('undefined reference', 'kp_rgb_condition_')),
+    'unregistered': ('&cc_root { conditions = <&cc_leaf>; }; &cc_leaf { unregistered; };',
+                     ('undefined reference', 'kp_rgb_condition_')),
+}
+
+
+def reject_graphs(root, role, fragment, conf, names):
+    # Same compiler/config/provider as the negative cases, with a registered edge.
+    image = f'{role}-dependency-positive'
+    addition = '&cc_root { conditions = <&cc_leaf>; };'
+    result = build(root, image, fragment + addition, selectors=SELECTOR_FIXTURE, extra_conf=conf)
+    if result.returncode:
+        raise AssertionError(f'{image} positive control failed:\n{result.stdout[-15000:]}')
+    run(root, image, 'external-timer')
+    for name in names:
+        addition, diagnostics = REJECTIONS[name]
+        image = f'{role}-reject-{name}'
+        result = build(root, image, fragment + addition, selectors=SELECTOR_FIXTURE, extra_conf=conf)
+        if not result.returncode or not all(text in result.stdout for text in diagnostics):
+            raise AssertionError(f'{image}: expected rejection {diagnostics!r}:\n{result.stdout[-15000:]}')
+        print(f'PASS {image} rejected with expected diagnostic', flush=True)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--scenario', action='append', choices=SCENARIOS)
+    parser.add_argument('--reject', action='append', choices=REJECTIONS)
     parser.add_argument('--repeat', type=int, default=1)
     parser.add_argument('--role', choices=('standalone', 'central', 'peripheral', 'all'), default='standalone')
     args = parser.parse_args()
@@ -162,7 +225,7 @@ def main():
             conf += f'CONFIG_ZMK_SPLIT_ROLE_CENTRAL={"y" if role == "central" else "n"}\n'
             fragment += '/ { chosen { zephyr,bt-hci = &cc_hci; }; cc_hci: cc_hci { compatible = "zephyr,bt-hci-userchan"; }; };'
         groups = {}
-        for scenario in args.scenario or SCENARIOS:
+        for scenario in args.scenario or (() if args.reject else SCENARIOS):
             variant = VARIANTS.get(scenario, ('automatic', '', ''))
             groups.setdefault(variant, []).append(scenario)
         for (variant, addition, options), scenarios in groups.items():
@@ -202,6 +265,8 @@ def main():
                     log = root / f'{image}-{scenario}.log'
                     log.rename(root / f'{image}-{scenario}-{iteration + 1}.log')
                     print(f'PASS {image} {scenario} iteration={iteration + 1}', flush=True)
+        if args.reject or not args.scenario:
+            reject_graphs(root, role, fragment, conf, args.reject or REJECTIONS)
 
 
 if __name__ == '__main__':
