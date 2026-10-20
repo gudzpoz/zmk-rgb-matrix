@@ -345,8 +345,7 @@ struct kp_rgb_condition_api {
  * Early notifications are subsumed by mandatory initial sampling.
  */
 void kp_rgb_condition_invalidate(const struct device *condition);
-/* Control-worker only. Returns a declared child's cache during sampling, or a
- * consumer root's cache after evaluation. Never invokes a provider.
+/* Control-worker only. Returns the cached value without invoking a provider.
  */
 bool kp_rgb_condition_value(const struct device *condition);
 

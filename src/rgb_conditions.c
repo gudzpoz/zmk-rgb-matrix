@@ -101,17 +101,6 @@ bool kp_rgb_condition_value(const struct device *dev) {
   if (!on_worker())
     return false;
 
-  if (sampling) {
-    bool declared = false;
-    for (size_t i = 0; i < sampling->dep_count; i++) {
-      declared |= sampling->deps[i] == dev;
-    }
-    if (!declared) {
-      fault(sampling, "undeclared dependency read");
-      return false;
-    }
-  }
-
   struct kp_rgb_condition_registration *e = lookup(dev);
   return e && e->sampled && !e->fault && e->value;
 }

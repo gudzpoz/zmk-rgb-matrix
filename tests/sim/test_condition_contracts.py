@@ -9,7 +9,7 @@ from native_build import SELECTORS, build, run
 
 SCENARIOS = (
     'startup', 'dag', 'same-value', 'isr', 'external-timer', 'event-only',
-    'cycle', 'missing', 'undeclared', 'scope', 'unused-scope',
+    'cycle', 'missing', 'scope', 'unused-scope',
     'unready', 'metadata', 'invalid-scope', 'short-circuit', 'sample-notification',
     'refresh', 'refresh-interrupted', 'early-refresh', 'self-feedback', 'multi-feedback',
     'trigger-startup', 'trigger-capture', 'trigger-fault', 'trigger-errors',
@@ -133,7 +133,7 @@ VARIANTS['held-source-refresh'] = VARIANTS['stale-source-refresh']
 
 DIAGNOSTICS = {
     'cycle': 'dependency cycle', 'missing': 'unregistered dependency',
-    'metadata': 'missing dependency metadata', 'undeclared': 'undeclared dependency read',
+    'metadata': 'missing dependency metadata',
     'sample-notification': 'notification from sample callback',
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
@@ -196,7 +196,7 @@ def main():
                     if role != 'peripheral' and scenario == 'trigger-unregistered-root':
                         assert 'Unregistered RGB condition root cc_noreg' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-fault':
-                        assert 'undeclared dependency read' in result.stdout
+                        assert 'notification from sample callback' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-errors':
                         assert 'binding 1' in result.stdout and 'err -5' in result.stdout
                     log = root / f'{image}-{scenario}.log'

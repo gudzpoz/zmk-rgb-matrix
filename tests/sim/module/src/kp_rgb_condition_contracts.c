@@ -18,7 +18,7 @@
 #define KP_TEST_SELECTOR_A_STATE \
     "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
 struct source {
-    atomic_t value, calls, undeclared, notify, pause;
+    atomic_t value, calls, notify, pause;
     const struct device *deps[3];
     size_t dep_count;
     bool bad_metadata, short_circuit;
@@ -52,8 +52,6 @@ static bool sample(const struct device *dev) {
         if (s->short_circuit && !value) break;
         value &= kp_rgb_condition_value(s->deps[i]);
     }
-    if (atomic_get(&s->undeclared))
-        (void)kp_rgb_condition_value(DEV(cc_unused));
     if (atomic_cas(&s->notify, 1, 0))
         kp_rgb_condition_invalidate(dev);
     return value;
@@ -223,7 +221,6 @@ static void graph_prepare(void) {
     else if (kp_test_case("unready")) link(root, DEV(cc_unready));
     else if (kp_test_case("invalid-scope")) link(root, DEV(cc_bad));
     else if (kp_test_case("scope")) { link(root, left); link(left, DEV(cc_central)); }
-    else if (kp_test_case("undeclared")) atomic_set(&src(root)->undeclared, 1);
     else if (kp_test_case("sample-notification")) atomic_set(&src(root)->notify, 1);
     else {
         link(root, left); link(root, right); link(left, leaf); link(right, leaf);
@@ -356,7 +353,7 @@ static void trigger_cases(void) {
         KP_CHECK(actions[0].timestamp == actions[3].timestamp);
     } else if (kp_test_case("trigger-fault")) {
         set(DEV(cc_root), true); drain(); unsigned before = action_count;
-        atomic_set(&src(DEV(cc_root))->undeclared, 1);
+        atomic_set(&src(DEV(cc_root))->notify, 1);
         kp_rgb_condition_invalidate(DEV(cc_root)); drain();
         KP_CHECK(!kp_rgb_condition_valid(DEV(cc_root)) && action_count == before);
         set(DEV(cc_root), false); drain(); KP_CHECK(action_count == before);
@@ -487,7 +484,7 @@ static void overlay_cases(void) {
 
 static int auto_prepare(void) {
     const char *graphs[] = {"dag", "cycle", "missing", "metadata", "unready", "invalid-scope",
-        "scope", "undeclared", "sample-notification", "short-circuit"};
+        "scope", "sample-notification", "short-circuit"};
     const char *timings[] = {"startup", "same-value", "isr", "refresh", "refresh-interrupted",
         "early-refresh", "external-timer"};
     for (size_t i = 0; i < ARRAY_SIZE(graphs); i++)
@@ -700,7 +697,7 @@ void kp_test_conditions_run(void) {
         kp_test_case("trigger-actions") || kp_test_case("trigger-unregistered-root")) special_cases();
     else if (kp_test_case("dag") || kp_test_case("cycle") || kp_test_case("missing") ||
         kp_test_case("metadata") || kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
-        kp_test_case("undeclared") || kp_test_case("sample-notification") ||
+        kp_test_case("sample-notification") ||
         kp_test_case("short-circuit")) graph_cases();
     else if (kp_test_case("startup") || kp_test_case("same-value") || kp_test_case("isr") ||
         kp_test_case("external-timer") || kp_test_case("refresh") || kp_test_case("refresh-interrupted") ||
