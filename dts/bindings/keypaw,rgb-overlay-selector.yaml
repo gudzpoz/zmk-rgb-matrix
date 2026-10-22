@@ -24,11 +24,3 @@ properties:
       Initial child slot, in declaration order including disabled children.
       Valid range is 0..65535. If this slot is unavailable, the first ready
       enabled child is selected instead.
-
-  initial-duration-ms:
-    type: int
-    default: 1000
-    description: |
-      Default period in milliseconds for children whose duration is zero or
-      omitted. Clamped to KEYPAW_RGB_MATRIX_DURATION_MIN_MS and
-      KEYPAW_RGB_MATRIX_DURATION_MAX_MS. A child's nonzero duration overrides it.

@@ -76,7 +76,7 @@ def main():
         elif image == "deferred":
             fragment += "&rgbs_a { compatible = \"test,rgb-control-late\", \"keypaw,behavior-rgb-selector\"; zephyr,deferred-init; };\n"
         elif image == "duration-defaults":
-            fragment += "&selector_a { initial-duration-ms = <1>; }; &probe_a { duration = <0>; }; &probe_c { duration = <66236>; }; &probe_b { duration = <0xffffffff>; };\n"
+            fragment += "&probe_a { duration = <0>; }; &probe_c { duration = <66236>; }; &probe_b { duration = <0xffffffff>; };\n"
         elif image == "peripheral":
             conf += "CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n"
             fragment += "&preview_selector { local; }; &selector_a { local; }; &selector_b { local; };\n"

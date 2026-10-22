@@ -56,13 +56,14 @@ static const struct kp_rgb_effect_callbacks kp_eff_solid_callbacks = {
     .render = kp_eff_solid_render,
 };
 
+#define KP_EFF_SOLID_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 #define KP_EFF_SOLID_DEFINE(inst)                                              \
   static const struct kp_eff_solid_config kp_eff_solid_##inst##_cfg = {        \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_SOLID_DEFAULTS(inst)),          \
       .axis = CONV_DT_ENUM(inst, axis),                                        \
   };                                                                           \
   static struct kp_eff_solid_data kp_eff_solid_##inst##_data = {               \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0, 0)};                                  \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_SOLID_DEFAULTS(inst))};                 \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_solid_callbacks,             \
                        kp_eff_solid_##inst)
 

@@ -94,11 +94,12 @@ static bool geometry_render(const struct device *dev, const struct kp_rgb_frame 
 }
 
 static const struct kp_rgb_effect_callbacks geometry_callbacks = {.render = geometry_render};
+#define GEOMETRY_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 static const struct { struct kp_rgb_effect_common_config common; } geometry_effect_cfg = {
-    KP_RGB_EFFECT_COMMON_CONFIG(0),
+    KP_RGB_EFFECT_COMMON_CONFIG(0, GEOMETRY_DEFAULTS(0)),
 };
 static struct { struct kp_rgb_effect_common_data common; } geometry_effect_data = {
-    KP_RGB_EFFECT_COMMON_DATA(0, 0, 0),
+    KP_RGB_EFFECT_COMMON_DATA(GEOMETRY_DEFAULTS(0)),
 };
 KP_RGB_EFFECT_DEFINE(DT_NODELABEL(geometry_probe), &geometry_callbacks, geometry_effect);
 

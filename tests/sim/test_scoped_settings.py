@@ -29,11 +29,11 @@ REORDERED = '''
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector"; initial-effect = <1>;
-        initial-duration-ms = <0xffffffff>; leds = <2 3>; condition = <&preview_visible>;
+        leds = <2 3>; condition = <&preview_visible>;
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-solid";
-            color = <0x00ffff>; duration = <0>; };
+            color = <0x00ffff>; duration = <0xffffffff>; };
         probe_b: b_static { compatible = "keypaw,rgb-matrix-solid";
-            color = <0xffff00>; };
+            color = <0xffff00>; duration = <0xffffffff>; };
     };
     selector_a: selector_a {
         compatible = "keypaw,rgb-overlay-selector"; initial-effect = <3>;

@@ -80,10 +80,11 @@ static const struct kp_rgb_effect_callbacks effects_probe_callbacks = {
 };
 static const struct kp_rgb_effect_callbacks effects_optional_callbacks = {.render = effects_probe_render};
 #define DT_DRV_COMPAT test_rgb_effects_probe
+#define EFFECTS_PROBE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xffffff, 0)
 #define EFFECTS_PROBE_DEFINE(inst) \
     static const struct { struct kp_rgb_effect_common_config common; } effects_probe_##inst##_cfg = { \
-        KP_RGB_EFFECT_COMMON_CONFIG(inst) }; \
-    static struct effects_observation effects_probe_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(inst, 0xffffff, 0) }; \
+        KP_RGB_EFFECT_COMMON_CONFIG(inst, EFFECTS_PROBE_DEFAULTS(inst)) }; \
+    static struct effects_observation effects_probe_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(EFFECTS_PROBE_DEFAULTS(inst)) }; \
     KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), \
         COND_CODE_1(DT_PROP(DT_DRV_INST(inst), optional_callbacks), \
                     (&effects_optional_callbacks), (&effects_probe_callbacks)), effects_probe_##inst);

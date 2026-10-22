@@ -13,16 +13,10 @@
 #include <zephyr/device.h>
 #include <zmk/rgb_color.h>
 
-struct kp_rgb_effect_defaults {
-  struct kp_rgb_hsb color;
-  uint16_t duration_ms;
-};
-
 /* Indexed by DTS child slot; disabled children retain a zeroed entry. */
 struct kp_rgb_selector_member {
   const struct device *effect;
   const char *id;
-  struct kp_rgb_effect_defaults defaults;
 };
 
 struct kp_rgb_selector {

@@ -230,13 +230,14 @@ static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
     .reset = kp_eff_reactive_reset,
 };
 
+#define KP_EFF_REACTIVE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) >= 0 &&       \
                    DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) <=        \
                        UINT16_MAX,                                             \
                "reactive spread-radius must be in 0..65535");                  \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_REACTIVE_DEFAULTS(inst)),       \
       .background_brightness = (uint8_t)CLAMP(                                 \
           DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
       .spread = CONV_DT_ENUM(inst, spread),                                    \
@@ -245,7 +246,7 @@ static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
       .palette = CONV_DT_ENUM(inst, palette),                                  \
   };                                                                           \
   static struct kp_eff_reactive_data kp_eff_reactive_##inst##_data = {         \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_REACTIVE_DEFAULTS(inst))};              \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_reactive_callbacks,          \
                        kp_eff_reactive_##inst)
 

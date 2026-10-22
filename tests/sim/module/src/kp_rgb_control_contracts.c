@@ -50,11 +50,12 @@ static bool event(const struct device *dev, const struct kp_rgb_key_event *ev) {
 static const struct kp_rgb_effect_callbacks callbacks = {
     .render = render, .reset = reset, .set_active = active, .on_event = event,
 };
+#define CONTROL_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 #define CONTROL_DEFINE(inst) \
     static const struct control_config control_##inst##_cfg = { \
-        KP_RGB_EFFECT_COMMON_CONFIG(inst), .axis = CONV_DT_ENUM(inst, axis), \
+        KP_RGB_EFFECT_COMMON_CONFIG(inst, CONTROL_DEFAULTS(inst)), .axis = CONV_DT_ENUM(inst, axis), \
     }; \
-    static struct control_data control_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(inst, 0, 0) }; \
+    static struct control_data control_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(CONTROL_DEFAULTS(inst)) }; \
     KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, control_##inst)
 DT_INST_FOREACH_STATUS_OKAY(CONTROL_DEFINE)
 
@@ -236,13 +237,13 @@ static void early(void) {
     KP_CHECK(kp_rgb_effect_period(DEV(control_late)) == 2345);
 }
 static void duration_defaults(void) {
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
     wait_ready();
     KP_CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2345) == 0);
     KP_CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 

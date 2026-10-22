@@ -112,20 +112,21 @@ static const struct kp_rgb_effect_callbacks kp_eff_breathe_callbacks = {
     .render = kp_eff_breathe_render,
 };
 
+#define KP_EFF_BREATHE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_BREATHE_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45) >= 0 &&        \
                    DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45) <=         \
                        UINT16_MAX,                                             \
                "breathe hue-amplitude must fit a nonnegative uint16_t");       \
   static const struct kp_eff_breathe_config kp_eff_breathe_##inst##_cfg = {    \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_BREATHE_DEFAULTS(inst)),        \
       .mode = CONV_DT_ENUM(inst, mode),                                        \
       .hue_amplitude =                                                         \
           (uint16_t)CLAMP(DT_PROP_OR(DT_DRV_INST(inst), hue_amplitude, 45), 0, \
                           KP_RGB_HUE_MAX),                                     \
   };                                                                           \
   static struct kp_eff_breathe_data kp_eff_breathe_##inst##_data = {           \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_BREATHE_DEFAULTS(inst))};               \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_breathe_callbacks,           \
                        kp_eff_breathe_##inst)
 

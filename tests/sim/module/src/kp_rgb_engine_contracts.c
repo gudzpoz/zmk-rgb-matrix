@@ -184,11 +184,12 @@ static bool child_render(const struct device *dev, const struct kp_rgb_frame *fr
 }
 static const struct kp_rgb_effect_callbacks child_callbacks = {.render = child_render};
 #define DT_DRV_COMPAT keypaw_native_engine_effect
+#define CHILD_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 1000)
 #define CHILD(inst) \
     static const struct child_config child_##inst##_cfg = { \
-        KP_RGB_EFFECT_COMMON_CONFIG(inst), .slot = DT_INST_PROP(inst, slot), \
+        KP_RGB_EFFECT_COMMON_CONFIG(inst, CHILD_DEFAULTS(inst)), .slot = DT_INST_PROP(inst, slot), \
     }; \
-    static struct child_data child_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(inst, 0, 1000) }; \
+    static struct child_data child_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(CHILD_DEFAULTS(inst)) }; \
     KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &child_callbacks, child_##inst);
 DT_INST_FOREACH_STATUS_OKAY(CHILD)
 #undef DT_DRV_COMPAT

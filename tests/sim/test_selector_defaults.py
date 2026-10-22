@@ -16,7 +16,6 @@ OVERLAY = '''
 &rgb_matrix {
     default_selector: default_selector {
         compatible = "keypaw,rgb-overlay-selector";
-        initial-duration-ms = <2345>;
         default_ready: ready {
             compatible = "test,rgb-default-effect";
             color = <0x008000>; duration = <0>;
@@ -29,10 +28,13 @@ OVERLAY = '''
             compatible = "test,rgb-default-effect";
             color = <0x000080>; duration = <0xffffffff>;
         };
+        default_breathe: breathe {
+            compatible = "keypaw,rgb-matrix-breathe";
+            mode = "brightness"; color = <0x0000ff>; duration = <2400>;
+        };
     };
     default_late_selector: default_late_selector {
         compatible = "keypaw,rgb-overlay-selector";
-        initial-duration-ms = <0>;
         default_late: late {
             compatible = "test,rgb-default-effect";
             color = <0x808000>; zephyr,deferred-init;
@@ -54,7 +56,6 @@ OVERLAY = '''
     };
     default_disabled: default_disabled {
         compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
-        initial-duration-ms = <2345>;
         default_disabled_child: child {
             compatible = "test,rgb-default-effect";
             color = <0x800000>; duration = <0>;
@@ -75,13 +76,11 @@ BOUNDARIES = [("below", "99"), ("min", "100"), ("max", "10000"),
               ("omitted", None)]
 for index, (name, duration) in enumerate(BOUNDARIES):
     prop = f"duration = <{duration}>;" if duration is not None else ""
-    parent_prop = (f"initial-duration-ms = <{duration}>;"
-                   if duration is not None else "")
     OVERLAY += f'''
 &rgb_matrix {{
     boundary_parent_{name}: boundary_parent_{name} {{
         compatible = "keypaw,rgb-overlay-selector";
-        {parent_prop}
+
         parent_{name}: parent_{name} {{
             compatible = "test,rgb-default-effect";
             duration = <0>;
@@ -89,7 +88,7 @@ for index, (name, duration) in enumerate(BOUNDARIES):
     }};
     child_boundaries {{
         compatible = "keypaw,rgb-overlay-selector";
-        initial-duration-ms = <2345>;
+
         child_{name}: child_{name} {{
             compatible = "test,rgb-default-effect"; {prop}
         }};

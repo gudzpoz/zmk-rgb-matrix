@@ -36,11 +36,11 @@ SELECTORS = '''
         condition = <&preview_visible>;
         leds = <2 3>;
         initial-effect = <99>;
-        initial-duration-ms = <0xffffffff>;
+
         probe_b: b_static { compatible = "keypaw,rgb-matrix-selector-probe";
-            color = <0xffff00>; };
+            color = <0xffff00>; duration = <0xffffffff>; };
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-selector-probe";
-            color = <0x00ffff>; duration = <0>; };
+            color = <0x00ffff>; duration = <0xffffffff>; };
     };
     ordinary: ordinary {
         compatible = "keypaw,rgb-overlay";

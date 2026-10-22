@@ -90,11 +90,12 @@ static const struct kp_rgb_effect_callbacks callbacks = {
   .render = render, .reset = reset, .set_active = active, .on_event = event,
 };
 
+#define PROBE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 #define PROBE_DEFINE(inst) \
   static const struct probe_config probe_##inst##_cfg = { \
-    KP_RGB_EFFECT_COMMON_CONFIG(inst), .animate = DT_INST_PROP(inst, animate), \
+    KP_RGB_EFFECT_COMMON_CONFIG(inst, PROBE_DEFAULTS(inst)), .animate = DT_INST_PROP(inst, animate), \
   }; \
-  static struct probe_data probe_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(inst, 0, 0) }; \
+  static struct probe_data probe_##inst##_data = { KP_RGB_EFFECT_COMMON_DATA(PROBE_DEFAULTS(inst)) }; \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, probe_##inst)
 DT_INST_FOREACH_STATUS_OKAY(PROBE_DEFINE)
 

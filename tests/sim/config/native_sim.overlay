@@ -76,12 +76,12 @@
             compatible = "keypaw,rgb-overlay-selector";
             all-leds;
             initial-effect = <0>;
-            initial-duration-ms = <4000>;
+
             /* --- static fields ------------------------------------------- */
 
             fx_solid: fx_solid {
                 compatible = "keypaw,rgb-matrix-solid";
-                color = <0xFF0000>;
+                color = <0xFF0000>; duration = <4000>;
             };
 
             fx_solid_v: fx_solid_v {

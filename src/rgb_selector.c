@@ -58,10 +58,7 @@ void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
     if (fx == NULL) {
       continue;
     }
-    const struct kp_rgb_effect_defaults *def = &selector->members[i].defaults;
-    struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
-    data->color = def->color;
-    data->duration_ms = def->duration_ms;
+    *kp_rgb_effect_data(fx) = kp_rgb_effect_cfg(fx)->defaults;
   }
 }
 

@@ -214,22 +214,11 @@ static int kp_selector_start(const struct device *dev) {
                    KP_RGB_PERSIST_MAX_ID_LENGTH,                               \
                "RGB node name exceeds KP_RGB_PERSIST_MAX_ID_LENGTH");
 
-#define KP_SELECTOR_RESET_PERIOD(node_id)                                      \
-  KP_RGB_EFFECT_CLAMP_PERIOD(                                                  \
-      (uint32_t)DT_PROP_OR(node_id, duration, 0) != 0U                         \
-          ? (int64_t)(uint32_t)DT_PROP_OR(node_id, duration, 0)                \
-          : (int64_t)DT_PROP(DT_PARENT(node_id), initial_duration_ms))
-
 #define KP_SELECTOR_MEMBER(node_id)                                            \
   COND_CODE_1(                                                                 \
       DT_NODE_HAS_STATUS(node_id, okay),                                       \
-      ({.effect = DEVICE_DT_GET(node_id),                                      \
-        .id = KP_SELECTOR_ID(node_id),                                         \
-        .defaults = {.color =                                                  \
-                         KP_RGB_HSB_FROM_HEX(DT_PROP_OR(node_id, color, 0)),   \
-                     .duration_ms = KP_SELECTOR_RESET_PERIOD(node_id)}}, ),    \
+      ({.effect = DEVICE_DT_GET(node_id), .id = KP_SELECTOR_ID(node_id)}, ),   \
       ({0}, ))
-
 #define KP_SELECTOR_INSTANCE(node_id)                                          \
   COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay),                               \
               (KP_RGB_EFFECT_INSTANCE_INIT(DEVICE_DT_GET(node_id)), ),         \

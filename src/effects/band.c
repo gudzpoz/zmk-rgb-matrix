@@ -102,14 +102,15 @@ static const struct kp_rgb_effect_callbacks kp_eff_band_callbacks = {
     .render = kp_eff_band_render,
 };
 
+#define KP_EFF_BAND_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_BAND_DEFINE(inst)                                               \
   static const struct kp_eff_band_config kp_eff_band_##inst##_cfg = {          \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_BAND_DEFAULTS(inst)),           \
       .channel = CONV_DT_ENUM(inst, channel),                                  \
       .shape = CONV_DT_ENUM(inst, shape),                                      \
   };                                                                           \
   static struct kp_eff_band_data kp_eff_band_##inst##_data = {                 \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_BAND_DEFAULTS(inst))};                  \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_band_callbacks,              \
                        kp_eff_band_##inst)
 

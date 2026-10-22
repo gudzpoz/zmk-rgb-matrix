@@ -22,18 +22,20 @@ static bool defaults_render(const struct device *dev, const struct kp_rgb_frame 
   return false;
 }
 static const struct kp_rgb_effect_callbacks callbacks = {.render = defaults_render};
+#define DEFAULTS_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 #define DEFAULTS_DEFINE(inst) \
-  static const struct defaults_config defaults_##inst##_cfg = {KP_RGB_EFFECT_COMMON_CONFIG(inst)}; \
-  static struct defaults_data defaults_##inst##_data = {KP_RGB_EFFECT_COMMON_DATA(inst, 0, 0)}; \
+  static const struct defaults_config defaults_##inst##_cfg = {KP_RGB_EFFECT_COMMON_CONFIG(inst, DEFAULTS_DEFAULTS(inst))}; \
+  static struct defaults_data defaults_##inst##_data = {KP_RGB_EFFECT_COMMON_DATA(DEFAULTS_DEFAULTS(inst))}; \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, defaults_##inst);
 DT_INST_FOREACH_STATUS_OKAY(DEFAULTS_DEFINE)
 
 #undef DT_DRV_COMPAT
 #define DT_DRV_COMPAT test_rgb_missing_defaults
 /* Model signed C macro arguments independently of DTS cell encoding. */
+#define MISSING_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0x008080, (int32_t)DT_INST_PROP(inst, test_period))
 #define MISSING_DEFINE(inst) \
-  static const struct defaults_config missing_##inst##_cfg = {KP_RGB_EFFECT_COMMON_CONFIG(inst)}; \
-  static struct defaults_data missing_##inst##_data = {KP_RGB_EFFECT_COMMON_DATA(inst, 0x008080, (int32_t)DT_INST_PROP(inst, test_period))}; \
+  static const struct defaults_config missing_##inst##_cfg = {KP_RGB_EFFECT_COMMON_CONFIG(inst, MISSING_DEFAULTS(inst))}; \
+  static struct defaults_data missing_##inst##_data = {KP_RGB_EFFECT_COMMON_DATA(MISSING_DEFAULTS(inst))}; \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, missing_##inst);
 DT_INST_FOREACH_STATUS_OKAY(MISSING_DEFINE)
 
@@ -61,22 +63,27 @@ static void check_static_metadata(void) {
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
   CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, defctl)));
-  CHECK(selector->effect_count == 4);
+  CHECK(selector->effect_count == 5);
   CHECK(selector->members[0].effect == DEV(default_ready));
   CHECK(strcmp(selector->members[0].id, "ready") == 0);
   CHECK(selector->members[1].effect == NULL && selector->members[1].id == NULL);
   CHECK(selector->members[2].effect == DEV(default_explicit));
   CHECK(strcmp(selector->members[2].id, "explicit") == 0);
-  CHECK(selector->members[0].defaults.duration_ms == 2345);
-  CHECK(selector->members[0].defaults.color.h == 120);
-  CHECK(selector->members[0].defaults.color.s == 100);
-  CHECK(selector->members[0].defaults.color.b == 50);
-  CHECK(selector->members[1].defaults.duration_ms == 0);
-  CHECK(selector->members[2].defaults.duration_ms == 10000);
-  CHECK(selector->members[3].defaults.duration_ms == 2345);
-  CHECK(selector->members[3].defaults.color.h == 0);
-  CHECK(selector->members[3].defaults.color.s == 0);
-  CHECK(selector->members[3].defaults.color.b == 0);
+  CHECK(selector->members[3].effect == DEV(default_breathe));
+  CHECK(selector->members[4].effect == DEV(missing_selected));
+  CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.duration_ms == 1000);
+  CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.color.h == 120);
+  CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.color.s == 100);
+  CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.color.b == 50);
+  CHECK(kp_rgb_effect_cfg(DEV(default_explicit))->defaults.duration_ms == 10000);
+  CHECK(kp_rgb_effect_cfg(DEV(default_breathe))->defaults.duration_ms == 2400);
+  CHECK(kp_rgb_effect_cfg(DEV(default_breathe))->defaults.color.h == 240);
+  CHECK(kp_rgb_effect_cfg(DEV(default_breathe))->defaults.color.s == 100);
+  CHECK(kp_rgb_effect_cfg(DEV(default_breathe))->defaults.color.b == 100);
+  CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.duration_ms == 3210);
+  CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.color.h == 180);
+  CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.color.s == 100);
+  CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.color.b == 50);
 
   selector = find_selector("default_late_selector");
   CHECK(selector != NULL && selector->effect_count == 3);
@@ -92,7 +99,7 @@ static void check_hole_selection(void) {
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
   kp_rgb_matrix_lock();
-  CHECK(selector->effect_count == 4);
+  CHECK(selector->effect_count == 5);
   CHECK(kp_rgb_selector_at(selector, 1) == NULL);
   CHECK(kp_rgb_selector_calc_index(selector, 0, 1) == 2);
   CHECK(kp_rgb_selector_calc_index(selector, 2, -1) == 0);
@@ -104,6 +111,13 @@ static void check_hole_selection(void) {
 
 static const struct kp_rgb_hsb early_color = {.h = 137, .s = 61, .b = 37};
 static const struct kp_rgb_hsb late_color = {.h = 271, .s = 42, .b = 73};
+
+static void check_defaults_match_data(const struct device *effect) {
+  const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
+  const struct kp_rgb_effect_common_data *defaults = &kp_rgb_effect_cfg(effect)->defaults;
+  CHECK(data->color.h == defaults->color.h && data->color.s == defaults->color.s &&
+        data->color.b == defaults->color.b && data->duration_ms == defaults->duration_ms);
+}
 
 static void check_parameters(const struct device *effect,
                              struct kp_rgb_hsb color, uint16_t period) {
@@ -127,17 +141,17 @@ struct period_case {
   {DEV(child_##name), DEV(child_boundaries), value, value}
 #define PRIVATE_CASE(name, value) {DEV(private_##name), NULL, value, value}
 static const struct period_case period_cases[] = {
-  PARENT_CASE(below, 100, 100),
-  PARENT_CASE(min, 100, 100),
-  PARENT_CASE(max, 10000, 10000),
-  PARENT_CASE(above, 10000, 10000),
-  PARENT_CASE(negative, 10000, 10000),
-  PARENT_CASE(zero, 100, 100),
+  PARENT_CASE(below, 1000, 1000),
+  PARENT_CASE(min, 1000, 1000),
+  PARENT_CASE(max, 1000, 1000),
+  PARENT_CASE(above, 1000, 1000),
+  PARENT_CASE(negative, 1000, 1000),
+  PARENT_CASE(zero, 1000, 1000),
   PARENT_CASE(omitted, 1000, 1000),
   CHILD_CASE(below, 100), CHILD_CASE(min, 100),
   CHILD_CASE(max, 10000), CHILD_CASE(above, 10000),
-  CHILD_CASE(negative, 10000), CHILD_CASE(zero, 2345),
-  CHILD_CASE(omitted, 2345),
+  CHILD_CASE(negative, 10000), CHILD_CASE(zero, 1000),
+  CHILD_CASE(omitted, 1000),
   PRIVATE_CASE(below, 100), PRIVATE_CASE(min, 100),
   PRIVATE_CASE(max, 10000), PRIVATE_CASE(above, 10000),
   PRIVATE_CASE(negative, 10000), PRIVATE_CASE(zero, 1000),
@@ -180,26 +194,28 @@ static int before_startup(void) {
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_disabled), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_private_wide), (struct kp_rgb_hsb){180, 100, 50}, 10000);
-  check_parameters(DEV(missing_private_negative), (struct kp_rgb_hsb){180, 100, 50}, 1000);
+  check_parameters(DEV(missing_private_negative), (struct kp_rgb_hsb){180, 100, 50}, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   check_parameters(DEV(missing_private_minus_one), (struct kp_rgb_hsb){180, 100, 50}, 10000);
   CHECK(!device_is_ready(DEV(missing_selected)));
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   CHECK(!device_is_ready(DEV(default_late)));
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 100);
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(missing_selected), &early_color) == -ENODEV);
   CHECK(zmk_rgb_matrix_set_period(DEV(missing_selected), 4321) == -ENODEV);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 4321) == -ENODEV);
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 100);
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   check_static_metadata();
   CHECK(device_is_ready(DEV(default_ready)));
-  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
+  check_defaults_match_data(DEV(default_ready));
   check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 50},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_defaults_match_data(DEV(default_explicit));
+  check_parameters(DEV(default_breathe), (struct kp_rgb_hsb){240, 100, 100}, 2400);
+  check_defaults_match_data(DEV(default_breathe));
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0}, 1000);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
   check_parameters(DEV(default_private), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   check_parameters(DEV(default_disabled_child), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
@@ -225,8 +241,7 @@ static int prepare_deferred_effect(void) {
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_selector_at(find_selector("default_late_selector"), 0) == DEV(default_late));
   kp_rgb_matrix_unlock();
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
   return 0;
@@ -281,23 +296,27 @@ static void defaults_test(void *a, void *b, void *c) {
   check_parameters(DEV(default_ready), early_color, 4321);
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == DEV(default_ready));
   CHECK(zmk_rgb_selector_get_selected(DEV(default_late_selector)) == DEV(default_late));
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_breathe), &early_color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_breathe), 4321) == 0);
   CHECK(zmk_rgb_selector_reset(DEV(default_selector)) == 0);
-  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
+  check_defaults_match_data(DEV(default_ready));
   check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 50},
                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
+  check_defaults_match_data(DEV(default_explicit));
+  check_parameters(DEV(default_breathe), (struct kp_rgb_hsb){240, 100, 100}, 2400);
+  check_defaults_match_data(DEV(default_breathe));
   check_parameters(DEV(default_late), late_color, 3456);
-  check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){0, 0, 0}, 2345);
+  check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
+  check_defaults_match_data(DEV(missing_selected));
   CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_white), &late_color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_black), 4567) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_white), 5678) == 0);
   CHECK(zmk_rgb_selector_reset(DEV(default_late_selector)) == 0);
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0}, 1000);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
@@ -316,16 +335,19 @@ static void defaults_test(void *a, void *b, void *c) {
       CHECK(zmk_rgb_selector_reset(period_cases[i].selector) == 0);
   }
   check_period_cases(true);
+  CHECK(zmk_rgb_matrix_set_color(DEV(default_breathe), &late_color) == 0);
+  CHECK(zmk_rgb_matrix_set_period(DEV(default_breathe), 5678) == 0);
   kp_rgb_reset_state();
-  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 2345);
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
-  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100},
-                   CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+  check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
+  check_defaults_match_data(DEV(default_ready));
+  check_parameters(DEV(default_breathe), (struct kp_rgb_hsb){240, 100, 100}, 2400);
+  check_defaults_match_data(DEV(default_breathe));
+  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
+  check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0}, 1000);
+  check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
   check_period_cases(true);
-  check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){0, 0, 0}, 2345);
+  check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
+  check_defaults_match_data(DEV(missing_selected));
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_disabled), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   printk("PASS selector defaults shared metadata/disabled slots/live readiness/setters/reset/automatic startup\n");

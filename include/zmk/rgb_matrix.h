@@ -210,26 +210,22 @@ void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instanc
  * not clear pixels, manage clocks or check engine activity. */
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 
-#define KP_RGB_EFFECT_COMMON_CONFIG(inst)                                      \
+#define KP_RGB_EFFECT_COMMON_CONFIG(inst, defaults_)                           \
   .common = {                                                                  \
       .owner = KP_RGB_EFFECT_OWNER(DT_DRV_INST(inst)),                         \
       .slot = KP_RGB_EFFECT_SLOT(inst),                                        \
+      .defaults = defaults_,                                                   \
   }
-#define KP_RGB_EFFECT_COMMON_DATA(inst, default_color_, default_duration_)     \
-  .common = {                                                                  \
-      .color = KP_RGB_HSB_FROM_HEX(                                            \
-          DT_PROP_OR(DT_DRV_INST(inst), color, default_color_)),               \
-      .duration_ms =                                                           \
-          KP_RGB_EFFECT_INITIAL_PERIOD(DT_DRV_INST(inst), default_duration_),  \
-  }
+#define KP_RGB_EFFECT_COMMON_DATA(defaults_) .common = defaults_
 
+struct kp_rgb_effect_common_data {
+  uint16_t duration_ms;    /* single cycle animation duration */
+  struct kp_rgb_hsb color; /* default or current color */
+};
 struct kp_rgb_effect_common_config {
   const struct device *owner; /* Selector device, or NULL for a non-selectable effect. */
   uint16_t slot; /* Child position within its parent, including disabled siblings. */
-};
-struct kp_rgb_effect_common_data {
-  uint16_t duration_ms;    /* single cycle animation duration */
-  struct kp_rgb_hsb color; /* current color */
+  struct kp_rgb_effect_common_data defaults;
 };
 
 /* The shared command handlers reach the effect's own config/data through these
@@ -265,28 +261,21 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
               (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
 
-#define KP_RGB_EFFECT_CLAMP_PERIOD(duration_)                                  \
-  CLAMP((duration_), CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,                 \
-        CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
-
-#define KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id, default_duration_)             \
-  ((uint16_t)MIN(DT_PROP_OR(node_id, duration, default_duration_), UINT16_MAX))
-
-#define KP_RGB_EFFECT_INITIAL_PERIOD(node_id, default_duration_)               \
-  COND_CODE_1(                                                                 \
-      KP_RGB_EFFECT_HAS_OWNER(node_id),                                        \
-      (KP_RGB_EFFECT_CLAMP_PERIOD(                                             \
-          (uint32_t)DT_PROP_OR(node_id, duration, default_duration_) != 0U     \
-              ? (uint32_t)DT_PROP_OR(node_id, duration, default_duration_)     \
-              : (uint32_t)DT_PROP(DT_PARENT(node_id), initial_duration_ms))),  \
-      (KP_RGB_EFFECT_CLAMP_PERIOD(                                             \
-          (uint32_t)DT_PROP_OR(node_id, duration, 0) != 0U                     \
-              ? (uint32_t)DT_PROP_OR(node_id, duration, 0)                     \
-              : (KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id, default_duration_)    \
-                     ? KP_RGB_EFFECT_PRIVATE_FALLBACK(node_id,                 \
-                                                      default_duration_)       \
-                     : KP_RGB_EFFECT_PERIOD_FALLBACK_MS))))
-
+/* Build one compile-time default initializer shared by the immutable config and
+ * mutable device data. Clamp the full-width property before narrowing it. */
+#define KP_RGB_EFFECT_DEFAULTS(inst, default_color_, default_duration_)        \
+  {                                                                            \
+      .color = KP_RGB_HSB_FROM_HEX(                                            \
+          DT_PROP_OR(DT_DRV_INST(inst), color, default_color_)),               \
+      .duration_ms = (uint16_t)CLAMP(                                          \
+          ((uint32_t)DT_PROP_OR(DT_DRV_INST(inst), duration,                   \
+                                default_duration_) != 0U)                      \
+              ? (uint32_t)DT_PROP_OR(DT_DRV_INST(inst), duration,              \
+                                     default_duration_)                        \
+              : KP_RGB_EFFECT_PERIOD_FALLBACK_MS,                              \
+          CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,                            \
+          CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS),                           \
+  }
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
   BUILD_ASSERT(!DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_matrix),     \
                "matrix children must be overlays, not effects");               \
@@ -298,12 +287,12 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * immutable struct kp_rgb_effect_callbacks table, exposed directly as dev->api.
  * Select effects through their selector control, not as keymap behaviors.
  *
- * Initialize mutable common data with KP_RGB_EFFECT_COMMON_DATA. Color and
- * duration properties take precedence over its fallback arguments. For an enabled
- * selector's children, zero duration uses the parent's initial-duration-ms;
- * private effects use the 1000 ms fallback when their stored default is zero.
- * Initial periods are clamped to configured bounds before device initialization.
- * Selector preparation preserves accepted parameter changes. */
+ * Initialize a per-instance defaults expression with KP_RGB_EFFECT_DEFAULTS and
+ * use it in both KP_RGB_EFFECT_COMMON_CONFIG and KP_RGB_EFFECT_COMMON_DATA.
+ * The color property overrides the color fallback; duration overrides its fallback,
+ * with zero using the common 1000 ms fallback. Duration is clamped to configured
+ * bounds before narrowing. Selector reset copies only these common defaults into
+ * ready effect data. Lifecycle reset preserves user parameters. */
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
   KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                      \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \

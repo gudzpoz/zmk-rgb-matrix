@@ -31,6 +31,7 @@ struct kp_eff_static_data {
 
 #define KP_EFF_STATIC_COLOR(idx, node) DT_PROP_BY_IDX(node, led_colors, idx),
 
+#define KP_EFF_STATIC_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_STATIC_DEFINE(inst)                                             \
   COND_CODE_1(                                                                 \
       DT_NODE_HAS_PROP(DT_DRV_INST(inst), led_colors),                         \
@@ -42,12 +43,12 @@ struct kp_eff_static_data {
                    ARRAY_SIZE(kp_eff_static_##inst##_colors) <= KP_LED_COUNT,  \
                "led-colors has more entries than LEDs");                       \
   static const struct kp_eff_static_config kp_eff_static_##inst##_cfg = {      \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_STATIC_DEFAULTS(inst)),         \
       .colors = kp_eff_static_##inst##_colors,                                 \
       .colors_len = ARRAY_SIZE(kp_eff_static_##inst##_colors),                 \
   };                                                                           \
   static struct kp_eff_static_data kp_eff_static_##inst##_data = {             \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_STATIC_DEFAULTS(inst))};                \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_static_callbacks,            \
                        kp_eff_static_##inst)
 

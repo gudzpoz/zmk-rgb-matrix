@@ -28,14 +28,12 @@ CASES = {
     "startup-priority-98": (True, ""),
     "startup-priority-99": (False, ""),
     "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
-    "period-zero": (True, '&preview_selector { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
+    "period-zero": (True, '&fx_solid { duration = <0>; };'),
     "period-wide": (True, '''
-&preview_selector { initial-duration-ms = <70000>; };
 &fx_solid { duration = <70000>; };
 &fixture_overlay { fx_fixture { duration = <70000>; }; };
 '''),
     "period-u32-max": (True, '''
-&preview_selector { initial-duration-ms = <0xffffffff>; };
 &fx_solid { duration = <0xffffffff>; };
 &fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
 '''),
@@ -118,6 +116,7 @@ CASES = {
     spread = <0>; }; };
 '''),
     "removed-selector-persist-id": (False, '&preview_selector { persist-id = "preview"; };'),
+    "removed-selector-initial-duration-ms": (False, '&preview_selector { initial-duration-ms = <2345>; };'),
     "removed-effect-persist-id": (False, '&fx_solid { persist-id = "solid"; };'),
     # Zephyr permits undeclared #-properties; this does not register a behavior.
     "inert-effect-binding-cells": (True, '&fx_solid { #binding-cells = <0>; };'),
@@ -147,6 +146,7 @@ DIAGNOSTICS = {
     "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
     "removed-heatmap-slim": r"['\"]slim['\"].*not declared|unknown property.*slim",
     "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
+    "removed-selector-initial-duration-ms": r"['\"]initial-duration-ms['\"].*not declared",
     "removed-effect-display-name": r"['\"]display-name['\"].*not declared|properties have been removed",
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
