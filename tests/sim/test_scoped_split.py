@@ -38,8 +38,7 @@ CONFIGS = {
     "transport-absent": ("", CONF + "CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START=y\nCONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"),
     "transport-absent-zero": (ZERO, CONF + "CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START=y\nCONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"),
     "transport-three": (THREE, CONF), "transport-three-zero": (THREE + ZERO, CONF),
-    "late-control": ('''&rgbs_a { compatible = "test,rgb-selector-late-control",
-        "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };''', CONF),
+    "late-control": ('''&selector_a { zephyr,deferred-init; };''', CONF),
     "late-member": ('''&probe_a { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };
         &probe_c { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };''', CONF),
     "late-global": ('''&rgb_matrix { compatible = "test,rgb-split-late-global",
@@ -101,8 +100,8 @@ def runtime(root, name, scenarios, repeat=1, no_build=False):
         assert all("HCI driver is not ready" in line or "BLUETOOTH FAILED (-19)" in line or
                    (name.startswith("late-") and "RGB control startup failed" in line) or
                    (peripheral and "Failed to invoke behavior" in line) or
-                   (name == "late-control" and "selector_a canonical control is not ready" in line) or
-                   (name == "late-member" and "selector_a has no ready effect" in line)
+                   (name == "late-control" and "RGB selector rgbs_a is not ready" in line) or
+                   (name == "late-member" and "rgbs_a has no ready effect" in line)
                    for line in errors), result.stdout
         print(f"PASS split native {name}/{scenario}", flush=True)
 

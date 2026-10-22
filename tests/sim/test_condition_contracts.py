@@ -94,7 +94,7 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 
 
 VARIANTS = {
-    'startup-unready-selector': ('deferred', '&rgbs_a { compatible = "test,rgb-condition-contract-control", "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };', ''),
+    'startup-unready-selector': ('deferred', '&selector_a { zephyr,deferred-init; };', ''),
     'startup-normalized-names': ('normalized', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'startup-auto': ('auto', '', ''),
     'startup-unrestored-settings': ('settings-auto', '',
@@ -120,8 +120,8 @@ VARIANTS = {
 ''', ''),
     'trigger-actions': ('actions', '''
 &{/cc_triggers/primary} {
-    on-enter = <&rgb_matrix RGB_OFF &ovl_tog &rgbs_a RGB_EFS_CMD 1>;
-    on-exit = <&rgb_matrix RGB_ON &ovl_tog &rgbs_a RGB_EFS_CMD 0>;
+    on-enter = <&rgb_matrix RGB_OFF &ovl_tog &selector_a RGB_EFS_CMD 1>;
+    on-exit = <&rgb_matrix RGB_ON &ovl_tog &selector_a RGB_EFS_CMD 0>;
 };
 &rgb_matrix { cc_latchgate: cc_latchgate {
     compatible = "keypaw,rgb-overlay"; local; condition = <&fixture_latch>; leds = <10>;
@@ -167,7 +167,7 @@ DIAGNOSTICS = {
     'sample-notification': 'notification from sample callback',
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
-    'startup-unready-selector': 'canonical control is not ready',
+    'startup-unready-selector': 'RGB selector rgbs_a is not ready',
 }
 
 REJECTIONS = {
@@ -234,8 +234,8 @@ def main():
             if variant == 'normalized':
                 selectors = (selectors
                     .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
-                    .replace('compatible = "keypaw,rgb-overlay-selector";',
-                             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
+                    .replace('compatible = "keypaw,rgb-overlay";',
+                             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay";')
                     .replace('compatible = "keypaw,rgb-matrix-solid";',
                              'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
                     .replace('selector_a: selector_a {',

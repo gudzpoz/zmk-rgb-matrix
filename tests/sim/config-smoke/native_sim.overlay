@@ -19,15 +19,15 @@
 
         smoke_caps: smoke_caps {
             condition = <&fixture_caps>;
-            on-enter = <&rgbs RGB_EFS_CMD 0>,
-                       <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
-            on-exit = <&rgbs RGB_EFS_CMD 0>,
-                      <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+            on-enter = <&preview_selector RGB_EFS_CMD 0>,
+                       <&preview_selector RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(240, 100, 100)>;
+            on-exit = <&preview_selector RGB_EFS_CMD 0>,
+                      <&preview_selector RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
 
         smoke_default: smoke_default {
-            on-enter = <&rgbs RGB_EFS_CMD 0>,
-                       <&rgbs RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
+            on-enter = <&preview_selector RGB_EFS_CMD 0>,
+                       <&preview_selector RGB_COLOR_HSB_CMD RGB_COLOR_HSB_VAL(0, 100, 100)>;
         };
     };
 };

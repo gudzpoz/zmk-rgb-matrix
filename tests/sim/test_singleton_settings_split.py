@@ -11,7 +11,6 @@ from native_protocol import SOLID_SELECTORS, CONF
 
 SINGLETON = SOLID_SELECTORS + '''
 &rgb_matrix { /delete-node/ selector_a; /delete-node/ selector_b; };
-/ { behaviors { /delete-node/ rgbs_a; /delete-node/ rgbs_b; }; };
 '''
 MASKS = (0x1234, 0xabcd)
 MASK_SCENE = '''

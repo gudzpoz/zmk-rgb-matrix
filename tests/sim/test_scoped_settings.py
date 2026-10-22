@@ -14,8 +14,8 @@ SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-m
              .replace(' animate;', ''))
 NORMALIZED_SELECTORS = (SELECTORS
     .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
-    .replace('compatible = "keypaw,rgb-overlay-selector";',
-             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay-selector";')
+    .replace('compatible = "keypaw,rgb-overlay";',
+             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay";')
     .replace('compatible = "keypaw,rgb-matrix-solid";',
              'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
     .replace('selector_a: selector_a {',
@@ -28,7 +28,8 @@ REORDERED = '''
 &rgb_matrix {
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
     selector_b: selector_b {
-        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <1>;
+        compatible = "keypaw,rgb-overlay"; initial-effect = <1>;
+        controllable; #binding-cells = <2>; label = "rgbs_b";
         leds = <2 3>; condition = <&preview_visible>;
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-solid";
             color = <0x00ffff>; duration = <0xffffffff>; };
@@ -36,7 +37,8 @@ REORDERED = '''
             color = <0xffff00>; duration = <0xffffffff>; };
     };
     selector_a: selector_a {
-        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <2>;
+        compatible = "keypaw,rgb-overlay"; initial-effect = <2>;
+        controllable; #binding-cells = <2>; label = "rgbs_a";
         leds = <0 1>; condition = <&preview_visible>;
         optout: optout { compatible = "keypaw,rgb-matrix-solid";
             color = <0xff0000>; };
@@ -51,10 +53,6 @@ REORDERED = '''
         private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
     };
 };
-/ { behaviors {
-    rgbs_a: rgbs_a { compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>; selector = <&selector_a>; };
-    rgbs_b: rgbs_b { compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>; selector = <&selector_b>; };
-}; };
 &rgb_conditions {
     preview_visible: preview_visible { compatible = "keypaw,rgb-condition-effect-selected";
         selector = <&preview_selector>; effect = <&fx_solid>; };
@@ -74,7 +72,7 @@ SCENARIOS = ("existing", "validation", "old-custom-ids", "runtime-parameters", "
 CONFIGS = {
     "auto": ("", ""),
     "provider": ("", ""),
-    "late-control": ('''&rgbs_a { compatible = "test,rgb-selector-late-control", "keypaw,behavior-rgb-selector"; zephyr,deferred-init; };''',
+    "late-control": ('''&selector_a { zephyr,deferred-init; };''',
                      ""),
     "late-member": ('&probe_b { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };',
                     ""),
@@ -143,7 +141,7 @@ def main():
             errors = [line for line in result.stdout.splitlines() if "<err>" in line]
             assert all("set-value failure. key: keypaw/rgb_matrix/" in line or
                        (scenario == "boundary-failure" and ("RGB control startup failed" in line or
-                        (name == "late-control" and "canonical control is not ready" in line)))
+                        (name == "late-control" and "RGB selector rgbs_a is not ready" in line)))
                        for line in errors), result.stdout
             print(f"PASS scoped settings native {name}/{scenario}", flush=True)
 

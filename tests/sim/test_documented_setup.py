@@ -29,6 +29,9 @@ def main():
     selectors = snippet(guide, "### Effect selectors")
     guide_bindings = snippet(guide, "### Effect selectors", 1)
     condition = snippet(guide, "#### Selected-effect condition")
+    assert re.search(r"zone:\s*zone\s*\{[^}]*\bcontrollable;", scene, re.S)
+    assert "&zone " in bindings and "&rgbs " not in bindings
+    assert "&zone_a " in guide_bindings and "&zone_b " in guide_bindings
     root = Path(tempfile.mkdtemp(prefix="rgb-documented-setup-"))
     print(f"ARTIFACTS {root}", flush=True)
     variants = (

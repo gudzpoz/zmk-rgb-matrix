@@ -4,30 +4,12 @@
  * SPDX-License-Identifier: MIT
  */
 
-#define DT_DRV_COMPAT keypaw_behavior_rgb_selector
-
 #include <drivers/behavior.h>
 #include <zephyr/sys/util.h>
 #include <zmk/behavior.h>
 
 #include "../rgb_matrix_internal.h"
 #include "../rgb_selector_sync_internal.h"
-
-#define KP_CONTROL_VALIDATE(node_id)                                           \
-  BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PHANDLE(node_id, selector),               \
-                                  keypaw_rgb_overlay_selector),                \
-               "RGB selector control must reference a selector overlay");      \
-  BUILD_ASSERT(DT_NODE_HAS_STATUS(DT_PHANDLE(node_id, selector), okay),        \
-               "RGB selector control must reference an enabled selector");     \
-  BUILD_ASSERT(sizeof(DEVICE_DT_NAME(node_id)) <= 9,                           \
-               "RGB selector control name must fit the 9-byte split "          \
-               "behavior_dev field");
-
-DT_FOREACH_STATUS_OKAY(DT_DRV_COMPAT, KP_CONTROL_VALIDATE)
-
-struct kp_selector_control_config {
-  const struct device *selector;
-};
 
 int kp_rgb_selector_binding_convert(const struct device *selector,
                                     struct zmk_behavior_binding *binding) {
@@ -36,13 +18,13 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
-  if (state == NULL || !device_is_ready(state->control)) {
+  if (state == NULL || !device_is_ready(state->owner)) {
     kp_rgb_matrix_unlock();
     return -ENODEV;
   }
   int err = kp_rgb_selector_convert_locked(state, binding);
   if (err == 0)
-    binding->behavior_dev = state->control->name;
+    binding->behavior_dev = state->owner->name;
   kp_rgb_matrix_unlock();
   return err;
 }
@@ -71,15 +53,9 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
   return err;
 }
 
-#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
-
 static const struct device *
 kp_control_selector(const struct zmk_behavior_binding *binding) {
-  const struct device *dev = zmk_behavior_get_binding(binding->behavior_dev);
-  if (dev == NULL)
-    return NULL;
-  const struct kp_selector_control_config *cfg = dev->config;
-  return cfg->selector;
+  return zmk_behavior_get_binding(binding->behavior_dev);
 }
 
 static int kp_selector_convert(struct zmk_behavior_binding *binding,
@@ -192,22 +168,10 @@ static const struct behavior_parameter_metadata kp_selector_metadata = {
 };
 #endif
 
-static const struct behavior_driver_api kp_selector_api = {
+const struct behavior_driver_api kp_rgb_selector_behavior_api = {
     .locality = BEHAVIOR_LOCALITY_GLOBAL,
     .binding_convert_central_state_dependent_params = kp_selector_convert,
     .binding_pressed = kp_selector_pressed,
     .binding_released = kp_selector_released,
     IF_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA,
                (.parameter_metadata = &kp_selector_metadata, ))};
-
-#define KP_CONTROL_DEFINE(inst)                                                \
-  static const struct kp_selector_control_config kp_control_##inst##_cfg = {   \
-      .selector = DEVICE_DT_GET(DT_INST_PHANDLE(inst, selector)),              \
-  };                                                                           \
-  BEHAVIOR_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, NULL,                      \
-                     &kp_control_##inst##_cfg, POST_KERNEL,                    \
-                     KP_RGB_DEVICE_INIT_PRIORITY, &kp_selector_api);
-
-DT_INST_FOREACH_STATUS_OKAY(KP_CONTROL_DEFINE)
-
-#endif

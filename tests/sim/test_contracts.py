@@ -32,7 +32,6 @@ SCENARIOS = (
 )
 FRAGMENT = r'''
 &preview_selector { status = "disabled"; };
-&rgbs { status = "disabled"; };
 &rgb_matrix {
     fixture_overlay { status = "disabled"; };
     fixture_battery { status = "disabled"; };
@@ -43,6 +42,7 @@ FRAGMENT = r'''
     };
     engine_mid: engine_mid {
         compatible = "keypaw,native-engine-overlay"; slot = <1>;
+        test-behavior; #binding-cells = <0>; label = "eng_mid";
         leds = <0>; condition = <&engine_mid_latch>;
     };
     engine_top: engine_top {
@@ -103,6 +103,7 @@ composition_second: composition_second {
 FILTER = '''
 composition_filter {
     compatible = "keypaw,native-engine-overlay"; slot = <4>; filter;
+    test-behavior; #binding-cells = <0>; label = "eng_filt";
     all-leds;
 };
 '''

@@ -74,7 +74,7 @@ CASES = {
     "empty-scene": (True, '''&rgb_matrix {
     /delete-node/ preview_selector; /delete-node/ fixture_overlay;
     /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
-}; / { behaviors { /delete-node/ rgbs; }; };'''),
+};'''),
     "overlay-wrong-parent": (False, '''/ { wrong_parent { bad_overlay {
     compatible = "keypaw,rgb-overlay-battery"; all-leds;
 }; }; };'''),

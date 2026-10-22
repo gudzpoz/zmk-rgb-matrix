@@ -51,8 +51,7 @@ uint16_t kp_rgb_overlay_get_word(uint16_t word) {
 
 bool kp_rgb_overlay_covers_all(const struct device *dev) {
   const struct kp_rgb_overlay_common_config *cfg = dev->config;
-  const struct kp_rgb_overlay_api *api = dev->api;
-  return api->replaces_target && cfg->opacity == 100 && KP_LED_COUNT > 0 &&
+  return cfg->replaces_target && cfg->opacity == 100 && KP_LED_COUNT > 0 &&
          kp_rgb_overlay_target_count(dev) == KP_LED_COUNT;
 }
 
@@ -73,11 +72,11 @@ bool kp_rgb_overlay_gate(const struct device *dev) {
 void kp_rgb_overlay_conditions_init(void) {
   for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
     const struct device *dev = kp_overlay_registry[i];
-    const struct kp_rgb_overlay_api *api = dev->api;
+    const struct kp_rgb_overlay_common_config *cfg = kp_rgb_overlay_cfg(dev);
     const struct kp_rgb_overlay_common_data *data = dev->data;
     if (data->local || !IS_ENABLED(CONFIG_ZMK_SPLIT) ||
         IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)) {
-      kp_rgb_condition_require(api->condition);
+      kp_rgb_condition_require(cfg->condition);
     }
   }
 }
@@ -89,13 +88,13 @@ bool kp_rgb_overlay_refresh(void) {
 
   for (size_t i = 0; i < KP_RGB_OVERLAY_COUNT; i++) {
     const struct device *dev = kp_overlay_registry[i];
-    const struct kp_rgb_overlay_api *api = dev->api;
+    const struct kp_rgb_overlay_common_config *cfg = kp_rgb_overlay_cfg(dev);
     struct kp_rgb_overlay_common_data *data = dev->data;
     if (!data->local && IS_ENABLED(CONFIG_ZMK_SPLIT) &&
         !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)) continue;
 
-    bool active = kp_rgb_condition_valid(api->condition) &&
-                  (!api->condition || kp_rgb_condition_value(api->condition));
+    bool active = kp_rgb_condition_valid(cfg->condition) &&
+                  (!cfg->condition || kp_rgb_condition_value(cfg->condition));
     changed |= data->gate != active;
     data->gate = active;
     if (!data->local && active) {

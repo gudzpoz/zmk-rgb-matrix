@@ -125,8 +125,17 @@ static bool provider_event(const struct device *dev, const struct kp_rgb_key_eve
     }
     return event->pressed;
 }
+static const struct behavior_driver_api provider_behavior_api = {
+    .locality = BEHAVIOR_LOCALITY_GLOBAL,
+};
 static bool provider_render(const struct device *dev, const struct kp_rgb_frame *frame) {
     unsigned s = slot(dev);
+    const struct kp_rgb_overlay_common_config *common = kp_rgb_overlay_cfg(dev);
+    KP_CHECK(kp_rgb_overlay_data(dev) == dev->data);
+    KP_CHECK(kp_rgb_overlay_callbacks(dev)->render == provider_render);
+    KP_CHECK(common->replaces_target == (s != 4));
+    KP_CHECK(dev->api == ((s == 1 || s == 4) ? &provider_behavior_api : NULL));
+    if (dev->api) KP_CHECK(zmk_behavior_get_binding(dev->name) == dev);
     KP_CHECK(frame->pixels && frame->scratch && frame->targets && frame->count == KP_LED_COUNT);
     obs[s].elapsed = frame->elapsed_ms;
     obs[s].max_elapsed = MAX(obs[s].max_elapsed, frame->elapsed_ms);
@@ -155,13 +164,15 @@ static const struct kp_rgb_effect_callbacks provider_callbacks = {
 #define PROVIDER(inst) \
     KP_RGB_OVERLAY_TARGET_ARRAYS(inst, provider_##inst); \
     static const struct provider_config provider_##inst##_cfg = { \
-        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)), \
+        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), &provider_callbacks, !DT_INST_PROP(inst, filter)), \
         .slot = DT_INST_PROP(inst, slot), \
     }; \
     static struct provider_data provider_##inst##_data = { \
         KP_RGB_OVERLAY_COMMON_DATA(inst, provider_##inst), \
     }; \
-    KP_RGB_OVERLAY_DEFINE(inst, &provider_callbacks, !DT_INST_PROP(inst, filter), provider_##inst);
+    COND_CODE_1(DT_INST_PROP(inst, test_behavior), \
+        (KP_RGB_OVERLAY_BEHAVIOR_DEFINE(inst, &provider_behavior_api, provider_##inst)), \
+        (KP_RGB_OVERLAY_DEFINE(inst, provider_##inst)));
 DT_INST_FOREACH_STATUS_OKAY(PROVIDER)
 #undef DT_DRV_COMPAT
 

@@ -268,7 +268,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
 
 /* Registers an ordinary device. callbacks_expr must point to a lifetime-long,
  * immutable struct kp_rgb_effect_callbacks table, exposed directly as dev->api.
- * Select effects through their selector control, not as keymap behaviors.
+ * Select effects through their controllable overlay, not as keymap behaviors.
  *
  * Initialize a per-instance defaults expression with KP_RGB_EFFECT_DEFAULTS and
  * use it in both KP_RGB_EFFECT_COMMON_CONFIG and KP_RGB_EFFECT_COMMON_DATA.
@@ -336,17 +336,14 @@ bool kp_rgb_condition_value(const struct device *condition);
 /* Overlays composite in declaration order, consume cached condition gates and
  * own any embedded effects. */
 
-struct kp_rgb_overlay_api {
-  const struct device *condition; /* NULL = unconditional */
-  const struct kp_rgb_effect_callbacks *callbacks;
-  /* Set true only when opacity 100 replaces every target independently of its
-   * incoming color. Full-strip coverage then allows earlier layers to be skipped.
-   * Filters must set false. */
-  bool replaces_target;
-};
-
 /* Kind-agnostic part of an overlay's config. */
 struct kp_rgb_overlay_common_config {
+  const struct device *condition; /* NULL = unconditional */
+  /* Lifetime-long immutable table; render is required, other callbacks optional. */
+  const struct kp_rgb_effect_callbacks *callbacks;
+  /* Set true only when opacity 100 replaces every target independently of its
+   * incoming color. Filters must set false. */
+  bool replaces_target;
   uint8_t opacity; /* blend strength: 100 replaces, lower values mix */
   /* Use every local LED instead of the keys/leds lists. */
   bool all_leds;
@@ -364,6 +361,26 @@ struct kp_rgb_overlay_common_data {
   bool local;       /* True when `local`: each half evaluates the condition */
   bool gate;        /* worker-published local gate */
 };
+
+/* These accessors require an overlay device, not an arbitrary device. */
+static inline const struct kp_rgb_overlay_common_config *
+kp_rgb_overlay_cfg(const struct device *dev) { return dev->config; }
+static inline struct kp_rgb_overlay_common_data *
+kp_rgb_overlay_data(const struct device *dev) { return dev->data; }
+static inline const struct kp_rgb_effect_callbacks *
+kp_rgb_overlay_callbacks(const struct device *dev) {
+  return kp_rgb_overlay_cfg(dev)->callbacks;
+}
+
+#define KP_RGB_IS_CONTROLLED_OVERLAY(node_id) \
+  UTIL_AND(DT_NODE_HAS_COMPAT(node_id, keypaw_rgb_overlay), \
+           DT_PROP_OR(node_id, controllable, 0))
+#define KP_RGB_SELECTOR_ENTRY(node_id, fn) \
+  COND_CODE_1(KP_RGB_IS_CONTROLLED_OVERLAY(node_id), (fn(node_id)), ())
+#define KP_RGB_FOREACH_SELECTOR(fn) \
+  DT_FOREACH_CHILD_STATUS_OKAY_VARGS(KP_RGB_NODE, KP_RGB_SELECTOR_ENTRY, fn)
+#define KP_RGB_SELECTOR_COUNT_ONE(node_id) +1
+#define KP_RGB_SELECTOR_COUNT (0 KP_RGB_FOREACH_SELECTOR(KP_RGB_SELECTOR_COUNT_ONE))
 
 /* Both halves must use the same enabled overlay sequence for split gate bits. */
 #define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM_STATUS_OKAY(KP_RGB_NODE)
@@ -416,17 +433,19 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
   }
 
 /* Member-wise initializer for the common part of a kind's config. */
-#define KP_RGB_OVERLAY_COMMON(node_id)                                         \
+#define KP_RGB_OVERLAY_COMMON(node_id, callbacks_expr, replaces)               \
   {.opacity = DT_PROP_OR(node_id, opacity, 100),                               \
    .all_leds = DT_PROP(node_id, all_leds),                                     \
    .keys = KP_RGB_OVERLAY_KEYS(node_id),                                       \
    .key_count = DT_PROP_LEN_OR(node_id, keys, 0),                              \
    .leds = KP_RGB_OVERLAY_LEDS(node_id),                                       \
-   .led_count = DT_PROP_LEN_OR(node_id, leds, 0)}
+   .led_count = DT_PROP_LEN_OR(node_id, leds, 0),                              \
+   .condition = KP_RGB_CONDITION_PTR(node_id),                                 \
+   .callbacks = callbacks_expr,                                                \
+   .replaces_target = replaces}
 
-/* Declare a non-behavior overlay device. Config/data must embed their
- * common headers first. render is required; other callbacks are optional. */
-#define KP_RGB_OVERLAY_DEFINE(inst, callbacks_expr, replaces, cfg_inst)        \
+/* Config/data must embed their common headers first. */
+#define KP_RGB_OVERLAY_ASSERT(inst, cfg_inst) \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
                        sizeof(struct kp_rgb_overlay_common_config) &&          \
                    (const void *)&cfg_inst##_cfg ==                            \
@@ -447,17 +466,23 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
   BUILD_ASSERT(!(DT_PROP(DT_DRV_INST(inst), all_leds) &&                       \
                  (DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) > 0 ||            \
                   DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0) > 0)),            \
-               "`all-leds` replaces `keys`/`leds`; do not combine them");      \
-  static const struct kp_rgb_overlay_api cfg_inst##_api = {                    \
-      .condition = KP_RGB_CONDITION_PTR(DT_DRV_INST(inst)),                    \
-      .callbacks = callbacks_expr,                                             \
-      .replaces_target = replaces,                                             \
-  };                                                                           \
+               "`all-leds` replaces `keys`/`leds`; do not combine them");
+
+/* render is required; other callbacks are optional. Ordinary overlays have no API. */
+#define KP_RGB_OVERLAY_DEFINE(inst, cfg_inst)                                  \
+  KP_RGB_OVERLAY_ASSERT(inst, cfg_inst)                                        \
   DEVICE_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, &cfg_inst##_data,            \
                    &cfg_inst##_cfg, POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY,  \
-                   &cfg_inst##_api)
+                   NULL)
 
-/* The generic keypaw,rgb-overlay composites exactly one enabled nested effect. */
+/* Include <drivers/behavior.h> before using this declaration. */
+#define KP_RGB_OVERLAY_BEHAVIOR_DEFINE(inst, behavior_api_expr, cfg_inst)      \
+  KP_RGB_OVERLAY_ASSERT(inst, cfg_inst)                                        \
+  BEHAVIOR_DT_DEFINE(DT_DRV_INST(inst), NULL, NULL, &cfg_inst##_data,          \
+                     &cfg_inst##_cfg, POST_KERNEL,                             \
+                     KP_RGB_DEVICE_INIT_PRIORITY, behavior_api_expr)
+
+/* A private keypaw,rgb-overlay composites exactly one enabled nested effect. */
 
 #define KP_RGB_OVERLAY_EFFECT_ONE(node_id) DEVICE_DT_GET(node_id)
 

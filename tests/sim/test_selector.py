@@ -23,27 +23,20 @@ CASES = {
 
 
 CONTROL_CASES = {
-    "missing-control": ('&rgbs_a { status = "disabled"; };',
-                        r"RGB selector requires exactly one enabled canonical control"),
-    "duplicate-control": ('''/ { behaviors { rgbs_dup {
-        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
-        selector = <&selector_a>; }; }; };''',
-                          r"RGB selector requires exactly one enabled canonical control"),
-    "wrong-kind-control": ('''/ { behaviors { badctl {
-        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
-        selector = <&ordinary>; }; }; };''',
-                           r"RGB selector control must reference a selector overlay"),
-    "disabled-control-target": ('''&rgb_matrix { disabled_selector: disabled_selector {
-        compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
-        child { compatible = "keypaw,rgb-matrix-solid"; };
-        }; }; / { behaviors { badctl {
-        compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
-        selector = <&disabled_selector>; }; }; };''',
-                               r"RGB selector control must reference an enabled selector"),
+    "missing-binding-cells": ('''&selector_a { /delete-property/ #binding-cells; };
+        / { binding_probe { compatible = "keypaw,rgb-trigger-table";
+            entry { on-enter = <&selector_a 0 0>; }; }; };''',
+                              r"selector_a.*lacks #binding-cells"),
+    "wrong-binding-cells": ('&selector_a { #binding-cells = <1>; };',
+                            r"value of property '#binding-cells'.*\(1\).*is different from the 'const' value.*\(2\)"),
+    "private-empty": ('&ordinary { /delete-node/ white; };',
+                      r"overlay requires exactly one enabled nested effect"),
+    "private-multiple": ('&ordinary { extra { compatible = "keypaw,rgb-matrix-solid"; }; };',
+                         r"overlay requires exactly one enabled nested effect"),
     "removed-global-alias": ('&rgb_matrix { selector = <&ordinary>; };',
                              r"['\"]selector['\"].*not declared"),
-    "oversized-control": ('&rgbs_a { label = "control_name_too_long"; };',
-                          r"RGB selector control name must fit the 9-byte split behavior_dev field"),
+    "oversized-endpoint": ('&selector_a { label = "control_name_too_long"; };',
+                           r"controlled overlay endpoint must be at most 8 bytes"),
     "oversized-global": ('&rgb_matrix { label = "global_name_too_long"; };',
                          r"RGB controller name must fit the split behavior_dev field"),
 }
@@ -104,7 +97,6 @@ SELECTED_CASES = {
     "wrong-selector": ('&selected_a { selector = <&ordinary>; };',
                        r'static assertion failed: "selected-effect condition requires an enabled selector overlay"'),
     "disabled-selector": ('&selector_b { status = "disabled"; }; '
-                          '&rgbs_b { status = "disabled"; }; '
                           '&selected_a { selector = <&selector_b>; };',
                           r'static assertion failed: "selected-effect condition requires an enabled selector overlay"'),
     "wrong-effect": ('&selected_a { effect = <&fixture_latch>; };',
@@ -205,9 +197,10 @@ def check_capture(path, log):
     print(f"PASS selector composition/demand ({len(frames)} captured frames)")
 
 
-def main():
+def main(root=None):
     # Keep logs/captures for inspection; all west directories are unique per invocation.
-    root = Path(tempfile.mkdtemp(prefix="rgb-selector-"))
+    root = root or Path(tempfile.mkdtemp(prefix="rgb-selector-"))
+    root.mkdir(parents=True, exist_ok=True)
     print(f"ARTIFACTS {root}", flush=True)
     for name, (fragment, diagnostic) in CASES.items():
         result = build(root, name, f"&selector_a {{ {fragment} }};")
@@ -219,6 +212,17 @@ def main():
         assert result.returncode != 0, name
         assert re.search(diagnostic, result.stdout), result.stdout[-12000:]
         print(f"PASS selector configuration {name}", flush=True)
+    collision_selectors = SELECTORS.replace("keypaw,rgb-matrix-selector-probe", "keypaw,rgb-matrix-solid").replace(" animate;", "")
+    result = build(root, "behavior-name-collision", '&selector_b { label = "rgbs_a"; };',
+                   selectors=collision_selectors)
+    assert result.returncode == 0, result.stdout[-12000:]
+    collision = run_logged(
+        [str(root / "behavior-name-collision/build/zephyr/zmk.exe"), "--stop_at=1", "-no-rt"],
+        cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        timeout=30, log_path=root / "behavior-name-collision.log")
+    assert collision.returncode == 0, collision.stdout
+    assert "Multiple behaviors have the same name 'rgbs_a'" in collision.stdout, collision.stdout
+    print("PASS duplicate behavior endpoint is diagnosed at runtime", flush=True)
     long_selectors = SELECTORS.replace("selector_a: selector_a {",
                                       'selector_a: ' + 's' * 30 + ' {')
     result = build(root, "long-overlay", "", runtime=True, selectors=long_selectors)
@@ -250,8 +254,7 @@ def main():
     check_capture(capture, run.stdout)
 
 
-    result = build(root, "late-control", '''&rgbs_a {
-        compatible = "test,rgb-selector-late-control", "keypaw,behavior-rgb-selector";
+    result = build(root, "late-control", '''&selector_a {
         zephyr,deferred-init;
         };''', runtime=True)
     assert result.returncode == 0, result.stdout[-12000:]
@@ -296,7 +299,7 @@ def stage42(root):
 / { selected_trigger: selected_trigger {
     compatible = "keypaw,rgb-trigger-table";
     reset_selection { condition = <&selected_c>;
-        on-enter = <&rgbs_a RGB_RESET_CMD 0>; };
+        on-enter = <&selector_a RGB_RESET_CMD 0>; };
 }; };
 ''', runtime=True, selectors=SELECTED_CONDITIONS + SELECTORS,
                    extra_conf="CONFIG_KEYPAW_RGB_TRIGGERS=y\n")
@@ -314,10 +317,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage42-only", action="store_true",
                         help="Run only selected-effect condition DT and runtime cases")
+    parser.add_argument("--artifacts", type=Path)
     args = parser.parse_args()
     if args.stage42_only:
         root = Path(tempfile.mkdtemp(prefix="rgb-selector-stage42-"))
         print(f"ARTIFACTS {root}", flush=True)
         stage42(root)
     else:
-        main()
+        main(args.artifacts)

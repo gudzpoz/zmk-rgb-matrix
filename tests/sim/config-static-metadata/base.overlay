@@ -9,5 +9,4 @@
 };
 &led_strip_capture { chain-length = <12>; };
 /delete-node/ &rgb_conditions;
-/delete-node/ &rgbs;
 &kscan { events = <>; };

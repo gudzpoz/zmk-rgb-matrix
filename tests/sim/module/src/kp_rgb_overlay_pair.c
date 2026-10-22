@@ -102,7 +102,7 @@ static const struct kp_rgb_effect_callbacks kp_rgb_pair_callbacks = {
 #define KP_RGB_PAIR_DEFINE(inst)                                                 \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_rgb_pair_##inst);                        \
   static const struct kp_rgb_pair_config kp_rgb_pair_##inst##_cfg = {            \
-      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                         \
+      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), &kp_rgb_pair_callbacks, false), \
   };                                                                             \
   static struct kp_rgb_pair_data kp_rgb_pair_##inst##_data = {                   \
       KP_RGB_OVERLAY_COMMON_DATA(inst, kp_rgb_pair_##inst),                      \
@@ -111,8 +111,7 @@ static const struct kp_rgb_effect_callbacks kp_rgb_pair_callbacks = {
       .second = KP_RGB_EFFECT_INSTANCE_INIT(                                     \
           DEVICE_DT_GET(DT_CHILD(DT_DRV_INST(inst), second))),                  \
   };                                                                             \
-  KP_RGB_OVERLAY_DEFINE(inst, &kp_rgb_pair_callbacks, false,                    \
-                        kp_rgb_pair_##inst)
+  KP_RGB_OVERLAY_DEFINE(inst, kp_rgb_pair_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_RGB_PAIR_DEFINE)
 

@@ -9,7 +9,6 @@ SOLID_SELECTORS = (SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
                    .replace("condition = <&preview_visible>;", "") + '''
 &rgb_matrix { /delete-node/ preview_selector; };
 &rgb_conditions { /delete-node/ preview_visible; };
-/ { behaviors { /delete-node/ rgbs; }; };
 ''')
 CONF = """CONFIG_KEYPAW_SIM_SELECTOR_TEST=n
 CONFIG_KEYPAW_SIM_SPLIT_TEST=y

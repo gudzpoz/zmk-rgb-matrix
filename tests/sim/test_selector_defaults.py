@@ -15,7 +15,8 @@ OVERLAY = '''
 &kscan { events = <>; };
 &rgb_matrix {
     default_selector: default_selector {
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "defctl";
         default_ready: ready {
             compatible = "test,rgb-default-effect";
             color = <0x008000>; duration = <0>;
@@ -34,7 +35,8 @@ OVERLAY = '''
         };
     };
     default_late_selector: default_late_selector {
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "latectl";
         default_late: late {
             compatible = "test,rgb-default-effect";
             color = <0x808000>; zephyr,deferred-init;
@@ -55,19 +57,14 @@ OVERLAY = '''
         };
     };
     default_disabled: default_disabled {
-        compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
+        compatible = "keypaw,rgb-overlay"; status = "disabled";
+        controllable; #binding-cells = <2>;
         default_disabled_child: child {
             compatible = "test,rgb-default-effect";
             color = <0x800000>; duration = <0>;
         };
     };
 };
-/ { behaviors {
-    defctl { compatible = "keypaw,behavior-rgb-selector";
-        #binding-cells = <2>; selector = <&default_selector>; };
-    latectl { compatible = "keypaw,behavior-rgb-selector";
-        #binding-cells = <2>; selector = <&default_late_selector>; };
-}; };
 '''
 
 # Values are paired with independent literal expectations in selector_defaults.c.
@@ -79,7 +76,8 @@ for index, (name, duration) in enumerate(BOUNDARIES):
     OVERLAY += f'''
 &rgb_matrix {{
     boundary_parent_{name}: boundary_parent_{name} {{
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "bp{index}";
 
         parent_{name}: parent_{name} {{
             compatible = "test,rgb-default-effect";
@@ -87,7 +85,8 @@ for index, (name, duration) in enumerate(BOUNDARIES):
         }};
     }};
     child_boundaries {{
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "cbctl";
 
         child_{name}: child_{name} {{
             compatible = "test,rgb-default-effect"; {prop}
@@ -105,10 +104,6 @@ for index, (name, duration) in enumerate(BOUNDARIES):
         }};
     }};
 }};
-/ {{ behaviors {{
-    bp{index} {{ compatible = "keypaw,behavior-rgb-selector";
-        #binding-cells = <2>; selector = <&boundary_parent_{name}>; }};
-}}; }};
 '''
 OVERLAY += '''
 &rgb_matrix {
@@ -149,10 +144,6 @@ OVERLAY += '''
         };
     };
 };
-/ { behaviors {
-    cbctl { compatible = "keypaw,behavior-rgb-selector";
-        #binding-cells = <2>; selector = <&child_boundaries>; };
-}; };
 '''
 
 

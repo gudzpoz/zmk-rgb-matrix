@@ -3,7 +3,7 @@
 
 description: RGB selector with a unit address for persistence-token tests
 compatible: "test,rgb-token-selector"
-include: "keypaw,rgb-overlay-selector.yaml"
+include: "keypaw,rgb-overlay.yaml"
 properties:
   reg:
     type: array

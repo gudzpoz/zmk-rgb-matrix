@@ -11,7 +11,7 @@
         };
     };
     control_disabled: control_disabled {
-        compatible = "keypaw,rgb-overlay-selector"; status = "disabled";
+        compatible = "keypaw,rgb-overlay"; status = "disabled";
 
         control_unowned: control_unowned {
             compatible = "test,rgb-control-probe";

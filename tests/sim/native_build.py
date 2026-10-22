@@ -20,7 +20,8 @@ SELECTORS = '''
     /delete-node/ fixture_battery;
     /delete-node/ fixture_batt_sub;
     selector_a: selector_a {
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "rgbs_a";
         leds = <0 1>;
         condition = <&preview_visible>;
         initial-effect = <0>;
@@ -38,11 +39,13 @@ SELECTORS = '''
         private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
     };
     disabled_selector: disabled_selector {
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>;
         status = "disabled";
     };
     selector_b: selector_b {
-        compatible = "keypaw,rgb-overlay-selector";
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "rgbs_b";
         condition = <&preview_visible>;
         leds = <2 3>;
         initial-effect = <99>;
@@ -51,20 +54,6 @@ SELECTORS = '''
             color = <0xffff00>; duration = <0xffffffff>; };
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-selector-probe";
             color = <0x00ffff>; duration = <0xffffffff>; };
-    };
-};
-/ {
-    behaviors {
-        rgbs_a: rgbs_a {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&selector_a>;
-        };
-        rgbs_b: rgbs_b {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&selector_b>;
-        };
     };
 };
 &rgb_conditions {

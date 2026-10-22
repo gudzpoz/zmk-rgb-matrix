@@ -118,7 +118,7 @@ static const struct kp_rgb_effect_callbacks *callbacks(const struct device *dev)
     return dev->api;
 }
 static const struct kp_rgb_effect_callbacks *overlay_callbacks(const struct device *dev) {
-    return ((const struct kp_rgb_overlay_api *)dev->api)->callbacks;
+    return kp_rgb_overlay_callbacks(dev);
 }
 static void geometry(void) {
     uint16_t min_x = UINT16_MAX, max_x = 0, min_y = UINT16_MAX, max_y = 0;

@@ -67,7 +67,7 @@ struct kp_rgb_sync_selector {
 
 #define KP_RGB_SYNC_SELECTOR(node_id) {.owner = DEVICE_DT_GET(node_id)},
 static struct kp_rgb_sync_selector kp_rgb_sync_selectors[] = {
-    DT_FOREACH_STATUS_OKAY(keypaw_rgb_overlay_selector, KP_RGB_SYNC_SELECTOR)
+    KP_RGB_FOREACH_SELECTOR(KP_RGB_SYNC_SELECTOR)
     {0},
 };
 #define KP_RGB_SYNC_SELECTOR_CAPACITY MAX(ARRAY_SIZE(kp_rgb_sync_selectors) - 1, 1)

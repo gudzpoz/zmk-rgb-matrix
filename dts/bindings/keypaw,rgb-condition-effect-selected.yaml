@@ -21,7 +21,7 @@ properties:
   selector:
     type: phandle
     required: true
-    description: Enabled keypaw,rgb-overlay-selector to query.
+    description: Enabled controllable keypaw,rgb-overlay to query.
 
   effect:
     type: phandle

@@ -11,6 +11,7 @@ from native_build import build, run, SIM, SELECTORS
 SCENARIOS = {
     "control-early": "controls",
     "control-registry": "controls",
+    "control-one-child": "one-child",
     "control-parameters": "controls",
     "control-global-defaults": "controls",
     "control-noop": "controls",
@@ -74,8 +75,18 @@ def main():
             fragment += "&probe_a { #binding-cells = <0>; };\n"
         elif image == "large-step":
             conf += "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=100000\n"
+        elif image == "one-child":
+            conf += "CONFIG_SETTINGS=y\nCONFIG_SETTINGS_CUSTOM=y\nCONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20\n"
+            fragment += '''&rgb_matrix {
+                single_control: single_control {
+                    compatible = "keypaw,rgb-overlay";
+                    controllable; #binding-cells = <2>; label = "onechild";
+                    all-leds;
+                    single_effect: single_effect { compatible = "keypaw,rgb-matrix-solid"; };
+                };
+            }; &ordinary { #binding-cells = <2>; };'''
         elif image == "deferred":
-            fragment += "&rgbs_a { compatible = \"test,rgb-control-late\", \"keypaw,behavior-rgb-selector\"; zephyr,deferred-init; };\n"
+            fragment += "&selector_a { zephyr,deferred-init; };\n"
         elif image == "member-unready":
             fragment += "&probe_c { zephyr,deferred-init; };\n"
         elif image == "duration-defaults":
@@ -115,7 +126,6 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
     /delete-node/ fixture_battery;
     /delete-node/ fixture_batt_sub;
 };
-/ { behaviors { /delete-node/ rgbs; }; };
 '''
             fragment += {
                 "matrix-default": "&rgb_matrix { /delete-property/ initial-on; /delete-property/ initial-brightness; /delete-property/ max-brightness; /delete-property/ idle-brightness; };",

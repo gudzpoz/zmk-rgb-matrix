@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#define DT_DRV_COMPAT keypaw_rgb_overlay_selector
-
 #include <limits.h>
 #include <string.h>
 #include <zephyr/kernel.h>
@@ -31,7 +29,7 @@ struct kp_selector_load {
 };
 
 static struct kp_selector_load
-    kp_selectors[MAX(1, DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT))];
+    kp_selectors[MAX(1, KP_RGB_SELECTOR_COUNT)];
 static struct kp_rgb_persist_global_state kp_global_load;
 static bool kp_global_pending, kp_global_dirty;
 static uint32_t kp_global_revision;

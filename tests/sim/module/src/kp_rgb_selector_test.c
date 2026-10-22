@@ -225,7 +225,7 @@ static void isr_boundaries(struct k_timer *unused) {
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == -EWOULDBLOCK);
   CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == -EWOULDBLOCK);
   CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 1) == -EWOULDBLOCK);
-  struct zmk_behavior_binding value = binding(DEV(rgbs_a), RGB_EFF_CMD, 0);
+  struct zmk_behavior_binding value = binding(DEV(selector_a), RGB_EFF_CMD, 0);
   CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &value) == -EWOULDBLOCK);
   k_sem_give(&isr_checked);
 }
@@ -300,7 +300,7 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(a->active_fx == original_member && a->effect_index == original_slot);
   CHECK(kp_rgb_set_color_locked(original_member, &initial_color) == 0);
   kp_rgb_matrix_unlock();
-  CHECK(captured_b.control == DEV(rgbs_b));
+  CHECK(captured_b.control == DEV(selector_b));
 }
 
 static void controls(void) {
@@ -309,7 +309,7 @@ static void controls(void) {
   atomic_val_t a_notifications = atomic_get(&selection_events_a);
   atomic_val_t b_notifications = atomic_get(&selection_events_b);
   struct behavior_parameter_metadata metadata;
-  CHECK(behavior_get_parameter_metadata(DEV(rgbs_a), &metadata) == 0);
+  CHECK(behavior_get_parameter_metadata(DEV(selector_a), &metadata) == 0);
   CHECK(metadata.sets_len == 4);
   bool reset_found = false;
   for (size_t i = 0; i < metadata.sets_len; i++) {
@@ -322,52 +322,52 @@ static void controls(void) {
   CHECK(reset_found);
   CHECK(metadata.sets[1].param2_values[0].range.max == UINT16_MAX);
   enum behavior_locality locality;
-  CHECK(behavior_get_locality(DEV(rgbs_a), &locality) == 0);
+  CHECK(behavior_get_locality(DEV(selector_a), &locality) == 0);
   CHECK(locality == BEHAVIOR_LOCALITY_GLOBAL);
   CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(private_white)));
   CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
   CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->control == DEV(rgbs_a));
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->control == DEV(rgbs_b));
+  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->owner == DEV(selector_a));
+  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->owner == DEV(selector_b));
   select_slot(DEV(selector_a), 2, -EINVAL);
   select_slot(DEV(selector_a), UINT16_MAX, -EINVAL);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-  invoke(DEV(rgbs_a), RGB_EFR_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFR_CMD, 0);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_c));
-  invoke(DEV(rgbs_a), RGB_EFF_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFF_CMD, 0);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_b));
-  struct zmk_behavior_binding invalid = binding(DEV(rgbs_a), RGB_OFF_CMD, 0);
+  struct zmk_behavior_binding invalid = binding(DEV(selector_a), RGB_OFF_CMD, 0);
   CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
           &invalid, (struct zmk_behavior_binding_event){0}) == -ENOTSUP);
-  invalid = binding(DEV(rgbs_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(361, 100, 100));
+  invalid = binding(DEV(selector_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(361, 100, 100));
   CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
           &invalid, (struct zmk_behavior_binding_event){0}) == -EINVAL);
   CHECK(before == callback_count());
-  converted(DEV(rgbs), RGB_EFS_CMD, 1, DEV(rgbs), RGB_EFS_CMD, 1);
-  invoke(DEV(rgbs), RGB_EFS_CMD, 1);
+  converted(DEV(preview_selector), RGB_EFS_CMD, 1, DEV(preview_selector), RGB_EFS_CMD, 1);
+  invoke(DEV(preview_selector), RGB_EFS_CMD, 1);
   CHECK(preview_slot() == 1);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
-  invoke(DEV(rgbs), RGB_EFS_CMD, 0);
+  invoke(DEV(preview_selector), RGB_EFS_CMD, 0);
   CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
   scoped_snapshot_roundtrip();
-  converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 1);
-  converted(DEV(rgbs_b), RGB_EFS_CMD, 1,
-            DEV(rgbs_b), RGB_EFS_CMD, 1);
-  converted(DEV(rgbs_a), RGB_HUI_CMD, 0, DEV(rgbs_a),
+  converted(DEV(selector_a), RGB_EFF_CMD, 0, DEV(selector_a), RGB_EFS_CMD, 1);
+  converted(DEV(selector_b), RGB_EFS_CMD, 1,
+            DEV(selector_b), RGB_EFS_CMD, 1);
+  converted(DEV(selector_a), RGB_HUI_CMD, 0, DEV(selector_a),
             KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 0),
             RGB_COLOR_HSB_VAL((120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360, 100, 100));
-  invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
+  invoke(DEV(selector_a), RGB_SPI_CMD, 2000);
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2000);
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-  invoke(DEV(rgbs_a), RGB_SPI_CMD, 1000);
+  invoke(DEV(selector_a), RGB_SPI_CMD, 1000);
   kp_rgb_matrix_lock();
   uint8_t brightness = kp_rgb_global.brightness;
-  invoke(DEV(rgbs_a), RGB_HUI_CMD, 0);
+  invoke(DEV(selector_a), RGB_HUI_CMD, 0);
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h ==
         (120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360);
   CHECK(kp_rgb_effect_data(DEV(probe_b))->color.h == 60);
-  invoke(DEV(rgbs_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(120, 100, 40));
+  invoke(DEV(selector_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(120, 100, 40));
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 40);
   CHECK(kp_rgb_global.brightness == brightness);
   kp_rgb_matrix_unlock();
@@ -380,18 +380,18 @@ static void controls(void) {
 }
 
 static void reset_controls(void) {
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, 1);
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, 1);
-  invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
-  invoke(DEV(rgbs_b), RGB_SPI_CMD, 3000);
-  invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 31));
+  invoke(DEV(selector_a), RGB_EFS_CMD, 1);
+  invoke(DEV(selector_b), RGB_EFS_CMD, 1);
+  invoke(DEV(selector_a), RGB_SPI_CMD, 2000);
+  invoke(DEV(selector_b), RGB_SPI_CMD, 3000);
+  invoke(DEV(selector_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 31));
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();
   atomic_val_t a_notifications = atomic_get(&selection_events_a);
   atomic_val_t b_notifications = atomic_get(&selection_events_b);
   unsigned b_resets = DATA(probe_d)->resets;
   unsigned a_resets = DATA(probe_c)->resets;
-  invoke(DEV(rgbs_a), RGB_RESET_CMD, 0);
+  invoke(DEV(selector_a), RGB_RESET_CMD, 0);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
   CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_d));
@@ -557,14 +557,14 @@ static void selected_conditions(void) {
 }
 #endif
 
-#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
+#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
 static int prepare_deferred_control(void) {
-  CHECK(!device_is_ready(DEV(rgbs_a)));
+  CHECK(!device_is_ready(DEV(selector_a)));
   CHECK(callback_count() == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-  CHECK(device_init(DEV(rgbs_a)) == 0);
-  CHECK(device_is_ready(DEV(rgbs_a)));
+  CHECK(device_init(DEV(selector_a)) == 0);
+  CHECK(device_is_ready(DEV(selector_a)));
   return 0;
 }
 SYS_INIT(prepare_deferred_control, APPLICATION, 98);
@@ -582,7 +582,7 @@ static void scenario(void *a, void *b, void *c) {
   selected_conditions();
   return;
 #endif
-#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
+#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
   printk("PASS canonical readiness automatic start\n");
 #endif
   k_sleep(K_MSEC(100));
@@ -613,7 +613,7 @@ static void scenario(void *a, void *b, void *c) {
   public_selection();
   controls();
   kp_rgb_matrix_lock();
-  invoke(DEV(rgbs_a), RGB_EFF_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFF_CMD, 0);
   CHECK(DATA(probe_c)->renders == 0 && DATA(probe_c)->activations == 0);
   raise_zmk_position_state_changed((struct zmk_position_state_changed){
     .source = 0, .position = 0, .state = true, .timestamp = k_uptime_get(),
@@ -629,8 +629,8 @@ static void scenario(void *a, void *b, void *c) {
 
   CHECK(preview_select(1) == 0);
   k_sleep(K_MSEC(100));
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, 0);
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, 1);
+  invoke(DEV(selector_a), RGB_EFS_CMD, 0);
+  invoke(DEV(selector_b), RGB_EFS_CMD, 1);
   mark("hidden");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(!DATA(probe_a)->active && !DATA(probe_d)->active); kp_rgb_matrix_unlock();
@@ -641,8 +641,8 @@ static void scenario(void *a, void *b, void *c) {
 
   CHECK(zmk_rgb_matrix_off() == 0);
   k_sleep(K_MSEC(100));
-  invoke(DEV(rgbs_a), RGB_EFF_CMD, 0);
-  invoke(DEV(rgbs_b), RGB_EFR_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFF_CMD, 0);
+  invoke(DEV(selector_b), RGB_EFR_CMD, 0);
   mark("off");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(!DATA(probe_c)->active && !DATA(probe_b)->active); kp_rgb_matrix_unlock();
@@ -654,10 +654,10 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock(); unsigned resets = DATA(probe_c)->resets; kp_rgb_matrix_unlock();
-  invoke(DEV(rgbs_a), RGB_EFR_CMD, 0);
-  invoke(DEV(rgbs_b), RGB_EFF_CMD, 0);
-  invoke(DEV(rgbs_a), RGB_EFF_CMD, 0);
-  invoke(DEV(rgbs_b), RGB_EFR_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFR_CMD, 0);
+  invoke(DEV(selector_b), RGB_EFF_CMD, 0);
+  invoke(DEV(selector_a), RGB_EFF_CMD, 0);
+  invoke(DEV(selector_b), RGB_EFR_CMD, 0);
   mark("inhibited");
   k_sleep(K_MSEC(200));
   CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);

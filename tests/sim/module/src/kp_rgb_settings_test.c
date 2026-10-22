@@ -267,9 +267,9 @@ static int settings_provider_commit(void) {
     CHECK(!device_is_ready(DEV(probe_b)));
     CHECK(device_init(DEV(probe_b)) == 0);
 #endif
-#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(rgbs_a)));
-    CHECK(device_init(DEV(rgbs_a)) == 0);
+#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
+    CHECK(!device_is_ready(DEV(selector_a)));
+    CHECK(device_init(DEV(selector_a)) == 0);
 #endif
   }
   printk("PASS scoped settings provider before restoration\n");
@@ -297,6 +297,13 @@ static void check_restored(void) {
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) ==
         (external_storage_loaded ? DEV(probe_b) : DEV(probe_d)));
+  CHECK(!strcmp(DEV(selector_a)->name, "rgbs_a"));
+  CHECK(!strcmp(DEV(selector_b)->name, "rgbs_b"));
+  CHECK(zmk_behavior_get_binding(DEV(selector_a)->name) == DEV(selector_a));
+  CHECK(zmk_behavior_get_binding(DEV(ordinary)->name) == NULL);
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    CHECK(kp_rgb_selector_registry_at(i)->owner != DEV(ordinary));
+  }
   CHECK(kp_rgb_global.brightness == 61 && kp_rgb_global.user_on);
   check_defaults();
 }
@@ -462,21 +469,21 @@ static void runtime_parameters(void) {
                               RGB_SPI_CMD, RGB_SPD_CMD, RGB_COLOR_HSB_CMD};
   for (size_t i = 0; i < ARRAY_SIZE(commands); i++) {
     uint32_t argument = commands[i] == RGB_COLOR_HSB_CMD ? RGB_COLOR_HSB_VAL(211, 37, 43) : 0;
-    invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
-    invoke(DEV(rgbs_a), commands[i], argument, DEV(rgbs_a));
+    invoke(DEV(selector_a), commands[i], argument, DEV(selector_a));
+    invoke(DEV(selector_a), commands[i], argument, DEV(selector_a));
     k_sleep(K_MSEC(60));
     CHECK(saves == before);
   }
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 211);
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 37);
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 43);
-  qualified_parameter(DEV(rgbs_a),
+  qualified_parameter(DEV(selector_a),
       KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, member_slot(DEV(selector_a), DEV(probe_a))),
       RGB_COLOR_HSB_VAL(288, 55, 29));
-  qualified_parameter(DEV(rgbs_a),
+  qualified_parameter(DEV(selector_a),
       KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, member_slot(DEV(selector_a), DEV(probe_a))),
       2888);
-  qualified_parameter(DEV(rgbs_b),
+  qualified_parameter(DEV(selector_b),
       KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, member_slot(DEV(selector_b), DEV(probe_b))),
       3888);
   k_sleep(K_MSEC(1100)); CHECK(saves == before);
@@ -492,7 +499,7 @@ static void runtime_parameters(void) {
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
   struct record before_b = *find(SELECTOR_B_PATH "state");
   struct record before_global = *find(ROOT "state");
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, member_slot(DEV(selector_a), DEV(probe_a)), DEV(rgbs_a));
+  invoke(DEV(selector_a), RGB_EFS_CMD, member_slot(DEV(selector_a), DEV(probe_a)), DEV(selector_a));
   k_sleep(K_MSEC(100));
   CHECK(saves == before + 1);
   durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
@@ -502,7 +509,7 @@ static void runtime_parameters(void) {
   CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
   CHECK(find(before_b.name)->len == before_b.len);
   CHECK(!memcmp(find(before_b.name)->bytes, before_b.bytes, before_b.len));
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, member_slot(DEV(selector_b), DEV(probe_b)), DEV(rgbs_b));
+  invoke(DEV(selector_b), RGB_EFS_CMD, member_slot(DEV(selector_b), DEV(probe_b)), DEV(selector_b));
   k_sleep(K_MSEC(100)); CHECK(saves == before + 2);
   CHECK(!strcmp(journal[1].path, SELECTOR_B_PATH "state"));
   durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
@@ -885,10 +892,12 @@ static void scenario(void *a, void *b, void *c) {
     CHECK(kp_rgb_global.brightness == 100);
     CHECK(device_init(DEV(probe_b)) == 0);
 #endif
-#if DT_PROP(DT_NODELABEL(rgbs_a), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(rgbs_a)));
-    CHECK(kp_rgb_global.brightness == 61);
-    CHECK(device_init(DEV(rgbs_a)) == 0);
+#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
+    CHECK(!device_is_ready(DEV(selector_a)));
+    CHECK(kp_rgb_global.brightness == 100);
+    CHECK(settings_load_subtree("keypaw/rgb_matrix") == -ENODEV);
+    CHECK(kp_rgb_global.brightness == 100);
+    CHECK(device_init(DEV(selector_a)) == 0);
 #endif
     k_sleep(K_MSEC(200));
     CHECK(!boot_checked);

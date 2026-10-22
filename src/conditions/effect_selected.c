@@ -30,16 +30,16 @@ static const struct kp_rgb_condition_api api = {
 
 #define DEFINE(inst)                                                           \
   BUILD_ASSERT(                                                                \
-      DT_NODE_HAS_COMPAT(DT_INST_PHANDLE(inst, selector),                      \
-                         keypaw_rgb_overlay_selector) &&                       \
-          DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, selector), okay),           \
+      KP_RGB_IS_CONTROLLED_OVERLAY(DT_INST_PHANDLE(inst, selector)) &&         \
+          DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, selector), okay) &&         \
+          DT_SAME_NODE(DT_PARENT(DT_INST_PHANDLE(inst, selector)),             \
+                       KP_RGB_NODE),                                           \
       "selected-effect condition requires an enabled selector overlay");       \
-  BUILD_ASSERT(                                                                \
-      DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, effect), okay) &&               \
-          DT_SAME_NODE(DT_PARENT(DT_INST_PHANDLE(inst, effect)),               \
-                       DT_INST_PHANDLE(inst, selector)),                       \
-      "selected-effect condition requires an enabled effect member "           \
-      "of its selector");                                                      \
+  BUILD_ASSERT(DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, effect), okay) &&      \
+                   DT_SAME_NODE(DT_PARENT(DT_INST_PHANDLE(inst, effect)),      \
+                                DT_INST_PHANDLE(inst, selector)),              \
+               "selected-effect condition requires an enabled effect member "  \
+               "of its selector");                                             \
   static const struct selected_cfg cfg_##inst = {                              \
       .selector = DEVICE_DT_GET(DT_INST_PHANDLE(inst, selector)),              \
       .effect = DEVICE_DT_GET(DT_INST_PHANDLE(inst, effect)),                  \

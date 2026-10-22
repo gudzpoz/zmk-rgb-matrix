@@ -60,19 +60,13 @@
         max-brightness = <100>;
         idle-brightness = <100>;
         composite_selector: composite_selector {
-            compatible = "keypaw,rgb-overlay-selector";
+            compatible = "keypaw,rgb-overlay";
+            controllable; #binding-cells = <2>; label = "rgbs";
             all-leds;
             fx_static: fx-static {
                 compatible = "keypaw,rgb-matrix-static";
                 led-colors = <0x102030 0x405060 0x708090 0xa0b0c0 0xd0e0f0>;
             };
-        };
-    };
-    behaviors {
-        rgbs: rgbs {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&composite_selector>;
         };
     };
 };

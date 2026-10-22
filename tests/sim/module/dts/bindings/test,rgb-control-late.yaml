@@ -1,6 +1,0 @@
-description: Deferred canonical control for native control contracts
-compatible: "test,rgb-control-late"
-include: "keypaw,behavior-rgb-selector.yaml"
-properties:
-  zephyr,deferred-init:
-    type: boolean

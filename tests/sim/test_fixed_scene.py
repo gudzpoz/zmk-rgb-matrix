@@ -25,7 +25,6 @@ SCENE = '''
             color = <0x804020>; };
     };
 };
-/ { behaviors { /delete-node/ rgbs; }; };
 &rgb_matrix {
     initial-on;
     initial-brightness = <50>; max-brightness = <75>; idle-brightness = <25>;

@@ -7,7 +7,7 @@
  * Deliberately standalone: a stock upstream 4x12 grid layout plus a 48-LED
  * strip, so the previews do not depend on the keypaw48 shield or any of the
  * real hardware bring-up. Effects belong to the preview_selector overlay;
- * rgbs is the canonical control for that selector.
+ * The selector itself is the behavior endpoint, named rgbs.
  *
  * The strip is a keypaw,led-strip-capture device rather than a real WS2812: the
  * capture driver records every frame the engine paints, which is what the GIF
@@ -73,7 +73,8 @@
            36 37 38 39 40 41 42 43 44 45 46 47
         >;
         preview_selector: preview_selector {
-            compatible = "keypaw,rgb-overlay-selector";
+            compatible = "keypaw,rgb-overlay";
+            controllable; #binding-cells = <2>; label = "rgbs";
             all-leds;
             initial-effect = <0>;
 
@@ -448,13 +449,6 @@
     };
 
 
-    behaviors {
-        rgbs: rgbs {
-            compatible = "keypaw,behavior-rgb-selector";
-            #binding-cells = <2>;
-            selector = <&preview_selector>;
-        };
-    };
 };
 
 /* The upstream 4x12 fragment ships only the key geometry; the transform is the

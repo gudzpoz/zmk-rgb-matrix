@@ -62,7 +62,7 @@ static void check_static_metadata(void) {
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == NULL);
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
-  CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, defctl)));
+  CHECK(selector->owner == DEV(default_selector));
   CHECK(selector->effect_count == 4);
   CHECK(selector->members[0].effect == DEV(default_ready));
   CHECK(strcmp(selector->members[0].id, "ready") == 0);
@@ -86,7 +86,7 @@ static void check_static_metadata(void) {
 
   selector = find_selector("default_late_selector");
   CHECK(selector != NULL && selector->effect_count == 3);
-  CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, latectl)));
+  CHECK(selector->owner == DEV(default_late_selector));
   CHECK(selector->members[0].effect == DEV(default_late));
   CHECK(strcmp(selector->members[0].id, "late") == 0);
   kp_rgb_matrix_lock();

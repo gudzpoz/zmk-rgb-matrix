@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 description: Scripted native overlay for lifecycle, composition and scheduling contracts.
 compatible: "keypaw,native-engine-overlay"
-include: keypaw,rgb-overlay-common.yaml
+include: [base.yaml, "keypaw,rgb-overlay-common.yaml", behavior-metadata.yaml]
 properties:
   condition:
     type: phandle
@@ -11,3 +11,7 @@ properties:
     required: true
   filter:
     type: boolean
+  test-behavior:
+    type: boolean
+  "#binding-cells":
+    type: int

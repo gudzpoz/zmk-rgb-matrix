@@ -70,13 +70,11 @@ def main():
     collision = SELECTOR_IDS + '''
 / { second_parent {
     collision_selector: selector-a {
-    compatible = "keypaw,rgb-overlay-selector"; leds = <0 1>;
+    compatible = "keypaw,rgb-overlay"; leds = <0 1>;
+    controllable; #binding-cells = <2>; label = "colctl";
     condition = <&preview_visible>; initial-effect = <0>;
     collision_effect: collision_effect { compatible = "keypaw,rgb-matrix-solid";
         };
-}; }; behaviors { colctl {
-    compatible = "keypaw,behavior-rgb-selector"; #binding-cells = <2>;
-    selector = <&collision_selector>;
 }; }; };
 '''
     for settings in ("n", "y"):

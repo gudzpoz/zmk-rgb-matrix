@@ -514,10 +514,10 @@ SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_sourc
 
 static void special_cases(void) {
     if (kp_test_case("startup-unready-selector")) {
-        KP_CHECK(!device_is_ready(DEV(rgbs_a)));
+        KP_CHECK(!device_is_ready(DEV(selector_a)));
         drain(); KP_CHECK(calls(DEV(cc_root)) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        KP_CHECK(device_init(DEV(rgbs_a)) == 0);
+        KP_CHECK(device_init(DEV(selector_a)) == 0);
         k_msleep(100); drain();
         KP_CHECK(calls(DEV(cc_root)) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);

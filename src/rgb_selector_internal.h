@@ -21,7 +21,6 @@ struct kp_rgb_selector_member {
 
 struct kp_rgb_selector {
   const struct device *owner;
-  const struct device *control;
   const char *id;
   const struct kp_rgb_selector_member *members;
   size_t effect_count;
@@ -72,6 +71,8 @@ kp_rgb_selector_overlay_state_locked(const struct device *selector);
 int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
 void kp_rgb_selector_overlays_defaults_locked(void);
 
+struct behavior_driver_api;
+extern const struct behavior_driver_api kp_rgb_selector_behavior_api;
 struct zmk_behavior_binding;
 #define RGB_SELECTOR_COLOR_CMD 0x108u
 #define RGB_SELECTOR_PERIOD_CMD 0x109u

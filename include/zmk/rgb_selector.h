@@ -12,7 +12,7 @@
  * effect, or NULL for a NULL/unready selector or until that selector's
  * post-restoration startup succeeds.
  * Selection is independent of power, inhibition, visibility and local LED count.
- * Supply a keypaw,rgb-overlay-selector device. ISR calls return NULL.
+ * Supply a controllable keypaw,rgb-overlay device. ISR calls return NULL.
  */
 const struct device *zmk_rgb_selector_get_selected(const struct device *selector);
 
@@ -25,7 +25,7 @@ const struct device *zmk_rgb_selector_get_selected(const struct device *selector
  * condition refresh. Input and painting wait for synchronous notification
  * consumers and the refresh. Does not save settings, broadcast, or change power;
  * selection-dependent conditions may change visibility. Do not call from
- * effect/overlay callbacks. Supply a keypaw,rgb-overlay-selector device.
+ * effect/overlay callbacks. Supply a controllable keypaw,rgb-overlay device.
  */
 int zmk_rgb_selector_select(const struct device *selector,
                             const struct device *effect);
@@ -34,7 +34,7 @@ int zmk_rgb_selector_select(const struct device *selector,
  * request child reset/repaint. Selection notifications are emitted only when the
  * selected effect changes. Returns 0, -ENODEV for an unavailable selector, or
  * -EWOULDBLOCK in ISR context. Thread-only, local-only; does not save settings or
- * broadcast. Supply a keypaw,rgb-overlay-selector device. Do not call from
+ * broadcast. Supply a controllable keypaw,rgb-overlay device. Do not call from
  * effect/overlay callbacks.
  */
 int zmk_rgb_selector_reset(const struct device *selector);

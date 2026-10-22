@@ -26,12 +26,12 @@ static const struct kp_rgb_effect_callbacks callbacks __unused = {.render = rend
 #define DEFINE(inst)                                                         \
     KP_RGB_OVERLAY_TARGET_ARRAYS(inst, sm_##inst);                             \
     static const struct static_config sm_##inst##_cfg = {                     \
-        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                    \
+        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), &callbacks, false), \
     };                                                                       \
     static struct static_data sm_##inst##_data = {                            \
         KP_RGB_OVERLAY_COMMON_DATA(inst, sm_##inst),                           \
     };                                                                       \
-    KP_RGB_OVERLAY_DEFINE(inst, &callbacks, false, sm_##inst);
+    KP_RGB_OVERLAY_DEFINE(inst, sm_##inst);
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
 #if DT_NODE_EXISTS(DT_NODELABEL(sm00))
