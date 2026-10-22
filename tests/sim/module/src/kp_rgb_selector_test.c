@@ -16,6 +16,7 @@
 #include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
 
 struct probe_config {
@@ -240,7 +241,7 @@ static void scoped_snapshot_roundtrip(void) {
   struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(selector_a);
   struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(selector_b);
   CHECK(a != NULL && b != NULL);
-  const struct device *captured_member = a->active_fx;
+  const struct device *captured_member = kp_rgb_selector_selected(a);
   struct kp_rgb_hsb initial_color = kp_rgb_effect_data(captured_member)->color;
   struct kp_rgb_hsb snapshot_color = initial_color;
   snapshot_color.b = 47;
@@ -249,7 +250,7 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(captured_a.color.b == 47);
   CHECK(kp_rgb_selector_snapshot_locked(selector_b, &captured_b) == 0);
   uint16_t original_slot = captured_a.slot;
-  const struct device *original_member = a->active_fx;
+  const struct device *original_member = kp_rgb_selector_selected(a);
   uint16_t alternate_slot = UINT16_MAX;
   for (size_t i = 0; i < a->effect_count; i++) {
     if (i != original_slot && kp_rgb_selector_at(a, i) != NULL &&
@@ -259,7 +260,7 @@ static void scoped_snapshot_roundtrip(void) {
     }
   }
   CHECK(alternate_slot != UINT16_MAX);
-  const struct device *other_member = b->active_fx;
+  const struct device *other_member = kp_rgb_selector_selected(b);
   struct kp_rgb_hsb other_color = kp_rgb_effect_data(other_member)->color;
   uint32_t other_period = kp_rgb_effect_period(other_member);
   CHECK(kp_rgb_selector_select_locked(a, alternate_slot) == 1);
@@ -282,22 +283,22 @@ static void scoped_snapshot_roundtrip(void) {
   CHECK(period_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
                                      RGB_SELECTOR_PERIOD_CMD, original_slot));
   kp_rgb_matrix_lock();
-  CHECK(a->active_fx != original_member);
+  CHECK(kp_rgb_selector_selected(a) != original_member);
   CHECK(kp_rgb_selector_dispatch_locked(a, color_binding.param1, color_binding.param2) == 0);
   CHECK(kp_rgb_selector_dispatch_locked(a, period_binding.param1, period_binding.param2) == 0);
-  CHECK(a->active_fx != original_member && a->effect_index == alternate_slot);
+  CHECK(kp_rgb_selector_selected(a) != original_member && a->effect_index == alternate_slot);
   CHECK(kp_rgb_effect_data(original_member)->color.h == captured_a.color.h);
   CHECK(kp_rgb_effect_data(original_member)->color.s == captured_a.color.s);
   CHECK(kp_rgb_effect_data(original_member)->color.b == captured_a.color.b);
   CHECK(kp_rgb_effect_period(original_member) == captured_a.period_ms);
-  CHECK(b->active_fx == other_member);
+  CHECK(kp_rgb_selector_selected(b) == other_member);
   CHECK(kp_rgb_effect_data(other_member)->color.h == other_color.h);
   CHECK(kp_rgb_effect_data(other_member)->color.s == other_color.s);
   CHECK(kp_rgb_effect_data(other_member)->color.b == other_color.b);
   CHECK(kp_rgb_effect_period(other_member) == other_period);
   CHECK(kp_rgb_selector_dispatch_locked(a, selection_binding.param1,
                                          selection_binding.param2) == 0);
-  CHECK(a->active_fx == original_member && a->effect_index == original_slot);
+  CHECK(kp_rgb_selector_selected(a) == original_member && a->effect_index == original_slot);
   CHECK(kp_rgb_set_color_locked(original_member, &initial_color) == 0);
   kp_rgb_matrix_unlock();
   CHECK(captured_b.control == DEV(selector_b));
@@ -333,9 +334,9 @@ static void controls(void) {
   select_slot(DEV(selector_a), UINT16_MAX, -EINVAL);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
   invoke(DEV(selector_a), RGB_EFR_CMD, 0);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_c));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_c));
   invoke(DEV(selector_a), RGB_EFF_CMD, 0);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_b));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_b))) == DEV(probe_b));
   struct zmk_behavior_binding invalid = binding(DEV(selector_a), RGB_OFF_CMD, 0);
   CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
           &invalid, (struct zmk_behavior_binding_event){0}) == -ENOTSUP);
@@ -346,7 +347,7 @@ static void controls(void) {
   converted(DEV(preview_selector), RGB_EFS_CMD, 1, DEV(preview_selector), RGB_EFS_CMD, 1);
   invoke(DEV(preview_selector), RGB_EFS_CMD, 1);
   CHECK(preview_slot() == 1);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_a));
   invoke(DEV(preview_selector), RGB_EFS_CMD, 0);
   CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
@@ -392,9 +393,9 @@ static void reset_controls(void) {
   unsigned b_resets = DATA(probe_d)->resets;
   unsigned a_resets = DATA(probe_c)->resets;
   invoke(DEV(selector_a), RGB_RESET_CMD, 0);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_a));
   CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_d));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_b))) == DEV(probe_d));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == 3000);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 42);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 31);
@@ -406,8 +407,8 @@ static void reset_controls(void) {
   CHECK(atomic_get(&selection_events_b) == b_notifications);
   CHECK(DATA(probe_d)->resets == b_resets && DATA(probe_d)->active);
   invoke(DEV(rgb_matrix), RGB_RESET_CMD, 0);
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->active_fx == DEV(probe_a));
-  CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->active_fx == DEV(probe_b));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_a));
+  CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_b))) == DEV(probe_b));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 180);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 100);

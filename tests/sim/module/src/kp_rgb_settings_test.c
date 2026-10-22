@@ -3,6 +3,7 @@
  */
 
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -909,8 +910,8 @@ static void scenario(void *a, void *b, void *c) {
     kp_rgb_matrix_lock();
     for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
       const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-      if (selector->owner == DEV(selector_a)) CHECK(selector->active_fx == DEV(probe_c));
-      if (selector->owner == DEV(selector_b)) CHECK(selector->active_fx == DEV(probe_d));
+      if (selector->owner == DEV(selector_a)) CHECK(kp_rgb_selector_selected(selector) == DEV(probe_c));
+      if (selector->owner == DEV(selector_b)) CHECK(kp_rgb_selector_selected(selector) == DEV(probe_d));
     }
     kp_rgb_matrix_unlock();
     check_defaults();

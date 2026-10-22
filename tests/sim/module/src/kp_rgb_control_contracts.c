@@ -11,6 +11,7 @@
 #include <zmk/rgb_selector.h>
 #include <zmk/events/rgb_selector_selection_changed.h>
 #include "rgb_matrix_internal.h"
+#include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
 #include "native_contract.h"
 
@@ -18,7 +19,8 @@ BUILD_ASSERT(KP_RGB_DEVICE_INIT_PRIORITY == 99);
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 DEFINE_DT_ENUM(control_axis_t, axis, none, vertical, horizontal);
 struct control_config { struct kp_rgb_effect_common_config common; control_axis_t axis; };
-struct control_data { struct kp_rgb_effect_common_data common; unsigned callbacks, resets, activations, deactivations, events; uint32_t elapsed; int64_t event_time; };
+struct control_data { struct kp_rgb_effect_common_data common; unsigned callbacks, resets, activations, deactivations, events; unsigned reset_sequence, activation_sequence, deactivation_sequence, event_sequence; uint32_t elapsed; int64_t event_time; };
+static unsigned callback_sequence;
 static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
     struct control_data *data = dev->data;
     KP_CHECK(frame->scratch == NULL);
@@ -34,17 +36,17 @@ static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
 static void reset(const struct device *dev, int64_t now) {
     ARG_UNUSED(now);
     struct control_data *data = dev->data;
-    data->callbacks++; data->resets++;
+    data->callbacks++; data->resets++; data->reset_sequence = ++callback_sequence;
 }
 static void active(const struct device *dev, bool value, int64_t now) {
     ARG_UNUSED(now);
     struct control_data *data = dev->data;
     data->callbacks++;
-    if (value) data->activations++; else data->deactivations++;
+    if (value) { data->activations++; data->activation_sequence = ++callback_sequence; } else { data->deactivations++; data->deactivation_sequence = ++callback_sequence; }
 }
 static bool event(const struct device *dev, const struct kp_rgb_key_event *ev) {
     struct control_data *data = dev->data;
-    data->callbacks++; data->events++; data->event_time = ev->timestamp_ms;
+    data->callbacks++; data->events++; data->event_time = ev->timestamp_ms; data->event_sequence = ++callback_sequence;
     return true;
 }
 static const struct kp_rgb_effect_callbacks callbacks = {
@@ -326,11 +328,11 @@ static void registry(void) {
     KP_CHECK(kp_rgb_selector_calc_index(a, 0, INT16_MAX) == 1);
     KP_CHECK(kp_rgb_selector_calc_index(a, 1, INT16_MIN) == 1);
     KP_CHECK(kp_rgb_selector_select_locked(a, 1) == 1);
-    KP_CHECK(a->active_fx == DEV(probe_c));
+    KP_CHECK(kp_rgb_selector_selected(a) == DEV(probe_c));
     KP_CHECK(kp_rgb_selector_select_locked(a, 0) == 1);
-    KP_CHECK(a->active_fx == DEV(probe_a));
+    KP_CHECK(kp_rgb_selector_selected(a) == DEV(probe_a));
     KP_CHECK(kp_rgb_selector_select_locked(a, 2) == -EINVAL);
-    KP_CHECK(b->active_fx == DEV(probe_b));
+    KP_CHECK(kp_rgb_selector_selected(b) == DEV(probe_b));
     KP_CHECK(((const struct control_config *)DEV(probe_a)->config)->axis == DT_ENUM_CONST(axis, none));
     KP_CHECK(((const struct control_config *)DEV(probe_b)->config)->axis == DT_ENUM_CONST(axis, vertical));
     KP_CHECK(((const struct control_config *)DEV(probe_c)->config)->axis == DT_ENUM_CONST(axis, horizontal));
@@ -728,7 +730,7 @@ static void prestart_reset_prepare(void) {
     kp_rgb_effect_data(DEV(probe_a))->duration_ms = 4321;
     kp_rgb_effect_data(DEV(probe_c))->duration_ms = 4321;
     kp_rgb_selector_overlays_defaults_locked();
-    KP_CHECK(a->effect_index == a->initial_effect && a->active_fx == NULL);
+    KP_CHECK(a->effect_index == a->initial_effect && kp_rgb_selector_selected(a) == NULL);
     check_reset_parameters();
     KP_CHECK(!a->publish_changes && zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     KP_CHECK(!a->notification_pending && callback_count() == callbacks);
@@ -755,7 +757,7 @@ static void reset_fallback(void) {
     kp_rgb_effect_data(DEV(probe_a))->duration_ms = 4321;
     kp_rgb_effect_data(DEV(probe_c))->duration_ms = 4321;
     KP_CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
-    KP_CHECK(a->active_fx == DEV(probe_a) && a->effect_index == 0);
+    KP_CHECK(kp_rgb_selector_selected(a) == DEV(probe_a) && a->effect_index == 0);
     check_reset_parameters();
     KP_CHECK(callback_count() == callbacks && atomic_get(&events_a) == publications);
     KP_CHECK(a->notification_pending == (start == 1));
@@ -834,9 +836,30 @@ static void owner_callbacks(void) {
     KP_CHECK(a->on_event(DEV(selector_a), &ev));
     KP_CHECK(a0->deactivations == old_deactivations + 1 && a1->resets == new_resets + 1);
     KP_CHECK(a1->events == 1 && a1->event_time == ev.timestamp_ms);
+    KP_CHECK(a0->deactivation_sequence < a1->reset_sequence &&
+             a1->reset_sequence < a1->activation_sequence &&
+             a1->activation_sequence < a1->event_sequence);
     KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 0);
     frame.local_ms = 1050; frame.elapsed_ms = 50;
     KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 50);
+    unsigned a0_resets = a0->resets, a1_resets = a1->resets, b0_resets = b0->resets;
+    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+    KP_CHECK(a->on_event(DEV(selector_a), &ev));
+    KP_CHECK(a0->resets == a0_resets && a1->resets == a1_resets &&
+             a0->activation_sequence < a0->event_sequence);
+    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    KP_CHECK(a->on_event(DEV(selector_a), &ev));
+    KP_CHECK(a0->resets == a0_resets && a1->resets == a1_resets);
+    KP_CHECK(b0->resets == b0_resets);
+    frame.local_ms = 1080; frame.elapsed_ms = 30;
+    KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 0);
+    frame.local_ms = 1090; frame.elapsed_ms = 10;
+    KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 10);
+    a->set_active(DEV(selector_a), false, 1090);
+    a->set_active(DEV(selector_a), true, 1095);
+    KP_CHECK(a1->resets == a1_resets);
+    frame.local_ms = 1096; frame.elapsed_ms = 6;
+    KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 0);
     frame.local_ms = 1100; frame.elapsed_ms = 0;
     KP_CHECK(a->render(DEV(selector_a), &frame)); KP_CHECK(a1->elapsed == 0);
     unsigned skipped_resets = a0->resets;

@@ -155,7 +155,8 @@ static int kp_save_selector(size_t index, uint32_t *revision) {
   kp_rgb_matrix_lock();
   *revision = kp_selectors[index].revision;
   int err = -ENODEV;
-  if (device_is_ready(selector->owner) && selector->active_fx != NULL) {
+  if (kp_rgb_selector_overlay_state_locked(selector->owner) == selector &&
+      kp_rgb_selector_selected(selector) != NULL) {
     err = kp_rgb_persist_encode_selector(
         selector->members[selector->effect_index].id, &selection);
   }

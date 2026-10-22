@@ -16,14 +16,15 @@ int kp_rgb_selector_snapshot_locked(const struct device *selector,
     return -EINVAL;
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
-  if (state == NULL || !device_is_ready(state->owner) ||
-      state->active_fx == NULL || !device_is_ready(state->active_fx))
+  if (state == NULL || !device_is_ready(state->owner))
+    return -ENODEV;
+  const struct device *effect = kp_rgb_selector_selected(state);
+  if (effect == NULL)
     return -ENODEV;
   size_t slot = state->effect_index;
-  if (slot >= state->effect_count || state->members[slot].effect != state->active_fx)
+  if (slot >= state->effect_count || state->members[slot].effect != effect)
     return -EINVAL;
-  const struct kp_rgb_effect_common_data *data =
-      kp_rgb_effect_data(state->active_fx);
+  const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
   *snapshot = (struct kp_rgb_selector_snapshot){.control = state->owner,
                                                 .slot = (uint16_t)slot,
                                                 .color = data->color,

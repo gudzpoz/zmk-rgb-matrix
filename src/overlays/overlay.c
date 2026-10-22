@@ -49,9 +49,6 @@ static void kp_selector_reconcile(const struct device *dev, int64_t now_ms) {
   if (data->reset_requested) {
     for (size_t i = 0; i < data->selector.effect_count; i++) {
       data->reset_pending[i] = true;
-      if (kp_rgb_selector_at(&data->selector, i) != NULL) {
-        kp_rgb_effect_instance_restart_clock(&data->instances[i]);
-      }
     }
     data->reset_requested = false;
   }
@@ -125,14 +122,11 @@ static bool kp_selector_render(const struct device *dev,
   bool animating = false;
 
   if (cfg->private_effect == NULL && data->ready) {
-    if (frame->elapsed_ms == 0) {
-      for (size_t i = 0; i < data->selector.effect_count; i++) {
-        if (kp_rgb_selector_at(&data->selector, i) != NULL) {
-          kp_rgb_effect_instance_restart_clock(&data->instances[i]);
-        }
-      }
-    }
     kp_selector_reconcile(dev, frame->local_ms);
+    if (frame->elapsed_ms == 0 && data->live_slot != SIZE_MAX &&
+        kp_rgb_selector_at(&data->selector, data->live_slot) != NULL) {
+      kp_rgb_effect_instance_restart_clock(&data->instances[data->live_slot]);
+    }
   }
 
   struct kp_rgb_frame child_frame = *frame;
@@ -188,11 +182,11 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
     return -ENODEV;
   struct kp_selector_data *data = dev->data;
   kp_rgb_selector_apply_defaults_locked(selector);
-  selector->effect_index =
+  size_t requested_slot =
       kp_rgb_selector_at(selector, selector->initial_effect) != NULL
           ? selector->initial_effect
           : 0;
-  int err = kp_rgb_selector_resolve_locked(selector);
+  int err = kp_rgb_selector_resolve_locked(selector, requested_slot);
   data->reset_requested = true;
   zmk_rgb_matrix_flush();
   return err;
@@ -209,14 +203,11 @@ static int kp_selector_start(const struct device *dev) {
     kp_rgb_matrix_unlock();
     return 0;
   }
-  if (data->selector.active_fx == NULL) {
-    data->selector.effect_index = data->selector.initial_effect;
-  }
-  if (kp_rgb_selector_at(&data->selector, data->selector.effect_index) ==
-      NULL) {
-    data->selector.effect_index = 0;
-  }
-  int err = kp_rgb_selector_resolve_locked(&data->selector);
+  size_t requested_slot =
+      kp_rgb_selector_selected(&data->selector) != NULL
+          ? data->selector.effect_index
+          : 0;
+  int err = kp_rgb_selector_resolve_locked(&data->selector, requested_slot);
   data->ready = err == 0;
   if (data->ready) {
     data->selector.publish_changes = true;
@@ -339,7 +330,6 @@ static void kp_selector_defaults_locked(const struct device *dev) {
   }
   kp_rgb_selector_apply_defaults_locked(&data->selector);
   data->selector.effect_index = data->selector.initial_effect;
-  data->selector.active_fx = NULL;
   data->reset_requested = true;
   zmk_rgb_matrix_flush();
 }
