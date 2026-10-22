@@ -76,6 +76,11 @@ static void global_apply(uint32_t command, uint32_t argument) {
     CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
 }
 static unsigned connected;
+static k_tid_t binding_thread;
+static bool framework_invoking;
+static uint32_t framework_color;
+static struct kp_rgb_hsb framework_before;
+static unsigned framework_destinations;
 static int64_t reconnect_floor[2];
 static bool fail_a;
 static uint32_t fail_kind = RGB_SELECTOR_COLOR_CMD;
@@ -112,6 +117,23 @@ K_THREAD_DEFINE(split_query, 1024, query_thread, NULL, NULL, NULL, 5, 0, 0);
 static int send_command(uint8_t source, struct zmk_split_transport_central_command cmd) {
     CHECK(source < 2);
     CHECK(cmd.type == ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR);
+    if (k_current_get() == binding_thread) {
+        CHECK(framework_invoking);
+        CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(rgbs_a)->name));
+        CHECK(cmd.data.invoke_behavior.param1 ==
+              KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+        CHECK(cmd.data.invoke_behavior.param2 == framework_color);
+        CHECK(cmd.data.invoke_behavior.state == 1);
+        CHECK(cmd.data.invoke_behavior.event_source == 0);
+        CHECK(cmd.data.invoke_behavior.position == 0);
+        kp_rgb_matrix_lock();
+        CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == framework_before.h &&
+              kp_rgb_effect_data(DEV(probe_a))->color.s == framework_before.s &&
+              kp_rgb_effect_data(DEV(probe_a))->color.b == framework_before.b);
+        kp_rgb_matrix_unlock();
+        framework_destinations |= BIT(source);
+        return 0;
+    }
     k_mutex_lock(&records_lock, K_FOREVER);
     bool present = connected & BIT(source);
     k_mutex_unlock(&records_lock);
@@ -354,6 +376,11 @@ static void clock_offsets(void) {
         CHECK(kp_rgb_clock_ms() == central[i] + (uint32_t)k_uptime_get() - before);
     }
     kp_rgb_set_clock_offset(0);
+}
+static int control_framework(uint32_t command, uint32_t argument) {
+    struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgbs_a)->name,
+        .param1 = command, .param2 = argument};
+    return zmk_behavior_invoke_binding(&binding, (struct zmk_behavior_binding_event){0}, true);
 }
 static int control_apply(uint32_t command, uint32_t argument) {
     struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgbs_a)->name,
@@ -784,6 +811,40 @@ static void test_thread(void *a, void *b, void *c) {
     snapshot_validation();
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+    if (!strcmp(split_case, "binding-forwarding")) {
+        apply(DEV(selector_a), RGB_EFS_CMD, 1);
+        connect(3);
+        kp_rgb_matrix_lock();
+        framework_before = kp_rgb_effect_data(DEV(probe_a))->color;
+        uint16_t expected_hue = (framework_before.h + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360;
+        framework_color = RGB_COLOR_HSB_VAL(expected_hue, framework_before.s, framework_before.b);
+        kp_rgb_matrix_unlock();
+        binding_thread = k_current_get();
+        framework_invoking = true;
+        CHECK(control_framework(RGB_HUI_CMD, 0) == 0);
+        framework_invoking = false;
+        CHECK(framework_destinations == (BIT(0) | BIT(1)));
+        kp_rgb_matrix_lock();
+        struct kp_rgb_hsb slot1_after = kp_rgb_effect_data(DEV(probe_a))->color;
+        CHECK(slot1_after.h == expected_hue && slot1_after.s == framework_before.s &&
+              slot1_after.b == framework_before.b);
+        kp_rgb_matrix_unlock();
+        apply(DEV(selector_a), RGB_EFS_CMD, 2);
+        kp_rgb_matrix_lock();
+        struct kp_rgb_hsb slot2_before = kp_rgb_effect_data(DEV(probe_c))->color;
+        kp_rgb_matrix_unlock();
+        unsigned destinations_before_direct = framework_destinations;
+        CHECK(control_apply(RGB_HUD_CMD, 0) == 0);
+        kp_rgb_matrix_lock();
+        struct kp_rgb_hsb slot2_after = kp_rgb_effect_data(DEV(probe_c))->color;
+        struct kp_rgb_hsb slot1_final = kp_rgb_effect_data(DEV(probe_a))->color;
+        CHECK(slot2_after.h == (slot2_before.h + 360 - CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360);
+        CHECK(slot2_after.s == slot2_before.s && slot2_after.b == slot2_before.b);
+        CHECK(memcmp(&slot1_after, &slot1_final, sizeof(slot1_after)) == 0);
+        kp_rgb_matrix_unlock();
+        CHECK(framework_destinations == destinations_before_direct);
+        printk("PASS split %s\n", split_case); exit(0);
+    }
     if (!strncmp(split_case, "late-", 5) || !strncmp(split_case, "ready-", 6)) readiness();
     if (!strncmp(split_case, "brightness-", 11)) brightness_split();
     apply(DEV(selector_a), RGB_EFS_CMD, 1);

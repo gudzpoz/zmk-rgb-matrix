@@ -417,6 +417,51 @@ static void converted(uint32_t command, uint32_t absolute, uint32_t value) {
         }
     }
 }
+static void normalize_commands(void) {
+    wait_ready(); kp_rgb_matrix_lock();
+    const uint32_t commands[][2] = {
+        {RGB_HUI_CMD, 0}, {RGB_HUD_CMD, 0}, {RGB_SAI_CMD, 0}, {RGB_SAD_CMD, 0},
+        {RGB_SPI_CMD, 0}, {RGB_SPD_CMD, 0}, {RGB_SPI_CMD, 2400},
+        {RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(17, 43, 61)},
+    };
+    for (size_t i = 0; i < ARRAY_SIZE(commands); i++) {
+        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+        struct kp_rgb_effect_common_data before_a = *kp_rgb_effect_data(DEV(probe_a));
+        struct kp_rgb_effect_common_data before_b = *kp_rgb_effect_data(DEV(probe_b));
+        struct kp_rgb_effect_common_data before_c = *kp_rgb_effect_data(DEV(probe_c));
+        struct zmk_behavior_binding b = binding(DEV(rgbs_a), commands[i][0], commands[i][1]);
+        bool period = commands[i][0] == RGB_SPI_CMD || commands[i][0] == RGB_SPD_CMD;
+        KP_CHECK(convert(&b) == 0);
+        KP_CHECK(b.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
+            period ? RGB_SELECTOR_PERIOD_CMD : RGB_SELECTOR_COLOR_CMD, 1));
+        KP_CHECK(memcmp(&before_a, kp_rgb_effect_data(DEV(probe_a)), sizeof(before_a)) == 0);
+        struct zmk_behavior_binding canonical = b;
+        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+        KP_CHECK(convert(&b) == 0);
+        KP_CHECK(b.param1 == canonical.param1 && b.param2 == canonical.param2 &&
+                 strcmp(b.behavior_dev, canonical.behavior_dev) == 0);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == 0);
+        const struct kp_rgb_effect_common_data *after_a = kp_rgb_effect_data(DEV(probe_a));
+        if (period) {
+            KP_CHECK(after_a->duration_ms == b.param2);
+            KP_CHECK(memcmp(&after_a->color, &before_a.color, sizeof(before_a.color)) == 0);
+        } else {
+            KP_CHECK(after_a->color.h == (b.param2 >> 16));
+            KP_CHECK(after_a->color.s == ((b.param2 >> 8) & 255));
+            KP_CHECK(after_a->color.b == (b.param2 & 255));
+            KP_CHECK(after_a->duration_ms == before_a.duration_ms);
+        }
+        KP_CHECK(memcmp(&before_b, kp_rgb_effect_data(DEV(probe_b)), sizeof(before_b)) == 0);
+        KP_CHECK(memcmp(&before_c, kp_rgb_effect_data(DEV(probe_c)), sizeof(before_c)) == 0);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+        struct kp_rgb_effect_common_data captured_a = *after_a;
+        KP_CHECK(invoke(DEV(rgbs_a), RGB_HUI_CMD, 0) == 0);
+        KP_CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h ==
+                 (before_c.color.h + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360);
+        KP_CHECK(memcmp(&captured_a, kp_rgb_effect_data(DEV(probe_a)), sizeof(captured_a)) == 0);
+    }
+    kp_rgb_matrix_unlock();
+}
 static void conversion(void) {
     wait_ready(); kp_rgb_matrix_lock();
     struct kp_rgb_hsb c = {350,95,37};
@@ -489,6 +534,47 @@ static void validation(void) {
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(ordinary)) == NULL);
     KP_CHECK(zmk_rgb_selector_select(DEV(ordinary), DEV(probe_a)) == -ENODEV);
     KP_CHECK(zmk_rgb_selector_reset(DEV(ordinary)) == -ENODEV);
+    kp_rgb_matrix_unlock();
+}
+static void canonical_validation(void) {
+    wait_ready(); kp_rgb_matrix_lock();
+    const uint32_t slots[] = {0, 3, UINT16_MAX};
+    const uint32_t bad_colors[] = {RGB_COLOR_HSB_VAL(361,0,0), RGB_COLOR_HSB_VAL(0,101,0),
+        RGB_COLOR_HSB_VAL(0,0,101), UINT32_MAX, 0x80000000};
+    const uint32_t bad_periods[] = {0, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS - 1,
+        CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS + 1, 65536 + 100, 0x80000000, UINT32_MAX};
+    struct kp_rgb_effect_common_data before_a = *kp_rgb_effect_data(DEV(probe_a));
+    struct kp_rgb_effect_common_data before_c = *kp_rgb_effect_data(DEV(probe_c));
+    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+    for (size_t i = 0; i < ARRAY_SIZE(slots); i++) {
+        int expected = slots[i] == 0 ? -ENOENT : -EINVAL;
+        uint32_t cmd = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, slots[i]);
+        struct zmk_behavior_binding b = binding(DEV(rgbs_a), cmd, RGB_COLOR_HSB_VAL(22, 33, 44));
+        KP_CHECK(convert(&b) == expected);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == expected);
+        cmd = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, slots[i]);
+        b = binding(DEV(rgbs_a), cmd, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS);
+        KP_CHECK(convert(&b) == expected);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == expected);
+    }
+    for (size_t i = 0; i < ARRAY_SIZE(bad_colors); i++) {
+        struct zmk_behavior_binding b = binding(DEV(rgbs_a),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1), bad_colors[i]);
+        KP_CHECK(convert(&b) == -EINVAL);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == -EINVAL);
+    }
+    for (size_t i = 0; i < ARRAY_SIZE(bad_periods); i++) {
+        struct zmk_behavior_binding b = binding(DEV(rgbs_a),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), bad_periods[i]);
+        KP_CHECK(convert(&b) == -EINVAL);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == -EINVAL);
+    }
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    KP_CHECK(memcmp(&before_a, kp_rgb_effect_data(DEV(probe_a)), sizeof(before_a)) == 0);
+    KP_CHECK(memcmp(&before_c, kp_rgb_effect_data(DEV(probe_c)), sizeof(before_c)) == 0);
+    KP_CHECK(invoke(DEV(rgbs_a), RGB_RESET_CMD, 1) == -EINVAL);
+    KP_CHECK(invoke(DEV(rgbs_a), RGB_EFS_CMD, UINT32_MAX) == -EINVAL);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == before_a.duration_ms);
     kp_rgb_matrix_unlock();
 }
 static void global_commands(void) {
@@ -819,6 +905,8 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-peripheral")) { conversion(); irq_offload(isr, NULL); }
     else if (kp_test_case("control-conversion") || kp_test_case("control-conversion-metadata-off") || kp_test_case("control-large-step")) conversion();
     else if (kp_test_case("control-validation")) validation();
+    else if (kp_test_case("control-canonical-validation")) canonical_validation();
+    else if (kp_test_case("control-normalize-commands")) normalize_commands();
     else if (kp_test_case("control-global-commands")) global_commands();
     else if (kp_test_case("control-reset")) scoped_reset();
     else if (kp_test_case("control-reset-fallback-noop") || kp_test_case("control-reset-fallback-notify")) reset_fallback();

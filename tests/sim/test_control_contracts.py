@@ -18,6 +18,8 @@ SCENARIOS = {
     "control-conversion": "controls",
     "control-conversion-metadata-off": "controls-metadata-off",
     "control-validation": "controls",
+    "control-canonical-validation": "controls",
+    "control-normalize-commands": "controls",
     "control-global-commands": "controls",
     "control-reset": "controls",
     "control-reset-fallback-noop": "reset-fallback",

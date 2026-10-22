@@ -17,7 +17,7 @@ ZERO = '''
 '''
 SCENARIOS = ("existing", "color", "period", "selection", "reset-color", "reset-period",
              "reset-selection", "pacing-color", "pacing-period", "pacing-selection",
-             "fairness", "transport-change", "local-silence", "clock")
+             "fairness", "transport-change", "local-silence", "clock", "binding-forwarding")
 SCENARIOS += tuple(f"sweep-{kind}-{phase}" for kind in
                    ("dirty", "reset", "failed-dirty", "failed-reset") for phase in range(7))
 SCENARIOS += tuple(f"global-reset-{kind}-{phase}" for kind in ("success", "failed")

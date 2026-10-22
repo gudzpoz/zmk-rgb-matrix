@@ -81,6 +81,12 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
 void kp_rgb_selector_overlays_defaults_locked(void);
 
 struct zmk_behavior_binding;
+#define RGB_SELECTOR_COLOR_CMD 0x108u
+#define RGB_SELECTOR_PERIOD_CMD 0x109u
+#define KP_RGB_SELECTOR_COMMAND_MASK 0xffffu
+#define KP_RGB_SELECTOR_MEMBER_COMMAND(command, slot) \
+  ((uint32_t)(command) | ((uint32_t)(slot) << 16))
+
 int kp_rgb_selector_convert_locked(struct kp_rgb_selector *selector,
                                    struct zmk_behavior_binding *binding);
 int kp_rgb_selector_dispatch_locked(struct kp_rgb_selector *selector,

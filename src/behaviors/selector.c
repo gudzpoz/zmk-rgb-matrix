@@ -41,15 +41,8 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
     return -ENODEV;
   }
   int err = kp_rgb_selector_convert_locked(state, binding);
-  if (err == 0) {
-    if (binding->param1 == RGB_COLOR_HSB_CMD)
-      binding->param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(
-          RGB_SELECTOR_COLOR_CMD, state->effect_index);
-    else if (binding->param1 == RGB_SPI_CMD)
-      binding->param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(
-          RGB_SELECTOR_PERIOD_CMD, state->effect_index);
+  if (err == 0)
     binding->behavior_dev = state->control->name;
-  }
   kp_rgb_matrix_unlock();
   return err;
 }
@@ -61,12 +54,9 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
-  int err =
-      state == NULL ? -ENODEV
-      : command == RGB_RESET_CMD
-          ? (argument == 0 ? kp_rgb_selector_overlay_reset_locked(selector)
-                           : -EINVAL)
-          : kp_rgb_selector_dispatch_locked(state, command, argument);
+  int err = state == NULL
+                ? -ENODEV
+                : kp_rgb_selector_dispatch_locked(state, command, argument);
   if (err >= 0) {
     if (command == RGB_RESET_CMD)
       kp_rgb_split_selector_reset_locked(selector);

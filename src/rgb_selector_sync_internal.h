@@ -7,12 +7,6 @@
 
 #include "rgb_selector_internal.h"
 
-#define RGB_SELECTOR_COLOR_CMD 0x108u
-#define RGB_SELECTOR_PERIOD_CMD 0x109u
-#define KP_RGB_SELECTOR_COMMAND_MASK 0xffffu
-#define KP_RGB_SELECTOR_MEMBER_COMMAND(command, slot)                          \
-  ((uint32_t)(command) | ((uint32_t)(slot) << 16))
-
 struct kp_rgb_selector_snapshot {
   const struct device *control;
   uint16_t slot;
@@ -28,8 +22,6 @@ int kp_rgb_selector_snapshot_locked(const struct device *selector,
 int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
                                          size_t *cursor,
                                          struct kp_rgb_selector_snapshot *snapshot);
-int kp_rgb_selector_member_apply_locked(struct kp_rgb_selector *selector,
-                                        uint32_t command, uint32_t argument);
 /* Three absolute bindings: member color, member period, then selection.
  * snapshot, snapshot->control and binding must be non-NULL; step must be 0–2.
  * The snapshot and returned binding contain no pointers to mutable parameters.
