@@ -63,14 +63,13 @@ static void check_static_metadata(void) {
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
   CHECK(selector->control == DEVICE_DT_GET(DT_PATH(behaviors, defctl)));
-  CHECK(selector->effect_count == 5);
+  CHECK(selector->effect_count == 4);
   CHECK(selector->members[0].effect == DEV(default_ready));
   CHECK(strcmp(selector->members[0].id, "ready") == 0);
-  CHECK(selector->members[1].effect == NULL && selector->members[1].id == NULL);
-  CHECK(selector->members[2].effect == DEV(default_explicit));
-  CHECK(strcmp(selector->members[2].id, "explicit") == 0);
-  CHECK(selector->members[3].effect == DEV(default_breathe));
-  CHECK(selector->members[4].effect == DEV(missing_selected));
+  CHECK(selector->members[1].effect == DEV(default_explicit));
+  CHECK(strcmp(selector->members[1].id, "explicit") == 0);
+  CHECK(selector->members[2].effect == DEV(default_breathe));
+  CHECK(selector->members[3].effect == DEV(missing_selected));
   CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.duration_ms == 1000);
   CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.color.h == 120);
   CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.color.s == 100);
@@ -95,17 +94,19 @@ static void check_static_metadata(void) {
   kp_rgb_matrix_unlock();
 }
 
-static void check_hole_selection(void) {
+static void check_dense_selection(void) {
   struct kp_rgb_selector *selector = find_selector("default_selector");
   CHECK(selector != NULL);
   kp_rgb_matrix_lock();
-  CHECK(selector->effect_count == 5);
-  CHECK(kp_rgb_selector_at(selector, 1) == NULL);
-  CHECK(kp_rgb_selector_calc_index(selector, 0, 1) == 2);
-  CHECK(kp_rgb_selector_calc_index(selector, 2, -1) == 0);
-  CHECK(kp_rgb_selector_select_locked(selector, 1) == -ENOENT);
-  CHECK(kp_rgb_selector_select_locked(selector, 2) == 1);
-  CHECK(kp_rgb_selector_select_locked(selector, 0) == 1);
+  CHECK(selector->effect_count == 4);
+  CHECK(kp_rgb_selector_at(selector, 0) == DEV(default_ready));
+  CHECK(kp_rgb_selector_at(selector, 1) == DEV(default_explicit));
+  CHECK(kp_rgb_selector_at(selector, 2) == DEV(default_breathe));
+  CHECK(kp_rgb_selector_at(selector, 3) == DEV(missing_selected));
+  CHECK(kp_rgb_selector_calc_index(selector, 0, 1) == 1);
+  CHECK(kp_rgb_selector_calc_index(selector, 1, -1) == 0);
+  CHECK(kp_rgb_selector_select_locked(selector, 0) == 0);
+  CHECK(kp_rgb_selector_select_locked(selector, 4) == -EINVAL);
   kp_rgb_matrix_unlock();
 }
 
@@ -281,7 +282,7 @@ static void defaults_test(void *a, void *b, void *c) {
     k_sleep(K_MSEC(1));
   }
   check_parameters(DEV(default_ready), early_color, 4321);
-  check_hole_selection();
+  check_dense_selection();
 #if IS_ENABLED(CONFIG_SETTINGS)
   stage_obsolete_parameters();
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
@@ -350,7 +351,7 @@ static void defaults_test(void *a, void *b, void *c) {
   check_defaults_match_data(DEV(missing_selected));
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_disabled), (struct kp_rgb_hsb){180, 100, 50}, 3210);
-  printk("PASS selector defaults shared metadata/disabled slots/live readiness/setters/reset/automatic startup\n");
+  printk("PASS selector defaults shared metadata/dense slots/live readiness/setters/reset/automatic startup\n");
   exit(0);
 }
 K_THREAD_DEFINE(defaults_thread, 4096, defaults_test, NULL, NULL, NULL, 5, 0, 1);

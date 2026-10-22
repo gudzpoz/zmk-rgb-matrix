@@ -30,6 +30,7 @@ SCENARIOS = {
     "control-large-step": "large-step",
     "control-deferred": "deferred",
     "control-unready": "deferred",
+    "control-member-unready": "member-unready",
     "control-local-only": "local-only",
     "control-owner": "owner",
     "control-duration-defaults": "duration-defaults",
@@ -67,7 +68,7 @@ def main():
             status = "disabled"; };
         probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
             color = <0x0000ff>; animate; };''')
-            fragment += "&selector_a { initial-effect = <1>; };"
+            fragment += "&selector_a { initial-effect = <99>; };"
         if image == "controls-metadata-off":
             conf += "CONFIG_ZMK_BEHAVIOR_METADATA=n\n"
             fragment += "&probe_a { #binding-cells = <0>; };\n"
@@ -75,6 +76,8 @@ def main():
             conf += "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=100000\n"
         elif image == "deferred":
             fragment += "&rgbs_a { compatible = \"test,rgb-control-late\", \"keypaw,behavior-rgb-selector\"; zephyr,deferred-init; };\n"
+        elif image == "member-unready":
+            fragment += "&probe_c { zephyr,deferred-init; };\n"
         elif image == "duration-defaults":
             fragment += "&probe_a { duration = <0>; }; &probe_c { duration = <66236>; }; &probe_b { duration = <0xffffffff>; };\n"
         elif image == "peripheral":

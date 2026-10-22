@@ -790,7 +790,7 @@ static void flush_isr(const void *arg) {
 }
 static void private_parameters(void) {
     const struct device *dev = DEV(effects_fallback);
-    KP_CHECK(device_is_ready(dev) && kp_rgb_effect_cfg(dev)->owner == NULL);
+    KP_CHECK(device_is_ready(dev));
     KP_CHECK(kp_rgb_effect_period(dev) == CLAMP(1000, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(rgb_equal(kp_rgb_hsb_to_rgb(kp_rgb_effect_data(dev)->color), kp_rgb_hsb_to_rgb((struct kp_rgb_hsb)KP_RGB_HSB_FROM_HEX(0x07111f))));
     kp_rgb_matrix_unlock();
@@ -804,7 +804,7 @@ static void private_parameters(void) {
     KP_CHECK(saved.color.h == 120 && saved.color.s == 90 && saved.color.b == 80);
     reset_device(dev, 0); common_equal(dev, saved);
     callbacks(dev)->set_active(dev, false, 0); common_equal(dev, saved);
-    KP_CHECK(kp_rgb_effect_cfg(DEV(effects_owned_reactive))->owner == NULL);
+
 }
 static void enums(void) {
     mode_t permissions = 0644; KP_CHECK(permissions == 0644);

@@ -120,8 +120,8 @@ VARIANTS = {
 ''', ''),
     'trigger-actions': ('actions', '''
 &{/cc_triggers/primary} {
-    on-enter = <&rgb_matrix RGB_OFF &ovl_tog &rgbs_a RGB_EFS_CMD 2>;
-    on-exit = <&rgb_matrix RGB_ON &ovl_tog &rgbs_a RGB_EFS_CMD 1>;
+    on-enter = <&rgb_matrix RGB_OFF &ovl_tog &rgbs_a RGB_EFS_CMD 1>;
+    on-exit = <&rgb_matrix RGB_ON &ovl_tog &rgbs_a RGB_EFS_CMD 0>;
 };
 &rgb_matrix { cc_latchgate: cc_latchgate {
     compatible = "keypaw,rgb-overlay"; local; condition = <&fixture_latch>; leds = <10>;

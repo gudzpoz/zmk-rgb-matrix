@@ -40,7 +40,7 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(device_is_ready(DEV(rgb_matrix)));
   CHECK(!strcmp(DEV(rgb_matrix)->name, "rgb"));
   const struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(status_color))->color;
-  CHECK(kp_rgb_effect_cfg(DEV(status_color))->owner == NULL);
+
   CHECK(zmk_rgb_matrix_set_color(DEV(status_color), &color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(status_color), 1000) == 0);
   kp_rgb_matrix_lock();

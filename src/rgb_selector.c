@@ -81,19 +81,6 @@ int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,
   return 1;
 }
 
-int kp_rgb_selector_member_slot(const struct kp_rgb_selector *selector,
-                                const struct device *effect) {
-  if (effect == NULL || selector->owner == NULL) {
-    return -ENOENT;
-  }
-  const struct kp_rgb_effect_common_config *cfg = kp_rgb_effect_cfg(effect);
-  if (cfg == NULL || cfg->owner != selector->owner ||
-      kp_rgb_selector_at(selector, cfg->slot) != effect) {
-    return -ENOENT;
-  }
-  return cfg->slot;
-}
-
 static bool kp_rgb_selector_command(uint32_t command) {
   switch (command) {
   case RGB_HUI_CMD:

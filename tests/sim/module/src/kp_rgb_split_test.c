@@ -30,6 +30,19 @@ NATIVE_TASK(split_options, PRE_BOOT_1, 12);
     printk("FAIL scoped split: %s line %d\n", #test, __LINE__); exit(1); \
 } } while (0)
 
+#if DT_NODE_EXISTS(DT_NODELABEL(selector_a))
+static uint16_t member_slot(const struct device *owner, const struct device *member) {
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+        const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+        if (selector->owner != owner) continue;
+        for (size_t slot = 0; slot < selector->effect_count; slot++)
+            if (selector->members[slot].effect == member) return slot;
+    }
+    CHECK(false);
+    return UINT16_MAX;
+}
+#define A_SLOT(member) member_slot(DEV(selector_a), DEV(member))
+#endif
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 #if !DT_NODE_EXISTS(DT_NODELABEL(selector_a))
 #include "kp_rgb_singleton_split_test.inc"
@@ -52,8 +65,8 @@ SYS_INIT(split_provider_init, APPLICATION, 98);
 struct lane {
     unsigned phase, slot, selected, completed;
     uint32_t color, period, selected_color, selected_period;
-    uint32_t member_color[MAX(DT_CHILD_NUM(DT_NODELABEL(selector_a)), DT_CHILD_NUM(DT_NODELABEL(selector_b)))];
-    uint32_t member_period[MAX(DT_CHILD_NUM(DT_NODELABEL(selector_a)), DT_CHILD_NUM(DT_NODELABEL(selector_b)))];
+    uint32_t member_color[MAX(DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a)), DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_b)))];
+    uint32_t member_period[MAX(DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a)), DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_b)))];
 };
 struct attempt {
     uint8_t source;
@@ -121,7 +134,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
         CHECK(framework_invoking);
         CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(rgbs_a)->name));
         CHECK(cmd.data.invoke_behavior.param1 ==
-              KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+              KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
         CHECK(cmd.data.invoke_behavior.param2 == framework_color);
         CHECK(cmd.data.invoke_behavior.state == 1);
         CHECK(cmd.data.invoke_behavior.event_source == 0);
@@ -240,16 +253,16 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
         global_apply(RGB_RESET_CMD, 0);
     } else if (action == 4) {
         CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
             RGB_COLOR_HSB_VAL(10, 100, 0)) == 0);
     } else if (action) {
         CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            action == 2 ? RGB_RESET_CMD : RGB_EFS_CMD, action == 2 ? 0 : 2) == 0);
+            action == 2 ? RGB_RESET_CMD : RGB_EFS_CMD, action == 2 ? 0 : A_SLOT(probe_c)) == 0);
         CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
             RGB_COLOR_HSB_VAL(299, 100, 100)) == 0);
         CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2999) == 0);
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2999) == 0);
     }
     if (send_duration) k_sleep(K_MSEC(send_duration));
     k_mutex_lock(&records_lock, K_FOREVER);
@@ -391,7 +404,7 @@ static int central_irq_result;
 static void central_irq(const void *unused) {
     ARG_UNUSED(unused);
     CHECK(k_is_in_isr());
-    central_irq_result = control_apply(RGB_EFS_CMD, 2);
+    central_irq_result = control_apply(RGB_EFS_CMD, A_SLOT(probe_c));
 }
 static void brightness_split(void) {
     bool reset = !strcmp(split_case, "brightness-reset");
@@ -402,10 +415,10 @@ static void brightness_split(void) {
     CHECK(kp_rgb_effect_data(DEV(probe_b))->color.b == 50);
     CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 25);
     const uint32_t old = RGB_COLOR_HSB_VAL(10, 100, 37);
-    parameters_hsb(DEV(selector_a), 1, old, 1100);
+    parameters_hsb(DEV(selector_a), A_SLOT(probe_a), old, 1100);
     parameters_hsb(DEV(selector_b), 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
     if (reset) {
-        parameters_hsb(DEV(selector_a), 2, RGB_COLOR_HSB_VAL(220, 70, 7), 2300);
+        parameters_hsb(DEV(selector_a), A_SLOT(probe_c), RGB_COLOR_HSB_VAL(220, 70, 7), 2300);
         parameters_hsb(DEV(selector_b), 1, RGB_COLOR_HSB_VAL(180, 60, 0), 2400);
     }
     mutate_kind = RGB_SELECTOR_COLOR_CMD;
@@ -422,7 +435,7 @@ static void brightness_split(void) {
             const struct attempt *r = &attempts[i];
             if (r->accepted) continue;
             CHECK(r->source == 0 && !strcmp(r->endpoint, DEV(rgbs_a)->name));
-            CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+            CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
             CHECK(r->argument == old);
             failures++;
         }
@@ -433,15 +446,15 @@ static void brightness_split(void) {
     uint32_t a_period = kp_rgb_effect_period(DEV(probe_a));
     uint32_t c_period = kp_rgb_effect_period(DEV(probe_c));
     const uint32_t commands[] = {
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD,
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), RGB_EFS_CMD};
-    const uint32_t reset_values[] = {old, 1100, 1, RGB_COLOR_HSB_VAL(120, 100, 50),
-        a_period, RGB_COLOR_HSB_VAL(240, 100, 25), c_period, 1};
-    const uint32_t latest_values[] = {old, 1100, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100, 1};
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD,
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), RGB_EFS_CMD};
+    const uint32_t reset_values[] = {old, 1100, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(120, 100, 50),
+        a_period, RGB_COLOR_HSB_VAL(240, 100, 25), c_period, A_SLOT(probe_a)};
+    const uint32_t latest_values[] = {old, 1100, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100, A_SLOT(probe_a)};
     unsigned step = 0, expected = reset ? 8 : 6;
     for (unsigned i = 0; i < attempt_count && step < expected; i++) {
         const struct attempt *r = &attempts[i];
@@ -456,8 +469,8 @@ static void brightness_split(void) {
         check_all_members(0); check_all_members(1);
         for (unsigned s = 0; s < 2; s++) {
             struct lane a = lane(s, 0), b = lane(s, 1);
-            CHECK(a.member_color[1] == RGB_COLOR_HSB_VAL(120, 100, 50));
-            CHECK(a.member_color[2] == RGB_COLOR_HSB_VAL(240, 100, 25));
+            CHECK(a.member_color[A_SLOT(probe_a)] == RGB_COLOR_HSB_VAL(120, 100, 50));
+            CHECK(a.member_color[A_SLOT(probe_c)] == RGB_COLOR_HSB_VAL(240, 100, 25));
             CHECK(b.member_color[0] == RGB_COLOR_HSB_VAL(60, 100, 50));
             CHECK(b.member_color[1] == RGB_COLOR_HSB_VAL(180, 100, 25));
             for (unsigned index = 0; index < 2; index++) {
@@ -473,11 +486,11 @@ static void brightness_split(void) {
                     if (!r->accepted || r->source != s || strcmp(r->endpoint, endpoint)) continue;
                     if (seen++ < count - 5) continue;
                     unsigned n = seen - (count - 5) - 1;
-                    unsigned slot = index ? n / 2 : 1 + n / 2;
+                    unsigned slot = n / 2;
                     uint32_t command = n == 4 ? RGB_EFS_CMD : KP_RGB_SELECTOR_MEMBER_COMMAND(
                         n & 1 ? RGB_SELECTOR_PERIOD_CMD : RGB_SELECTOR_COLOR_CMD, slot);
                     CHECK(r->command == command);
-                    if (n == 4) CHECK(r->argument == (index ? 0 : 1));
+                    if (n == 4) CHECK(r->argument == (index ? 0 : A_SLOT(probe_a)));
                     else if (!(n & 1)) {
                         uint32_t color = index ? (n == 0 ? RGB_COLOR_HSB_VAL(60, 100, 50) :
                             RGB_COLOR_HSB_VAL(180, 100, 25)) : (n == 0 ? RGB_COLOR_HSB_VAL(120, 100, 50) :
@@ -493,7 +506,7 @@ static void brightness_split(void) {
         }
     } else {
         for (unsigned s = 0; s < 2; s++) {
-            matches_hsb(s, 0, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
+            matches_hsb(s, 0, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
             matches_hsb(s, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
         }
         connect(2); k_sleep(K_MSEC(150));
@@ -501,7 +514,7 @@ static void brightness_split(void) {
         memset(remote[0], 0, sizeof(remote[0]));
         k_mutex_unlock(&records_lock);
         connect(3); k_sleep(K_MSEC(1200));
-        matches_hsb(0, 0, 1, RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
+        matches_hsb(0, 0, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
         matches_hsb(0, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
     }
     printk("PASS split %s\n", split_case); exit(0);
@@ -545,9 +558,9 @@ static void extended_split(void) {
         CHECK(mutation_count == 1);
         check_all_members(0); check_all_members(1);
         unsigned step = 0;
-        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD};
-        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, 1};
+        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
+        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
         for (unsigned i = 0; i < attempt_count && step < 3; i++) {
             const struct attempt *r = &attempts[i];
             if (r->source || strcmp(r->endpoint, DEV(rgbs_a)->name)) continue;
@@ -560,7 +573,7 @@ static void extended_split(void) {
         for (unsigned n = 0; n < 4; n++) {
             unsigned before = attempt_count;
             int64_t changed = k_uptime_get();
-            apply(DEV(selector_a), RGB_EFS_CMD, 1);
+            apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
             k_sleep(K_MSEC(500));
             unsigned packets = 0;
             for (unsigned i = before; i < attempt_count; i++) {
@@ -583,16 +596,16 @@ static void extended_split(void) {
             kp_rgb_split_selector_reset_locked(DEV(private_white));
             kp_rgb_matrix_unlock();
         } else {
-            const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD};
-            const uint32_t arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, 1};
+            const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
+            const uint32_t arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
             for (unsigned n = 0; n < ARRAY_SIZE(commands); n++) {
                 CHECK(control_apply(commands[n], arguments[n]) == 0);
                 k_sleep(K_MSEC(500));
                 for (unsigned s = 0; s < 2; s++) {
                     CHECK(lane(s, 0).completed == before[s] + 1);
                     before[s]++;
-                    matches(s, 0, 1, 10, 1100);
+                    matches(s, 0, A_SLOT(probe_a), 10, 1100);
                 }
             }
             CHECK(control_apply(RGB_EFS_CMD, UINT32_MAX) == -EINVAL);
@@ -652,8 +665,8 @@ static void extended_split(void) {
     } else if (!strcmp(split_case, "transport-change")) {
         failing(true); connect(3); k_sleep(K_MSEC(300));
         CHECK(lane(0, 0).completed == 0);
-        apply(DEV(selector_a), RGB_EFS_CMD, 2);
-        parameters(DEV(selector_a), 2, 220, 2220);
+        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
+        parameters(DEV(selector_a), A_SLOT(probe_c), 220, 2220);
         connect(0); k_sleep(K_MSEC(100));
         k_mutex_lock(&records_lock, K_FOREVER);
         memset(remote, 0, sizeof(remote));
@@ -661,10 +674,10 @@ static void extended_split(void) {
         k_mutex_unlock(&records_lock);
         failing(false); connect(3);
         k_sleep(K_MSEC(20)); CHECK(attempt_count == before);
-        k_sleep(K_MSEC(1000)); matches(0, 0, 2, 220, 2220); matches(1, 0, 2, 220, 2220);
+        k_sleep(K_MSEC(1000)); matches(0, 0, A_SLOT(probe_c), 220, 2220); matches(1, 0, A_SLOT(probe_c), 220, 2220);
         for (unsigned i = before; i < attempt_count; i++) if (!strcmp(attempts[i].endpoint, DEV(rgbs_a)->name)) {
             CHECK((attempts[i].command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_EFS_CMD ||
-                  attempts[i].command >> 16 == 2);
+                  attempts[i].command >> 16 == A_SLOT(probe_c));
         }
         query_error = -EIO; k_sleep(K_MSEC(100));
         query_error = 0; k_sleep(K_MSEC(1000));
@@ -672,11 +685,11 @@ static void extended_split(void) {
     } else if (!strcmp(split_case, "fairness")) {
         connect(3);
         for (unsigned i = 0; i < 30; i++) {
-            parameters(DEV(selector_a), 1, 100 + i, 2000 + i);
+            parameters(DEV(selector_a), A_SLOT(probe_a), 100 + i, 2000 + i);
             k_sleep(K_MSEC(20));
         }
         k_sleep(K_MSEC(1000));
-        matches(0, 0, 1, 129, 2029); matches(1, 0, 1, 129, 2029);
+        matches(0, 0, A_SLOT(probe_a), 129, 2029); matches(1, 0, A_SLOT(probe_a), 129, 2029);
         CHECK(lane(0, 1).completed == 1 && lane(1, 1).completed == 1);
         unsigned counts[2][2] = {0};
         for (unsigned i = 0; i < attempt_count; i++) {
@@ -711,7 +724,7 @@ static void extended_split(void) {
             if (!record->accepted) {
                 CHECK((record->command & KP_RGB_SELECTOR_COMMAND_MASK) == fail_kind);
                 CHECK(record->argument == (fail_kind == RGB_SELECTOR_COLOR_CMD ?
-                      RGB_COLOR_HSB_VAL(10, 100, 100) : fail_kind == RGB_SELECTOR_PERIOD_CMD ? 1100 : 1));
+                      RGB_COLOR_HSB_VAL(10, 100, 100) : fail_kind == RGB_SELECTOR_PERIOD_CMD ? 1100 : A_SLOT(probe_a)));
                 failures++;
             }
             previous = record;
@@ -720,12 +733,12 @@ static void extended_split(void) {
         k_mutex_unlock(&records_lock);
         failing(false); k_sleep(K_MSEC(3500));
         if (reset) check_all_members(0);
-        else { matches(0, 0, 2, 299, 2999); matches(1, 0, 2, 299, 2999); }
+        else { matches(0, 0, A_SLOT(probe_c), 299, 2999); matches(1, 0, A_SLOT(probe_c), 299, 2999); }
         k_mutex_lock(&records_lock, K_FOREVER);
         unsigned step = 0;
-        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD};
-        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, 1};
+        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
+        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
         for (unsigned i = 0; i < attempt_count && step < 3; i++) {
             struct attempt *record = &attempts[i];
             if (record->accepted && !record->source && !strcmp(record->endpoint, DEV(rgbs_a)->name)) {
@@ -812,7 +825,7 @@ static void test_thread(void *a, void *b, void *c) {
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
     if (!strcmp(split_case, "binding-forwarding")) {
-        apply(DEV(selector_a), RGB_EFS_CMD, 1);
+        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
         connect(3);
         kp_rgb_matrix_lock();
         framework_before = kp_rgb_effect_data(DEV(probe_a))->color;
@@ -829,7 +842,7 @@ static void test_thread(void *a, void *b, void *c) {
         CHECK(slot1_after.h == expected_hue && slot1_after.s == framework_before.s &&
               slot1_after.b == framework_before.b);
         kp_rgb_matrix_unlock();
-        apply(DEV(selector_a), RGB_EFS_CMD, 2);
+        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
         kp_rgb_matrix_lock();
         struct kp_rgb_hsb slot2_before = kp_rgb_effect_data(DEV(probe_c))->color;
         kp_rgb_matrix_unlock();
@@ -847,8 +860,8 @@ static void test_thread(void *a, void *b, void *c) {
     }
     if (!strncmp(split_case, "late-", 5) || !strncmp(split_case, "ready-", 6)) readiness();
     if (!strncmp(split_case, "brightness-", 11)) brightness_split();
-    apply(DEV(selector_a), RGB_EFS_CMD, 1);
-    parameters(DEV(selector_a), 1, 10, 1100);
+    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
+    parameters(DEV(selector_a), A_SLOT(probe_a), 10, 1100);
     apply(DEV(selector_b), RGB_EFS_CMD, 0);
     parameters(DEV(selector_b), 0, 20, 1200);
     if (strcmp(split_case, "existing")) { extended_split(); }
@@ -857,7 +870,7 @@ static void test_thread(void *a, void *b, void *c) {
     k_sleep(K_MSEC(800));
     CHECK(lane(0, 0).completed == 0);
     matches(0, 1, 0, 20, 1200);
-    matches(1, 0, 1, 10, 1100);
+    matches(1, 0, A_SLOT(probe_a), 10, 1100);
     matches(1, 1, 0, 20, 1200);
     k_mutex_lock(&records_lock, K_FOREVER);
     for (unsigned s = 0; s < 2; s++) {
@@ -868,11 +881,11 @@ static void test_thread(void *a, void *b, void *c) {
     printk("PASS scoped split off/inhibited reconnect endpoints/qualified ordering\n");
 
     unsigned previous = lane(1, 0).completed;
-    parameters(DEV(selector_a), 1, 30, 1300);
+    parameters(DEV(selector_a), A_SLOT(probe_a), 30, 1300);
     parameters(DEV(selector_b), 0, 40, 1400);
     k_sleep(K_MSEC(600));
     CHECK(lane(1, 0).completed > previous);
-    matches(1, 0, 1, 30, 1300);
+    matches(1, 0, A_SLOT(probe_a), 30, 1300);
     matches(0, 1, 0, 40, 1400);
     matches(1, 1, 0, 40, 1400);
     k_mutex_lock(&records_lock, K_FOREVER);
@@ -882,7 +895,7 @@ static void test_thread(void *a, void *b, void *c) {
         struct attempt *record = &attempts[i];
         if (record->accepted) continue;
         CHECK(record->source == 0 && !strcmp(record->endpoint, DEV(rgbs_a)->name));
-        CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+        CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
         CHECK(record->argument == RGB_COLOR_HSB_VAL(10, 100, 100));
         CHECK(last < 0 || record->time - last >= 50);
         last = record->time;
@@ -893,23 +906,23 @@ static void test_thread(void *a, void *b, void *c) {
     printk("PASS scoped split same-member parameter repair/independent lanes/frozen retries\n");
 
     for (unsigned i = 0; i < 6; i++) {
-        apply(DEV(selector_a), RGB_EFS_CMD, (i & 1) ? 1 : 2);
-        parameters(DEV(selector_a), (i & 1) ? 1 : 2, 50 + i, 1500 + i);
+        apply(DEV(selector_a), RGB_EFS_CMD, (i & 1) ? A_SLOT(probe_a) : A_SLOT(probe_c));
+        parameters(DEV(selector_a), (i & 1) ? A_SLOT(probe_a) : A_SLOT(probe_c), 50 + i, 1500 + i);
         k_sleep(K_MSEC(10));
     }
-    apply(DEV(selector_a), RGB_EFS_CMD, 2);
-    parameters(DEV(selector_a), 2, 60, 1600);
+    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
+    parameters(DEV(selector_a), A_SLOT(probe_c), 60, 1600);
     failing(false);
     k_sleep(K_MSEC(1700));
-    matches(0, 0, 2, 60, 1600);
-    matches(1, 0, 2, 60, 1600);
+    matches(0, 0, A_SLOT(probe_c), 60, 1600);
+    matches(1, 0, A_SLOT(probe_c), 60, 1600);
     /* The first accepted retry must still be the original frozen command. */
     k_mutex_lock(&records_lock, K_FOREVER);
     unsigned frozen_steps = 0;
     const uint32_t frozen_commands[] = {
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), RGB_EFS_CMD};
-    const uint32_t frozen_arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, 1};
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
+    const uint32_t frozen_arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
     for (unsigned i = 0; i < attempt_count && frozen_steps < 3; i++) {
         struct attempt *record = &attempts[i];
         if (record->accepted && record->source == 0 &&
@@ -936,7 +949,7 @@ static void test_thread(void *a, void *b, void *c) {
     for (unsigned i = blocked_start; i < attempt_count; i++) {
         if (!attempts[i].accepted) {
             CHECK(attempts[i].command ==
-                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2));
+                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)));
             blocked_failures++;
         }
     }
@@ -948,8 +961,8 @@ static void test_thread(void *a, void *b, void *c) {
     memset(remote[0], 0, sizeof(remote[0]));
     unsigned reconnect_start = attempt_count;
     k_mutex_unlock(&records_lock);
-    apply(DEV(selector_a), RGB_EFS_CMD, 1);
-    parameters(DEV(selector_a), 1, 70, 1700);
+    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
+    parameters(DEV(selector_a), A_SLOT(probe_a), 70, 1700);
     apply(DEV(selector_b), RGB_EFS_CMD, 1);
     parameters(DEV(selector_b), 1, 80, 1800);
     CHECK(zmk_rgb_matrix_on() == 0);
@@ -957,9 +970,9 @@ static void test_thread(void *a, void *b, void *c) {
     failing(false);
     connect(3);
     k_sleep(K_MSEC(1500));
-    matches(0, 0, 1, 70, 1700);
+    matches(0, 0, A_SLOT(probe_a), 70, 1700);
     matches(0, 1, 1, 80, 1800);
-    matches(1, 0, 1, 70, 1700);
+    matches(1, 0, A_SLOT(probe_a), 70, 1700);
     matches(1, 1, 1, 80, 1800);
     k_mutex_lock(&records_lock, K_FOREVER);
     CHECK(power[0] == RGB_ON_CMD);
@@ -967,7 +980,7 @@ static void test_thread(void *a, void *b, void *c) {
         struct attempt *record = &attempts[i];
         if (record->source == 0 && !strcmp(record->endpoint, DEV(rgbs_a)->name) &&
             (record->command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_SELECTOR_COLOR_CMD) {
-            CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1));
+            CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
             CHECK(record->argument == RGB_COLOR_HSB_VAL(70, 100, 100));
         }
     }
@@ -975,7 +988,8 @@ static void test_thread(void *a, void *b, void *c) {
     printk("PASS scoped split disconnect/reconnect discards in-flight snapshot\n");
 
     unsigned before = lane(0, 0).completed;
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 0) < 0);
+    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD,
+        DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a))) == -EINVAL);
     CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 99) < 0);
     CHECK(kp_rgb_selector_binding_apply(NULL, RGB_EFS_CMD, 1) == -ENODEV);
     CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
@@ -993,20 +1007,20 @@ static void test_thread(void *a, void *b, void *c) {
     unsigned reset_start = attempt_count;
     k_mutex_unlock(&records_lock);
     failing(true);
-    apply(DEV(selector_a), RGB_EFS_CMD, 2);
-    parameters(DEV(selector_a), 2, 211, 3211);
+    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
+    parameters(DEV(selector_a), A_SLOT(probe_c), 211, 3211);
     k_sleep(K_MSEC(200));
     k_mutex_lock(&records_lock, K_FOREVER);
     bool frozen_retry = false;
     for (unsigned i = reset_start; i < attempt_count; i++) {
         frozen_retry |= !attempts[i].accepted && attempts[i].source == 0 &&
-            attempts[i].command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2);
+            attempts[i].command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c));
     }
     CHECK(frozen_retry);
     k_mutex_unlock(&records_lock);
     apply(DEV(selector_a), RGB_RESET_CMD, 0);
     /* A normal revision must not erase the all-member reset obligation. */
-    parameters(DEV(selector_a), 1, 131, 2131);
+    parameters(DEV(selector_a), A_SLOT(probe_a), 131, 2131);
     failing(false);
     k_sleep(K_MSEC(2000));
     for (unsigned source = 0; source < 2; source++) {
@@ -1102,9 +1116,9 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(zmk_rgb_matrix_get_user_state(&initial_on) == 0);
     const unsigned levels[] = {37, 0};
     for (size_t i = 0; i < ARRAY_SIZE(levels); i++) {
-        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2),
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
                       RGB_COLOR_HSB_VAL(220, 70, levels[i])) == 0);
-        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2300) == 0);
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2300) == 0);
         CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
         CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
         struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(probe_c))->color;
@@ -1123,21 +1137,21 @@ static void receiving(void *a, void *b, void *c) {
         CHECK(kp_rgb_global.brightness == 37);
     }
     k_sleep(K_MSEC(200)); CHECK(peripheral_reports == 0);
-    CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, 2) == 0);
+    CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, A_SLOT(probe_c)) == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 0), 0) == -ENOENT);
+    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), 0) == -EINVAL);
     const uint32_t colors[] = {RGB_COLOR_HSB_VAL(361, 1, 100), RGB_COLOR_HSB_VAL(1, 101, 100),
                               RGB_COLOR_HSB_VAL(1, 1, 101), RGB_COLOR_HSB_VAL(1, 1, 255), UINT32_MAX};
     for (size_t i = 0; i < ARRAY_SIZE(colors); i++)
-        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), colors[i]) == -EINVAL);
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)), colors[i]) == -EINVAL);
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 220 &&
           kp_rgb_effect_data(DEV(probe_c))->color.s == 70 && kp_rgb_effect_data(DEV(probe_c))->color.b == 0);
     const uint32_t periods[] = {0, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS - 1,
                                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS + 1, UINT32_MAX};
     for (size_t i = 0; i < ARRAY_SIZE(periods); i++)
-        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), periods[i]) == -EINVAL);
-    const uint32_t slots[] = {0, UINT16_MAX, 0x10000, 0x10002, UINT32_MAX};
+        CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), periods[i]) == -EINVAL);
+    const uint32_t slots[] = {2, UINT16_MAX, 0x10000, 0x10002, UINT32_MAX};
     for (size_t i = 0; i < ARRAY_SIZE(slots); i++) {
         CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, slots[i]) < 0);
         if (slots[i] <= UINT16_MAX) {
@@ -1152,9 +1166,9 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(behavior_keymap_binding_pressed(&no_control, (struct zmk_behavior_binding_event){0}) == -EINVAL);
     irq_offload(receiving_irq, NULL);
     CHECK(irq_result == -EWOULDBLOCK);
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 2), RGB_COLOR_HSB_VAL(220, 70, 0)) == 0);
-    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 2), 2300) == 0);
-    CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, 2) == 0);
+    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)), RGB_COLOR_HSB_VAL(220, 70, 0)) == 0);
+    CHECK(receive(DEV(rgbs_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2300) == 0);
+    CHECK(receive(DEV(rgbs_a), RGB_EFS_CMD, A_SLOT(probe_c)) == 0);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 220 && kp_rgb_effect_data(DEV(probe_c))->color.s == 70 &&

@@ -211,11 +211,7 @@ void kp_rgb_effect_instance_restart_clock(struct kp_rgb_effect_instance *instanc
 bool kp_rgb_effect_render(const struct device *dev, const struct kp_rgb_frame *frame);
 
 #define KP_RGB_EFFECT_COMMON_CONFIG(inst, defaults_)                           \
-  .common = {                                                                  \
-      .owner = KP_RGB_EFFECT_OWNER(DT_DRV_INST(inst)),                         \
-      .slot = KP_RGB_EFFECT_SLOT(inst),                                        \
-      .defaults = defaults_,                                                   \
-  }
+  .common = {.defaults = defaults_}
 #define KP_RGB_EFFECT_COMMON_DATA(defaults_) .common = defaults_
 
 struct kp_rgb_effect_common_data {
@@ -223,8 +219,6 @@ struct kp_rgb_effect_common_data {
   struct kp_rgb_hsb color; /* default or current color */
 };
 struct kp_rgb_effect_common_config {
-  const struct device *owner; /* Selector device, or NULL for a non-selectable effect. */
-  uint16_t slot; /* Child position within its parent, including disabled siblings. */
   struct kp_rgb_effect_common_data defaults;
 };
 
@@ -250,17 +244,6 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
                CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
-
-#define KP_RGB_EFFECT_SLOT(inst) DT_NODE_CHILD_IDX(DT_DRV_INST(inst))
-
-#define KP_RGB_EFFECT_HAS_OWNER(node_id)                                       \
-  UTIL_AND(DT_NODE_HAS_STATUS(DT_PARENT(node_id), okay),                       \
-           DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_overlay_selector))
-
-#define KP_RGB_EFFECT_OWNER(node_id)                                           \
-  COND_CODE_1(KP_RGB_EFFECT_HAS_OWNER(node_id),                                \
-              (DEVICE_DT_GET(DT_PARENT(node_id))), (NULL))
-
 /* Build one compile-time default initializer shared by the immutable config and
  * mutable device data. Clamp the full-width property before narrowing it. */
 #define KP_RGB_EFFECT_DEFAULTS(inst, default_color_, default_duration_)        \

@@ -67,13 +67,16 @@ static bool event(const struct device *dev, const struct kp_rgb_key_event *ev) {
   printk("selector child %s input before renders=%u\n", dev->name, data->renders);
   return true;
 }
+#define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 
 static bool render(const struct device *dev, const struct kp_rgb_frame *frame) {
   check_callback_gates();
   struct probe_data *data = dev->data;
   const struct probe_config *cfg = dev->config;
   CHECK(data->active && frame->scratch == NULL);
-  CHECK(zmk_rgb_selector_get_selected(cfg->common.owner) == dev);
+  const struct device *selector = dev == DEV(probe_a) || dev == DEV(probe_c)
+                                      ? DEV(selector_a) : DEV(selector_b);
+  CHECK(zmk_rgb_selector_get_selected(selector) == dev);
   if (data->restart) { CHECK(frame->elapsed_ms == 0); data->restart = false; }
   data->renders++;
   for (size_t i = 0; i < frame->target_count; i++) {
@@ -99,7 +102,6 @@ static const struct kp_rgb_effect_callbacks callbacks = {
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, probe_##inst)
 DT_INST_FOREACH_STATUS_OKAY(PROBE_DEFINE)
 
-#define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 
 static int preview_select(unsigned slot) {
   return zmk_rgb_selector_select(DEV(preview_selector),
@@ -327,7 +329,7 @@ static void controls(void) {
   CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->control == DEV(rgbs_a));
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->control == DEV(rgbs_b));
-  select_slot(DEV(selector_a), 0, -ENOENT);
+  select_slot(DEV(selector_a), 2, -EINVAL);
   select_slot(DEV(selector_a), UINT16_MAX, -EINVAL);
   CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
   invoke(DEV(rgbs_a), RGB_EFR_CMD, 0);
@@ -349,11 +351,11 @@ static void controls(void) {
   CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
   scoped_snapshot_roundtrip();
-  converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 2);
-  converted(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot,
-            DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
+  converted(DEV(rgbs_a), RGB_EFF_CMD, 0, DEV(rgbs_a), RGB_EFS_CMD, 1);
+  converted(DEV(rgbs_b), RGB_EFS_CMD, 1,
+            DEV(rgbs_b), RGB_EFS_CMD, 1);
   converted(DEV(rgbs_a), RGB_HUI_CMD, 0, DEV(rgbs_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
+            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 0),
             RGB_COLOR_HSB_VAL((120 + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360, 100, 100));
   invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 2000);
@@ -378,8 +380,8 @@ static void controls(void) {
 }
 
 static void reset_controls(void) {
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_c))->slot);
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, 1);
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, 1);
   invoke(DEV(rgbs_a), RGB_SPI_CMD, 2000);
   invoke(DEV(rgbs_b), RGB_SPI_CMD, 3000);
   invoke(DEV(rgbs_b), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(42, 50, 31));
@@ -590,18 +592,23 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-  CHECK(kp_rgb_effect_cfg(DEV(probe_a))->owner == DEV(selector_a));
-  CHECK(kp_rgb_effect_cfg(DEV(probe_a))->slot == 1);
-  CHECK(kp_rgb_effect_cfg(DEV(probe_c))->slot == 2);
-  CHECK(kp_rgb_effect_cfg(DEV(probe_b))->owner == DEV(selector_b));
+  struct kp_rgb_selector *selector_a_state = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
+  CHECK(selector_a_state->members[0].effect == DEV(probe_a));
+  CHECK(selector_a_state->members[1].effect == DEV(probe_c));
+  CHECK(selector_a_state->effect_count == 2);
+  CHECK(kp_rgb_selector_at(selector_a_state, 2) == NULL);
+  struct kp_rgb_selector *selector_b_state = kp_rgb_selector_overlay_state_locked(DEV(selector_b));
+  CHECK(selector_b_state->members[0].effect == DEV(probe_b));
+  CHECK(selector_b_state->members[1].effect == DEV(probe_d));
+  CHECK(kp_rgb_selector_select_locked(selector_a_state, UINT16_MAX) == -EINVAL);
   unsigned settled = DATA(probe_a)->renders;
   kp_rgb_matrix_unlock();
   mark("initial");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(DATA(probe_a)->renders == settled); kp_rgb_matrix_unlock();
-  select_slot(DEV(selector_a), 0, -ENOENT);
+  select_slot(DEV(selector_a), 2, -EINVAL);
   select_slot(DEV(selector_a), 99, -EINVAL);
-  select_slot(DEV(selector_a), 1, 0);
+  select_slot(DEV(selector_a), 0, 0);
 
   public_selection();
   controls();
@@ -622,8 +629,8 @@ static void scenario(void *a, void *b, void *c) {
 
   CHECK(preview_select(1) == 0);
   k_sleep(K_MSEC(100));
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot);
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_d))->slot);
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, 0);
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, 1);
   mark("hidden");
   k_sleep(K_MSEC(200));
   kp_rgb_matrix_lock(); CHECK(!DATA(probe_a)->active && !DATA(probe_d)->active); kp_rgb_matrix_unlock();
@@ -668,7 +675,7 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(DATA(probe_c)->resets > resets && DATA(probe_c)->active);
   CHECK(DATA(probe_a)->resets == inactive_resets);
   kp_rgb_matrix_unlock();
-  select_slot(DEV(selector_a), 1, 1);
+  select_slot(DEV(selector_a), 0, 1);
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock(); CHECK(DATA(probe_a)->resets > inactive_resets); kp_rgb_matrix_unlock();
   kp_rgb_matrix_lock(); settled = DATA(probe_a)->renders; kp_rgb_matrix_unlock();

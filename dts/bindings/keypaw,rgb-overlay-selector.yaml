@@ -21,6 +21,6 @@ properties:
     type: int
     default: 0
     description: |
-      Initial child slot, in declaration order including disabled children.
+      Initial child slot, in declaration order among enabled children.
       Valid range is 0..65535. If this slot is unavailable, the first ready
       enabled child is selected instead.

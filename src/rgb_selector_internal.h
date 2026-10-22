@@ -13,7 +13,7 @@
 #include <zephyr/device.h>
 #include <zmk/rgb_color.h>
 
-/* Indexed by DTS child slot; disabled children retain a zeroed entry. */
+/* Enabled selector children in declaration order. */
 struct kp_rgb_selector_member {
   const struct device *effect;
   const char *id;
@@ -38,13 +38,11 @@ struct kp_rgb_selector {
 size_t kp_rgb_selector_registry_count(void);
 struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index);
 
-/* Returns NULL for out-of-range, disabled or currently unready slots. */
+/* Returns NULL for out-of-range or currently unready slots. */
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot);
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
                                     uint16_t current, int16_t delta);
-int kp_rgb_selector_member_slot(const struct kp_rgb_selector *selector,
-                                const struct device *effect);
 
 /* Caller holds the matrix lock. Selection changes queue notifications for
  * publish_changes selectors; callbacks are delivered outside the lock. */

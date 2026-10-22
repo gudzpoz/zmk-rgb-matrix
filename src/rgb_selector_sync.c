@@ -19,8 +19,8 @@ int kp_rgb_selector_snapshot_locked(const struct device *selector,
   if (state == NULL || !device_is_ready(state->control) ||
       state->active_fx == NULL || !device_is_ready(state->active_fx))
     return -ENODEV;
-  int slot = kp_rgb_selector_member_slot(state, state->active_fx);
-  if (slot < 0)
+  size_t slot = state->effect_index;
+  if (slot >= state->effect_count || state->members[slot].effect != state->active_fx)
     return -EINVAL;
   const struct kp_rgb_effect_common_data *data =
       kp_rgb_effect_data(state->active_fx);

@@ -36,7 +36,7 @@ REORDERED = '''
             color = <0xffff00>; duration = <0xffffffff>; };
     };
     selector_a: selector_a {
-        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <3>;
+        compatible = "keypaw,rgb-overlay-selector"; initial-effect = <2>;
         leds = <0 1>; condition = <&preview_visible>;
         optout: optout { compatible = "keypaw,rgb-matrix-solid";
             color = <0xff0000>; };

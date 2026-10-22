@@ -49,9 +49,11 @@ NATIVE_TASK(settings_options, PRE_BOOT_1, 11);
 #define B_STATIC_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_b))
 #define B_ALT_NAME KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_d))
 
+
 #if !DT_NODE_EXISTS(DT_NODELABEL(selector_a))
 #include "kp_rgb_singleton_settings_test.inc"
 #else
+static uint16_t member_slot(const struct device *owner, const struct device *member);
 struct record {
   char name[SETTINGS_MAX_NAME_LEN + 32];
   uint8_t bytes[36];
@@ -88,7 +90,7 @@ static void storage_query(void *a, void *b, void *c) {
     hook_action = 0;
     if (action == 1) {
       CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD,
-          kp_rgb_effect_cfg(DEV(probe_c))->slot) == 0);
+          member_slot(DEV(selector_a), DEV(probe_c))) == 0);
     } else if (action == 2) {
       CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
     } else if (action == 3) {
@@ -385,9 +387,20 @@ static unsigned durable_brightness(void) {
   return value.brightness;
 }
 
+static uint16_t member_slot(const struct device *owner, const struct device *member) {
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+    if (selector->owner != owner) continue;
+    for (size_t slot = 0; slot < selector->effect_count; slot++)
+      if (selector->members[slot].effect == member) return slot;
+  }
+  CHECK(false);
+  return UINT16_MAX;
+}
+
 static void select_member(const struct device *selector, const struct device *member) {
   CHECK(kp_rgb_selector_binding_apply(selector, RGB_EFS_CMD,
-                                     kp_rgb_effect_cfg(member)->slot) == 0);
+                                     member_slot(selector, member)) == 0);
 }
 
 static void stage(const char *path, const void *bytes, size_t len) {
@@ -458,13 +471,13 @@ static void runtime_parameters(void) {
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.s == 37);
   CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 43);
   qualified_parameter(DEV(rgbs_a),
-      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, member_slot(DEV(selector_a), DEV(probe_a))),
       RGB_COLOR_HSB_VAL(288, 55, 29));
   qualified_parameter(DEV(rgbs_a),
-      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, member_slot(DEV(selector_a), DEV(probe_a))),
       2888);
   qualified_parameter(DEV(rgbs_b),
-      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, kp_rgb_effect_cfg(DEV(probe_b))->slot),
+      KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, member_slot(DEV(selector_b), DEV(probe_b))),
       3888);
   k_sleep(K_MSEC(1100)); CHECK(saves == before);
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 288);
@@ -479,7 +492,7 @@ static void runtime_parameters(void) {
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
   struct record before_b = *find(SELECTOR_B_PATH "state");
   struct record before_global = *find(ROOT "state");
-  invoke(DEV(rgbs_a), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_a))->slot, DEV(rgbs_a));
+  invoke(DEV(rgbs_a), RGB_EFS_CMD, member_slot(DEV(selector_a), DEV(probe_a)), DEV(rgbs_a));
   k_sleep(K_MSEC(100));
   CHECK(saves == before + 1);
   durable_selection(SELECTOR_A_PATH "state", A_STATIC_NAME);
@@ -489,7 +502,7 @@ static void runtime_parameters(void) {
   CHECK(!strcmp(journal[0].path, SELECTOR_A_PATH "state"));
   CHECK(find(before_b.name)->len == before_b.len);
   CHECK(!memcmp(find(before_b.name)->bytes, before_b.bytes, before_b.len));
-  invoke(DEV(rgbs_b), RGB_EFS_CMD, kp_rgb_effect_cfg(DEV(probe_b))->slot, DEV(rgbs_b));
+  invoke(DEV(rgbs_b), RGB_EFS_CMD, member_slot(DEV(selector_b), DEV(probe_b)), DEV(rgbs_b));
   k_sleep(K_MSEC(100)); CHECK(saves == before + 2);
   CHECK(!strcmp(journal[1].path, SELECTOR_B_PATH "state"));
   durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
@@ -565,7 +578,7 @@ static void validation_case(void) {
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
 #if DT_NODE_EXISTS(DT_NODELABEL(optout))
-  CHECK(DT_PROP(DT_NODELABEL(selector_a), initial_effect) == 3);
+  CHECK(DT_PROP(DT_NODELABEL(selector_a), initial_effect) == 2);
   CHECK(DT_PROP(DT_NODELABEL(selector_b), initial_effect) == 1);
   CHECK(device_is_ready(DEV(probe_a)) && device_is_ready(DEV(probe_b)));
 #endif

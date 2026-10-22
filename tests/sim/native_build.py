@@ -31,6 +31,16 @@ SELECTORS = '''
         probe_c: a_motion { compatible = "keypaw,rgb-matrix-selector-probe";
             color = <0x0000ff>; animate; };
     };
+    ordinary: ordinary {
+        compatible = "keypaw,rgb-overlay";
+        leds = <1>;
+        condition = <&preview_visible>;
+        private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
+    };
+    disabled_selector: disabled_selector {
+        compatible = "keypaw,rgb-overlay-selector";
+        status = "disabled";
+    };
     selector_b: selector_b {
         compatible = "keypaw,rgb-overlay-selector";
         condition = <&preview_visible>;
@@ -41,12 +51,6 @@ SELECTORS = '''
             color = <0xffff00>; duration = <0xffffffff>; };
         probe_d: b_alt { compatible = "keypaw,rgb-matrix-selector-probe";
             color = <0x00ffff>; duration = <0xffffffff>; };
-    };
-    ordinary: ordinary {
-        compatible = "keypaw,rgb-overlay";
-        leds = <1>;
-        condition = <&preview_visible>;
-        private_white: white { compatible = "keypaw,rgb-matrix-solid"; color = <0xffffff>; };
     };
 };
 / {

@@ -215,14 +215,9 @@ static int kp_selector_start(const struct device *dev) {
                "RGB node name exceeds KP_RGB_PERSIST_MAX_ID_LENGTH");
 
 #define KP_SELECTOR_MEMBER(node_id)                                            \
-  COND_CODE_1(                                                                 \
-      DT_NODE_HAS_STATUS(node_id, okay),                                       \
-      ({.effect = DEVICE_DT_GET(node_id), .id = KP_SELECTOR_ID(node_id)}, ),   \
-      ({0}, ))
+  {.effect = DEVICE_DT_GET(node_id), .id = KP_SELECTOR_ID(node_id)},
 #define KP_SELECTOR_INSTANCE(node_id)                                          \
-  COND_CODE_1(DT_NODE_HAS_STATUS(node_id, okay),                               \
-              (KP_RGB_EFFECT_INSTANCE_INIT(DEVICE_DT_GET(node_id)), ),         \
-              (KP_RGB_EFFECT_INSTANCE_INIT(NULL), ))
+  KP_RGB_EFFECT_INSTANCE_INIT(DEVICE_DT_GET(node_id)),
 
 #define KP_CONTROL_MATCH(node_id, selector_id)                                 \
   +DT_SAME_NODE(DT_PHANDLE(node_id, selector), selector_id)
@@ -243,18 +238,18 @@ static int kp_selector_start(const struct device *dev) {
                                KP_SELECTOR_MEMBER_ID_LENGTH)                   \
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(DT_DRV_INST(inst)) > 0,                \
                "selector requires at least one enabled nested effect");        \
-  BUILD_ASSERT(DT_CHILD_NUM(DT_DRV_INST(inst)) <= UINT16_MAX,                  \
+  BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(DT_DRV_INST(inst)) <= UINT16_MAX,      \
                "selector has too many effect slots");                          \
   BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), initial_effect) >= 0 &&              \
                    DT_PROP(DT_DRV_INST(inst), initial_effect) <= UINT16_MAX,   \
                "selector initial-effect must fit a local slot");               \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_selector_##inst);                      \
   static const struct kp_rgb_selector_member kp_selector_##inst##_members[] =  \
-      {DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_SELECTOR_MEMBER)};               \
+      {DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_SELECTOR_MEMBER)};   \
   static struct kp_rgb_effect_instance kp_selector_##inst##_instances[] = {    \
-      DT_FOREACH_CHILD(DT_DRV_INST(inst), KP_SELECTOR_INSTANCE)};              \
-  static bool                                                                  \
-      kp_selector_##inst##_reset_pending[DT_CHILD_NUM(DT_DRV_INST(inst))];     \
+      DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_SELECTOR_INSTANCE)};  \
+  static bool kp_selector_##inst##_reset_pending[DT_CHILD_NUM_STATUS_OKAY(     \
+      DT_DRV_INST(inst))];                                                     \
   static const struct kp_selector_config kp_selector_##inst##_cfg = {          \
       .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst)),                      \
   };                                                                           \
@@ -280,30 +275,30 @@ static int kp_selector_start(const struct device *dev) {
 
 DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_DEFINE)
 
-#define KP_SELECTOR_ENTRY(inst) &kp_selector_##inst##_data.selector,
+#define KP_SELECTOR_REGISTRY_ENTRY(node_id)                                    \
+  COND_CODE_1(DT_NODE_HAS_COMPAT(node_id, keypaw_rgb_overlay_selector),        \
+              (DEVICE_DT_GET(node_id), ), ())
 
-static struct kp_rgb_selector *const kp_selector_registry[] = {
-    DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_ENTRY)};
+static const struct device *const kp_selector_registry[] = {
+    DT_FOREACH_CHILD_STATUS_OKAY(KP_RGB_NODE, KP_SELECTOR_REGISTRY_ENTRY)};
 
 size_t kp_rgb_selector_registry_count(void) {
   return ARRAY_SIZE(kp_selector_registry);
 }
 
 struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index) {
-  return index < kp_rgb_selector_registry_count() ? kp_selector_registry[index]
-                                                 : NULL;
+  if (index >= kp_rgb_selector_registry_count())
+    return NULL;
+  return &((struct kp_selector_data *)kp_selector_registry[index]->data)->selector;
 }
-
-#define KP_SELECTOR_START(inst)                                                \
-  do {                                                                         \
-    int err = kp_selector_start(DEVICE_DT_GET(DT_DRV_INST(inst)));             \
-    if (result == 0)                                                           \
-      result = err;                                                            \
-  } while (0);
 
 int kp_rgb_selector_overlays_start(void) {
   int result = 0;
-  DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_START)
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    int err = kp_selector_start(kp_selector_registry[i]);
+    if (result == 0)
+      result = err;
+  }
   return result;
 }
 
@@ -322,11 +317,9 @@ static void kp_selector_defaults_locked(const struct device *dev) {
   zmk_rgb_matrix_flush();
 }
 
-#define KP_SELECTOR_DEFAULTS(inst)                                             \
-  kp_selector_defaults_locked(DEVICE_DT_GET(DT_DRV_INST(inst)));
-
 void kp_rgb_selector_overlays_defaults_locked(void) {
-  DT_INST_FOREACH_STATUS_OKAY(KP_SELECTOR_DEFAULTS)
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+    kp_selector_defaults_locked(kp_selector_registry[i]);
 }
 
 #else
