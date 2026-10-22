@@ -304,7 +304,8 @@ enum kp_rgb_condition_scope {
 
 struct kp_rgb_condition_api {
   enum kp_rgb_condition_scope scope;
-  /* Return true when active. Must not synchronously invalidate any condition. */
+  /* Return true when active. Must be side-effect-free and must not synchronously
+   * invalidate any condition. */
   bool (*sample)(const struct device *dev);
 };
 

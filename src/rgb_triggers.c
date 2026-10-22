@@ -30,7 +30,6 @@ struct kp_trig {
   size_t enter_len;
   const struct kp_trig_action *exit;
   size_t exit_len;
-  bool baseline;
 };
 
 #define KP_TRIG_ACTION(idx, node_id, prop)                                     \
@@ -53,6 +52,8 @@ struct kp_trig {
 #define KP_TRIG_ASSERT(node_id)                                                \
   BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, bindings),                           \
                "RGB triggers use on-enter, not bindings");                     \
+  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, startup),                            \
+               "RGB trigger startup is unsupported");                          \
   BUILD_ASSERT(DT_PROP_LEN_OR(node_id, on_enter, 0) +                          \
                        DT_PROP_LEN_OR(node_id, on_exit, 0) >                   \
                    0,                                                          \
@@ -67,8 +68,7 @@ DT_INST_FOREACH_STATUS_OKAY(KP_TRIG_ASSERT_TABLE)
    .enter = KP_TRIG_ACTIONS(node_id, on_enter),                                \
    .enter_len = DT_PROP_LEN_OR(node_id, on_enter, 0),                          \
    .exit = KP_TRIG_ACTIONS(node_id, on_exit),                                  \
-   .exit_len = DT_PROP_LEN_OR(node_id, on_exit, 0),                            \
-   .baseline = DT_ENUM_IDX(node_id, startup) == 1},
+   .exit_len = DT_PROP_LEN_OR(node_id, on_exit, 0)},
 #define KP_TRIG_TABLE(inst)                                                    \
   DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), KP_TRIG_ONE_CHILD)
 
@@ -78,9 +78,7 @@ static const struct kp_trig kp_triggers[] = {
 /* All entry points run serialized on the control worker, outside engine locks. */
 static struct {
   bool disabled;
-  bool initialized;
   bool previous;
-  bool participant;
 } kp_trigger_state[ARRAY_SIZE(kp_triggers)];
 
 void kp_rgb_triggers_init(void) {
@@ -91,12 +89,6 @@ void kp_rgb_triggers_init(void) {
     if (!valid) {
       LOG_ERR("RGB trigger %s disabled: invalid condition", t->name);
     }
-  }
-}
-
-void kp_rgb_triggers_begin(void) {
-  for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
-    kp_trigger_state[i].participant = false;
   }
 }
 
@@ -113,7 +105,6 @@ static void kp_triggers_run(const struct kp_trig *t,
 }
 
 void kp_rgb_triggers_evaluate(int64_t now_ms) {
-  int8_t edges[MAX(1, ARRAY_SIZE(kp_triggers))] = {0};
   for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
     const struct kp_trig *t = &kp_triggers[i];
     if (kp_trigger_state[i].disabled) {
@@ -125,37 +116,11 @@ void kp_rgb_triggers_evaluate(int64_t now_ms) {
       continue;
     }
     bool active = t->condition == NULL || kp_rgb_condition_value(t->condition);
-    if (!kp_trigger_state[i].initialized) {
-      if (!t->baseline && active) {
-        edges[i] = 1;
-      }
-      kp_trigger_state[i].initialized = true;
-    } else if (active != kp_trigger_state[i].previous) {
-      edges[i] = active ? 1 : -1;
+    if (active == kp_trigger_state[i].previous) {
+      continue;
     }
     kp_trigger_state[i].previous = active;
-  }
-
-  for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
-    if (edges[i] == 0) {
-      continue;
-    }
-    const struct kp_trig *t = &kp_triggers[i];
-    const struct kp_trig_action *actions = edges[i] > 0 ? t->enter : t->exit;
-    size_t len = edges[i] > 0 ? t->enter_len : t->exit_len;
-    if (len == 0) {
-      continue;
-    }
-    kp_trigger_state[i].participant = true;
-    kp_triggers_run(t, actions, len, now_ms);
-  }
-}
-
-void kp_rgb_triggers_quarantine(void) {
-  for (size_t i = 0; i < ARRAY_SIZE(kp_triggers); i++) {
-    if (kp_trigger_state[i].participant) {
-      kp_trigger_state[i].disabled = true;
-      LOG_ERR("RGB trigger %s quarantined: feedback did not settle", kp_triggers[i].name);
-    }
+    kp_triggers_run(t, active ? t->enter : t->exit,
+                   active ? t->enter_len : t->exit_len, now_ms);
   }
 }

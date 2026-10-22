@@ -18,7 +18,7 @@
 #define KP_TEST_SELECTOR_A_STATE \
     "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
 struct source {
-    atomic_t value, calls, notify, pause;
+    atomic_t value, calls, pause;
     bool short_circuit;
 };
 struct source_config {
@@ -54,8 +54,6 @@ static bool sample(const struct device *dev) {
         if (s->short_circuit && !value) break;
         value &= kp_rgb_condition_value(cfg->deps[i]);
     }
-    if (atomic_cas(&s->notify, 1, 0))
-        kp_rgb_condition_invalidate(dev);
     return value;
 }
 #define DEP_DEVICE(node_id, prop, idx) DEVICE_DT_GET(DT_PHANDLE_BY_IDX(node_id, prop, idx)),
@@ -137,7 +135,39 @@ struct action_record { uint32_t code, parameter; int64_t timestamp; };
 static struct action_record actions[128];
 static unsigned action_count, release_count;
 static int action_error;
-static bool feedback, multi_feedback, capture_mutation, selector_mutation;
+static bool finite_cascade, multi_cascade, capture_mutation, selector_mutation;
+static unsigned mutation_budget, interleavings, sentinel_actions;
+static unsigned sentinel_root_calls, sentinel_left_calls, sentinel_right_calls;
+static unsigned cascade_actions;
+K_SEM_DEFINE(cascade_done, 0, 1);
+static void sentinel_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    KP_CHECK(k_current_get() == k_work_queue_thread_get(kp_rgb_work_q()));
+    KP_CHECK(action_count == sentinel_actions);
+    KP_CHECK(calls(DEV(cc_root)) == sentinel_root_calls);
+    KP_CHECK(calls(DEV(cc_left)) == sentinel_left_calls);
+    KP_CHECK(calls(DEV(cc_right)) == sentinel_right_calls);
+    if (capture_mutation) {
+        const unsigned expected[] = {10, 20, 25, 40};
+        KP_CHECK(action_count == ARRAY_SIZE(expected));
+        for (size_t n = 0; n < ARRAY_SIZE(expected); n++)
+            KP_CHECK(actions[n].code == expected[n]);
+    }
+    interleavings++;
+}
+K_WORK_DEFINE(sentinel_work, sentinel_handler);
+static void queue_sentinel(unsigned remaining_actions) {
+    sentinel_actions = action_count + remaining_actions;
+    sentinel_root_calls = calls(DEV(cc_root));
+    sentinel_left_calls = calls(DEV(cc_left));
+    sentinel_right_calls = calls(DEV(cc_right));
+    KP_CHECK(k_work_submit_to_queue(kp_rgb_work_q(), &sentinel_work) > 0);
+}
+static void capture_setup_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    set(DEV(cc_root), true); set(DEV(cc_left), true); set(DEV(cc_right), true);
+}
+K_WORK_DEFINE(capture_setup_work, capture_setup_handler);
 static int pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_binding_event event) {
     KP_CHECK(k_current_get() == k_work_queue_thread_get(kp_rgb_work_q()));
     KP_CHECK(binding->param2 == 77);
@@ -145,16 +175,28 @@ static int pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_bin
     KP_CHECK(action_count < ARRAY_SIZE(actions));
     actions[action_count++] = (struct action_record){binding->param1, binding->param2, event.timestamp};
     if (capture_mutation && binding->param1 == 10) {
+        queue_sentinel(3);
         set(DEV(cc_left), false); set(DEV(cc_right), false);
+    }
+    if (capture_mutation && (binding->param1 == 10 || binding->param1 == 20 ||
+                             binding->param1 == 25 || binding->param1 == 40)) {
+        KP_CHECK(kp_rgb_condition_value(DEV(cc_left)));
+        KP_CHECK(kp_rgb_condition_value(DEV(cc_right)));
+        KP_CHECK(calls(DEV(cc_left)) == sentinel_left_calls);
+        KP_CHECK(calls(DEV(cc_right)) == sentinel_right_calls);
     }
     if (selector_mutation && binding->param1 == 10)
         KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
-    if (feedback && (binding->param1 == 10 || binding->param1 == 11)) {
-        const struct device *target = multi_feedback ? DEV(cc_right) : DEV(cc_root);
+    bool root_edge = binding->param1 == 10 || binding->param1 == 11;
+    bool right_edge = binding->param1 == 25 || binding->param1 == 26;
+    if (finite_cascade && mutation_budget && (root_edge || (multi_cascade && right_edge))) {
+        queue_sentinel(root_edge ? 1 : 0);
+        mutation_budget--;
+        const struct device *target = root_edge && multi_cascade ? DEV(cc_right) : DEV(cc_root);
         set(target, !atomic_get(&src(target)->value));
     }
-    if (multi_feedback && (binding->param1 == 25 || binding->param1 == 26))
-        set(DEV(cc_root), !atomic_get(&src(DEV(cc_root))->value));
+    if (finite_cascade && action_count == cascade_actions) k_sem_give(&cascade_done);
+    if (capture_mutation && binding->param1 == 26) k_sem_give(&cascade_done);
     return action_error;
 }
 static int released(struct zmk_behavior_binding *binding, struct zmk_behavior_binding_event event) {
@@ -203,7 +245,6 @@ static void resume(void) { k_sem_give(&sample_release); drain(); }
 
 static void graph_prepare(void) {
     const struct device *root = DEV(cc_root), *left = DEV(cc_left), *right = DEV(cc_right), *leaf = DEV(cc_leaf);
-    if (kp_test_case("sample-notification")) atomic_set(&src(root)->notify, 1);
     if (kp_test_case("short-circuit")) src(root)->short_circuit = true;
     for (size_t i = 0; i < 4; i++) {
         const struct device *devs[] = {root, left, right, leaf};
@@ -315,27 +356,27 @@ static void trigger_cases(void) {
         KP_CHECK(action_count == 0 && release_count == 0); return;
     }
     if (kp_test_case("trigger-startup")) {
-        KP_CHECK(action_count == 3 && actions[0].code == 10 && actions[1].code == 30 && actions[2].code == 40);
+        KP_CHECK(action_count == 4 && actions[0].code == 10 && actions[1].code == 20 &&
+                 actions[2].code == 30 && actions[3].code == 40);
+        for (unsigned n = 0; n < action_count; n++)
+            KP_CHECK(actions[n].code != 25 && actions[n].code != 26);
+        kp_rgb_condition_invalidate(DEV(cc_root));
+        kp_rgb_conditions_request_refresh(51); drain();
+        KP_CHECK(action_count == 4);
         set(DEV(cc_root), false); set(DEV(cc_left), false); set(DEV(cc_leaf), false); drain();
-        KP_CHECK(action_count == 7 && actions[3].code == 11 && actions[4].code == 21 && actions[5].code == 41 && actions[6].code == 50);
-        set(DEV(cc_left), true); drain(); KP_CHECK(actions[7].code == 20);
+        KP_CHECK(action_count == 8 && actions[4].code == 11 && actions[5].code == 21 &&
+                 actions[6].code == 41 && actions[7].code == 50);
+        set(DEV(cc_left), true); drain(); KP_CHECK(action_count == 9 && actions[8].code == 20);
     } else if (kp_test_case("trigger-capture")) {
         action_count = 0; capture_mutation = true;
-        pause(DEV(cc_root));
-        atomic_set(&src(DEV(cc_root))->value, true);
-        set(DEV(cc_left), true); set(DEV(cc_right), true);
-        kp_rgb_condition_invalidate(DEV(cc_root)); resume();
+        KP_CHECK(k_work_submit_to_queue(kp_rgb_work_q(), &capture_setup_work) > 0);
+        KP_CHECK(k_sem_take(&cascade_done, K_SECONDS(2)) == 0);
+        drain();
         KP_CHECK(action_count == 6);
         const unsigned expected[] = {10,20,25,40,21,26};
         for (size_t n = 0; n < ARRAY_SIZE(expected); n++) KP_CHECK(actions[n].code == expected[n]);
         KP_CHECK(actions[0].timestamp == actions[3].timestamp);
-    } else if (kp_test_case("trigger-fault")) {
-        set(DEV(cc_root), true); drain(); unsigned before = action_count;
-        atomic_set(&src(DEV(cc_root))->notify, 1);
-        kp_rgb_condition_invalidate(DEV(cc_root)); drain();
-        KP_CHECK(!kp_rgb_condition_valid(DEV(cc_root)) && action_count == before);
-        set(DEV(cc_root), false); drain(); KP_CHECK(action_count == before);
-        set(DEV(cc_right), true); drain(); KP_CHECK(actions[action_count - 1].code == 25);
+        KP_CHECK(interleavings == 1);
     } else if (kp_test_case("trigger-errors")) {
         action_count = 0; action_error = -EIO; set(DEV(cc_root), true); drain();
         KP_CHECK(action_count == 3 && actions[0].code == 10 && actions[1].code == 60 && actions[2].code == 40);
@@ -343,14 +384,45 @@ static void trigger_cases(void) {
         action_error = 1; set(DEV(cc_root), false); drain();
         KP_CHECK(action_count == 6 && actions[3].code == 11 && actions[4].code == 61 && actions[5].code == 41);
     } else {
-        action_count = 0; feedback = true; multi_feedback = kp_test_case("multi-feedback");
-        action_error = multi_feedback ? 0 : -EIO;
-        set(DEV(cc_root), true); drain();
-        KP_CHECK(action_count == (multi_feedback ? 12 : 16));
+        KP_CHECK(kp_test_case("finite-self-cascade") || kp_test_case("finite-multi-cascade"));
+        action_count = 0; finite_cascade = true;
+        multi_cascade = kp_test_case("finite-multi-cascade");
+        mutation_budget = 12;
+        action_error = multi_cascade ? 0 : -EIO;
+        cascade_actions = multi_cascade ? 20 : 26;
+        unsigned root_before = calls(DEV(cc_root)), right_before = calls(DEV(cc_right));
+        set(DEV(cc_root), true);
+        KP_CHECK(k_sem_take(&cascade_done, K_SECONDS(2)) == 0);
+        drain();
+        KP_CHECK(action_count == cascade_actions && mutation_budget == 0 && interleavings == 12);
+        if (multi_cascade) {
+            const unsigned expected[] = {10,40,25,11,41,26,10,40,25,11,41,26,10,40,25,11,41,26,10,40};
+            KP_CHECK(action_count == ARRAY_SIZE(expected));
+            for (size_t n = 0; n < ARRAY_SIZE(expected); n++) KP_CHECK(actions[n].code == expected[n]);
+            KP_CHECK(calls(DEV(cc_root)) == root_before + 7);
+            KP_CHECK(calls(DEV(cc_right)) == right_before + 6);
+        } else {
+            for (unsigned n = 0; n < 13; n++) {
+                KP_CHECK(actions[2 * n].code == (n % 2 ? 11 : 10));
+                KP_CHECK(actions[2 * n + 1].code == (n % 2 ? 41 : 40));
+            }
+            KP_CHECK(calls(DEV(cc_root)) == root_before + 13);
+            KP_CHECK(calls(DEV(cc_right)) == right_before);
+        }
+        KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)) && kp_rgb_condition_valid(DEV(cc_right)));
+        finite_cascade = false;
         unsigned before = action_count;
-        set(DEV(cc_root), false); set(DEV(cc_right), false); drain();
-        KP_CHECK(action_count == before);
-        set(DEV(cc_left), true); drain(); KP_CHECK(actions[action_count - 1].code == 20);
+        k_msleep(100); drain(); KP_CHECK(action_count == before);
+        set(DEV(cc_left), true); drain();
+        set(DEV(cc_left), false); drain();
+        KP_CHECK(action_count == before + 2 && actions[before].code == 20 && actions[before + 1].code == 21);
+        action_error = 1;
+        set(DEV(cc_root), false); drain();
+        set(DEV(cc_root), true); drain();
+        KP_CHECK(action_count == before + 6 && actions[before + 2].code == 11 &&
+                 actions[before + 3].code == 41 && actions[before + 4].code == 10 &&
+                 actions[before + 5].code == 40);
+        KP_CHECK(interleavings == 12);
     }
     KP_CHECK(release_count == 0);
 }
@@ -462,7 +534,7 @@ static void overlay_cases(void) {
 
 static int auto_prepare(void) {
     const char *graphs[] = {"dag", "chain", "combinators", "unready", "invalid-scope",
-        "scope", "sample-notification", "short-circuit"};
+        "scope", "short-circuit"};
     const char *timings[] = {"startup", "same-value", "isr", "refresh", "refresh-interrupted",
         "early-refresh", "external-timer"};
     for (size_t i = 0; i < ARRAY_SIZE(graphs); i++)
@@ -675,14 +747,13 @@ void kp_test_conditions_run(void) {
         kp_test_case("trigger-actions") || kp_test_case("trigger-unregistered-root")) special_cases();
     else if (kp_test_case("dag") || kp_test_case("chain") || kp_test_case("combinators") ||
         kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
-        kp_test_case("sample-notification") ||
         kp_test_case("short-circuit")) graph_cases();
     else if (kp_test_case("startup") || kp_test_case("same-value") || kp_test_case("isr") ||
         kp_test_case("external-timer") || kp_test_case("refresh") || kp_test_case("refresh-interrupted") ||
         kp_test_case("early-refresh")) timing_cases();
     else if (kp_test_case("trigger-startup") || kp_test_case("trigger-capture") ||
-        kp_test_case("trigger-fault") || kp_test_case("trigger-errors") ||
-        kp_test_case("self-feedback") || kp_test_case("multi-feedback")) trigger_cases();
+        kp_test_case("trigger-errors") ||
+        kp_test_case("finite-self-cascade") || kp_test_case("finite-multi-cascade")) trigger_cases();
     else if (kp_test_case("overlay-gate") || kp_test_case("split-visibility")) overlay_cases();
     else if (kp_test_case("unused-scope")) {
         wait_ready(); KP_CHECK(calls(DEV(cc_unused)) == 0);

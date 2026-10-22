@@ -100,16 +100,12 @@ void kp_rgb_overlay_conditions_init(void);
 
 #if IS_ENABLED(CONFIG_KEYPAW_RGB_TRIGGERS)
 void kp_rgb_triggers_init(void);
-void kp_rgb_triggers_begin(void);
 void kp_rgb_triggers_evaluate(int64_t now_ms);
-void kp_rgb_triggers_quarantine(void);
 #else
 static inline void kp_rgb_triggers_init(void) {}
-static inline void kp_rgb_triggers_begin(void) {}
 static inline void kp_rgb_triggers_evaluate(int64_t now_ms) {
   ARG_UNUSED(now_ms);
 }
-static inline void kp_rgb_triggers_quarantine(void) {}
 #endif
 
 #define RGB_BRT_SET_CMD 0x107

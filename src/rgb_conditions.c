@@ -8,7 +8,6 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-static struct kp_rgb_condition_registration *sampling;
 static struct k_spinlock schedule_lock;
 static atomic_t external_pending;
 static bool started, initialized, in_control;
@@ -48,12 +47,6 @@ void kp_rgb_condition_invalidate(const struct device *dev) {
     __ASSERT(!error, "unregistered RGB condition");
     if (error)
       LOG_ERR("Invalid RGB condition notification");
-    return;
-  }
-
-  if (on_worker() && sampling) {
-    fault(sampling, "notification from sample callback");
-    k_spin_unlock(&schedule_lock, key);
     return;
   }
 
@@ -166,13 +159,7 @@ static void evaluate(void) {
       continue;
 
     const struct kp_rgb_condition_api *api = e->dev->api;
-    sampling = e;
     bool active = api->sample(e->dev);
-    sampling = NULL;
-
-    if (e->fault)
-      continue;
-
     e->value = active;
     e->sampled = true;
   }
@@ -204,21 +191,13 @@ static void control_handler(struct k_work *work) {
       if (e->live && !e->fault) atomic_set(&e->pending, 1);
     }
   }
-  kp_rgb_triggers_begin();
-
-  for (unsigned pass = 0; pass < 8; pass++) {
-    int64_t now = k_uptime_get();
-    evaluate();
-    bool changed = kp_rgb_overlay_refresh();
-    kp_rgb_overlay_dispatch();
-    if (changed)
-      zmk_rgb_matrix_flush();
-    kp_rgb_triggers_evaluate(now);
-    if (!pending() || atomic_get(&external_pending))
-      break;
-    if (pass == 7)
-      kp_rgb_triggers_quarantine();
-  }
+  int64_t now = k_uptime_get();
+  evaluate();
+  bool changed = kp_rgb_overlay_refresh();
+  kp_rgb_overlay_dispatch();
+  if (changed)
+    zmk_rgb_matrix_flush();
+  kp_rgb_triggers_evaluate(now);
 
   in_control = false;
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);

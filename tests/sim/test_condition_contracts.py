@@ -10,9 +10,9 @@ from native_build import SELECTORS, build, run
 SCENARIOS = (
     'startup', 'dag', 'same-value', 'isr', 'external-timer', 'event-only',
     'scope', 'unused-scope',
-    'unready', 'chain', 'combinators', 'invalid-scope', 'short-circuit', 'sample-notification',
-    'refresh', 'refresh-interrupted', 'early-refresh', 'self-feedback', 'multi-feedback',
-    'trigger-startup', 'trigger-capture', 'trigger-fault', 'trigger-errors',
+    'unready', 'chain', 'combinators', 'invalid-scope', 'short-circuit',
+    'refresh', 'refresh-interrupted', 'early-refresh', 'finite-self-cascade', 'finite-multi-cascade',
+    'trigger-startup', 'trigger-capture', 'trigger-errors',
     'initial-shared', 'scoped-listener', 'third-party', 'coalesced', 'reentrant',
     'trigger-mutation', 'resume-held', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
@@ -74,7 +74,7 @@ FIXTURE = '''
         #binding-cells = <2>; }; };
     cc_triggers { compatible = "keypaw,rgb-trigger-table";
         primary { condition = <&cc_root>; on-enter = <&ccact 10 77>; on-exit = <&ccact 11 77>; };
-        baseline { condition = <&cc_left>; startup = "baseline";
+        left_edge { condition = <&cc_left>;
             on-enter = <&ccact 20 77>; on-exit = <&ccact 21 77>; };
         third { condition = <&cc_right>; on-enter = <&ccact 25 77>; on-exit = <&ccact 26 77>; };
         constant { on-enter = <&ccact 30 77>; };
@@ -164,13 +164,16 @@ VARIANTS.update({
 VARIANTS['short-circuit'] = VARIANTS['dag']
 
 DIAGNOSTICS = {
-    'sample-notification': 'notification from sample callback',
     'unready': 'RGB condition cc_unready: invalid or unready provider',
     'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
     'startup-unready-selector': 'RGB selector rgbs_a is not ready',
 }
 
 REJECTIONS = {
+    'startup-baseline': ('&{/cc_triggers/left_edge} { startup = "baseline"; };',
+                         ("'startup'", 'not declared')),
+    'startup-enter-if-active': ('&{/cc_triggers/left_edge} { startup = "enter-if-active"; };',
+                                ("'startup'", 'not declared')),
     'cycle': ('&cc_root { conditions = <&cc_left>; }; &cc_left { conditions = <&cc_right>; }; &cc_right { conditions = <&cc_left>; };',
               ('cycle in devicetree involving', 'cc_left', 'cc_right')),
     'self': ('&cc_root { conditions = <&cc_root>; };',
@@ -258,8 +261,6 @@ def main():
                         assert 'central-only source used on peripheral' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-unregistered-root':
                         assert 'Unregistered RGB condition root cc_noreg' in result.stdout
-                    if role != 'peripheral' and scenario == 'trigger-fault':
-                        assert 'notification from sample callback' in result.stdout
                     if role != 'peripheral' and scenario == 'trigger-errors':
                         assert 'binding 1' in result.stdout and 'err -5' in result.stdout
                     log = root / f'{image}-{scenario}.log'

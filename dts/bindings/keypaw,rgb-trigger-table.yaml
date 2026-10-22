@@ -17,15 +17,19 @@ child-binding:
     including third-party one-shot behaviors. The user must ensure this; action
     targets are not restricted to an allowlist. on-exit invokes its own actions,
     not releases for on-enter actions. Global commands use central conversion and
-    split transport once. Invalid condition snapshots
-    disable the rule without an exit action. Unsettled feedback chains are
-    limited to eight passes and participating rules are disabled until reboot.
+    split transport once. Invalid condition snapshots disable the rule without an
+    exit action. Initially true conditions invoke on-enter; initially false
+    conditions invoke nothing. All rules use one cached condition pass; action-driven
+    source changes take effect in a subsequent queued pass, without rollback of
+    earlier actions. Rules must not form feedback loops, and condition samples must
+    be side-effect-free and must not synchronously invalidate conditions. Runtime
+    feedback detection, pass limits and quarantine are not provided.
   properties:
     condition:
       type: phandle
       description: |
-        Cached condition predicate. Absent means constant true, so default
-        startup invokes on-enter once and on-exit never runs.
+        Cached condition predicate. Absent means constant true, so startup
+        invokes on-enter once and on-exit never runs.
     on-enter:
       type: phandle-array
       specifier-space: binding
@@ -36,13 +40,3 @@ child-binding:
       type: phandle-array
       specifier-space: binding
       description: Commands invoked in order on true-to-false edges.
-    startup:
-      type: string
-      default: "enter-if-active"
-      enum:
-        - "enter-if-active"
-        - "baseline"
-      description: |
-        enter-if-active invokes on-enter for an initially true predicate;
-        initially false predicates invoke nothing. baseline records the initial
-        value without executing either list. Subsequent edges behave identically.
