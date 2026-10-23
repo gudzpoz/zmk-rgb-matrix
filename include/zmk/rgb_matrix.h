@@ -309,11 +309,11 @@ struct kp_rgb_condition_api {
   bool (*sample)(const struct device *dev);
 };
 
-/* Any-context, non-blocking notification. NULL/unregistered devices are errors.
- * Notifications coalesce: intermediate source transitions need not be observed.
- * Early notifications are subsumed by mandatory initial sampling.
+/* Any-context, non-blocking request to resample all eligible live conditions.
+ * Requests coalesce: intermediate source transitions need not be observed.
+ * Early requests are subsumed by mandatory initial sampling.
  */
-void kp_rgb_condition_invalidate(const struct device *condition);
+void kp_rgb_condition_invalidate(void);
 /* Control-worker only. Returns the cached value without invoking a provider.
  */
 bool kp_rgb_condition_value(const struct device *condition);

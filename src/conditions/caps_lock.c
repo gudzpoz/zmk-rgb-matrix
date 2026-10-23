@@ -23,11 +23,9 @@ static bool sample(const struct device *dev) {
 #endif
 }
 
-#define INVALIDATE(inst)                                                       \
-  kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
 static int listener(const zmk_event_t *eh) {
   ARG_UNUSED(eh);
-  DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
+  kp_rgb_condition_invalidate();
   return ZMK_EV_EVENT_BUBBLE;
 }
 ZMK_LISTENER(kp_cond_caps_lock, listener);

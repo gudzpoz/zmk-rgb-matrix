@@ -12,9 +12,9 @@
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 static bool sample(const struct device *dev) {
-  const struct kp_rgb_condition_list_config *cfg = dev->config;
-  for (size_t i = 0; i < cfg->count; ++i) {
-    if (!kp_rgb_condition_value(cfg->conditions[i])) {
+  const struct kp_rgb_condition_registration *cfg = dev->config;
+  for (size_t i = 0; i < cfg->dep_count; ++i) {
+    if (!kp_rgb_condition_value(cfg->deps[i]->dev)) {
       return false;
     }
   }

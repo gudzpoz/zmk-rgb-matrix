@@ -81,7 +81,7 @@ static int kp_ovl_toggle_pressed(struct zmk_behavior_binding *binding,
   }
   bool active = binding->param2 != 0;
   if (atomic_set(&lat->active, active) != active) {
-    kp_rgb_condition_invalidate(cfg->condition);
+    kp_rgb_condition_invalidate();
   }
 
   return ZMK_BEHAVIOR_OPAQUE;

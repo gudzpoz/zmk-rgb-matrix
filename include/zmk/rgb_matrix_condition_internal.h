@@ -5,7 +5,6 @@
 #pragma once
 
 #include <zephyr/device.h>
-#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/util.h>
 
@@ -15,12 +14,9 @@ struct kp_rgb_condition_registration {
   struct kp_rgb_condition_registration *const *deps;
   size_t dep_count;
 
-  atomic_t pending;
   bool live;
   bool fault;
-  bool sampled;
   bool value;
-  bool dirty;
 };
 
 /* The iterable section sorts these names lexically into dependency order. */

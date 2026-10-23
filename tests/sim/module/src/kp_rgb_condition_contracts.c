@@ -23,19 +23,17 @@ struct source {
 };
 struct source_config {
     const struct device *selector, *effect;
-    const struct device *const *deps;
-    size_t dep_count;
+    const struct kp_rgb_condition_registration *registration;
 };
 K_SEM_DEFINE(sample_entered, 0, 1);
 K_SEM_DEFINE(sample_release, 0, 1);
 static atomic_t notifications, notifications_b, reenter, irq_calls;
-static const struct device *irq_device;
 
 static void interrupt(const void *arg) {
     ARG_UNUSED(arg);
     KP_CHECK(k_is_in_isr());
     atomic_inc(&irq_calls);
-    kp_rgb_condition_invalidate(irq_device);
+    kp_rgb_condition_invalidate();
 }
 static bool sample(const struct device *dev) {
     struct source *s = dev->data;
@@ -50,24 +48,21 @@ static bool sample(const struct device *dev) {
     }
     if (cfg->selector)
         value = zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
-    for (size_t i = 0; i < cfg->dep_count; i++) {
+    const struct kp_rgb_condition_registration *registration = cfg->registration;
+    for (size_t i = 0; registration && i < registration->dep_count; i++) {
         if (s->short_circuit && !value) break;
-        value &= kp_rgb_condition_value(cfg->deps[i]);
+        value &= kp_rgb_condition_value(registration->deps[i]->dev);
     }
     return value;
 }
-#define DEP_DEVICE(node_id, prop, idx) DEVICE_DT_GET(DT_PHANDLE_BY_IDX(node_id, prop, idx)),
 #define DEFINE(inst) \
     COND_CODE_1(DT_INST_PROP(inst, unregistered), (), ( \
         KP_RGB_CONDITION_REGISTRATION_DEFINE(DT_DRV_INST(inst)); \
     )) \
     static struct source source_##inst; \
-    static const struct device *const deps_##inst[] = { \
-        COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, conditions), \
-            (DT_INST_FOREACH_PROP_ELEM(inst, conditions, DEP_DEVICE)), ()) \
-    }; \
     static const struct source_config config_##inst = { \
-        .deps = deps_##inst, .dep_count = ARRAY_SIZE(deps_##inst), \
+        .registration = COND_CODE_1(DT_INST_PROP(inst, unregistered), \
+            (NULL), (&KP_RGB_CONDITION_REGISTRATION(DT_DRV_INST(inst)))), \
         .selector = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, selected_selector), \
             (DEVICE_DT_GET(DT_INST_PHANDLE(inst, selected_selector))), (NULL)), \
         .effect = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, selected_effect), \
@@ -90,7 +85,7 @@ static struct source *src(const struct device *dev) { return dev->data; }
 static unsigned calls(const struct device *dev) { return atomic_get(&src(dev)->calls); }
 static void set(const struct device *dev, bool value) {
     atomic_set(&src(dev)->value, value);
-    kp_rgb_condition_invalidate(dev);
+    kp_rgb_condition_invalidate();
 }
 static bool gate(const struct device *dev) {
     kp_rgb_matrix_lock();
@@ -112,7 +107,7 @@ static void external_invalidation_handler(struct k_work *work) {
     ARG_UNUSED(work);
     KP_CHECK(k_current_get() != k_work_queue_thread_get(kp_rgb_work_q()));
     atomic_set(&src(DEV(cc_leaf))->value, true);
-    kp_rgb_condition_invalidate(DEV(cc_leaf));
+    kp_rgb_condition_invalidate();
 }
 K_WORK_DELAYABLE_DEFINE(external_invalidation_work, external_invalidation_handler);
 static void wait_calls(const struct device *dev, unsigned count) {
@@ -214,12 +209,12 @@ static int listener(const zmk_event_t *eh) {
     const struct zmk_rgb_selector_selection_changed *ev = as_zmk_rgb_selector_selection_changed(eh);
     if (ev->selector == DEV(selector_a)) {
         atomic_inc(&notifications);
-        kp_rgb_condition_invalidate(DEV(cc_event));
+        kp_rgb_condition_invalidate();
         if (atomic_cas(&reenter, 1, 0))
             KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
     } else if (ev->selector == DEV(selector_b)) {
         atomic_inc(&notifications_b);
-        kp_rgb_condition_invalidate(DEV(cc_event_b));
+        kp_rgb_condition_invalidate();
     }
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -238,7 +233,7 @@ static void select_a(bool a) {
 }
 static void pause(const struct device *dev) {
     atomic_set(&src(dev)->pause, 1);
-    kp_rgb_condition_invalidate(dev);
+    kp_rgb_condition_invalidate();
     KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
 }
 static void resume(void) { k_sem_give(&sample_release); drain(); }
@@ -275,17 +270,18 @@ static void graph_cases(void) {
     KP_CHECK(calls(DEV(cc_unused)) == 0);
     if (kp_test_case("short-circuit")) {
         KP_CHECK(!gate(DEV(ordinary)));
-        unsigned right_before = calls(right), root_before = calls(root), leaf_before = calls(leaf);
-        kp_rgb_condition_invalidate(right);
+        unsigned right_before = calls(right), root_before = calls(root);
+        unsigned leaf_before = calls(leaf), left_before = calls(left);
+        kp_rgb_condition_invalidate();
         drain();
         KP_CHECK(calls(right) == right_before + 1 && calls(root) == root_before + 1);
-        KP_CHECK(calls(leaf) == leaf_before);
+        KP_CHECK(calls(leaf) == leaf_before + 1 && calls(left) == left_before + 1);
     } else {
         KP_CHECK(gate(DEV(ordinary)));
         set(leaf, false); drain();
         KP_CHECK(calls(root) == 2 && calls(left) == 2 && calls(right) == 2 && calls(leaf) == 2);
         KP_CHECK(!gate(DEV(ordinary)));
-        kp_rgb_condition_invalidate(leaf); drain();
+        kp_rgb_condition_invalidate(); drain();
         KP_CHECK(calls(root) == 3 && calls(left) == 3 && calls(right) == 3 && calls(leaf) == 3);
         KP_CHECK(!gate(DEV(ordinary)));
     }
@@ -298,7 +294,7 @@ static void timing_prepare(void) {
         atomic_set(&src(DEV(cc_leaf))->value, false);
     }
     if (kp_test_case("early-refresh")) kp_rgb_conditions_request_refresh(17);
-    kp_rgb_condition_invalidate(root);
+    kp_rgb_condition_invalidate();
     KP_CHECK(calls(root) == 0);
 }
 static void timing_cases(void) {
@@ -306,7 +302,7 @@ static void timing_cases(void) {
     wait_ready();
     KP_CHECK(calls(root) == 1);
     if (kp_test_case("same-value")) {
-        kp_rgb_condition_invalidate(root); drain();
+        kp_rgb_condition_invalidate(); drain();
         KP_CHECK(!gate(DEV(ordinary)) && calls(root) == 2);
         k_msleep(100); KP_CHECK(calls(root) == 2);
         set(root, true); drain();
@@ -320,12 +316,12 @@ static void timing_cases(void) {
         KP_CHECK(calls(root) == root_before + 1 && calls(DEV(cc_leaf)) == leaf_before + 1);
         KP_CHECK(gate(DEV(ordinary)));
     } else if (kp_test_case("isr")) {
-        pause(root); irq_device = root;
+        pause(root);
         atomic_set(&src(root)->value, true); irq_offload(interrupt, NULL);
         KP_CHECK(irq_calls == 1);
         resume(); KP_CHECK(calls(root) >= 3 && gate(DEV(ordinary)));
     } else if (kp_test_case("refresh-interrupted")) {
-        pause(root); irq_device = root; irq_offload(interrupt, NULL);
+        pause(root); irq_offload(interrupt, NULL);
         kp_rgb_conditions_request_refresh(22); resume();
         KP_CHECK(calls(root) >= 3 && kp_rgb_condition_valid(root));
     } else if (kp_test_case("refresh")) {
@@ -336,7 +332,7 @@ static void timing_cases(void) {
         drain();
         KP_CHECK(calls(root) == 1);
         pause(root);
-        for (unsigned n = 0; n < 100; n++) kp_rgb_condition_invalidate(root);
+        for (unsigned n = 0; n < 100; n++) kp_rgb_condition_invalidate();
         resume(); KP_CHECK(calls(root) == 3);
     }
 }
@@ -360,7 +356,7 @@ static void trigger_cases(void) {
                  actions[2].code == 30 && actions[3].code == 40);
         for (unsigned n = 0; n < action_count; n++)
             KP_CHECK(actions[n].code != 25 && actions[n].code != 26);
-        kp_rgb_condition_invalidate(DEV(cc_root));
+        kp_rgb_condition_invalidate();
         kp_rgb_conditions_request_refresh(51); drain();
         KP_CHECK(action_count == 4);
         set(DEV(cc_root), false); set(DEV(cc_left), false); set(DEV(cc_leaf), false); drain();
@@ -391,6 +387,7 @@ static void trigger_cases(void) {
         action_error = multi_cascade ? 0 : -EIO;
         cascade_actions = multi_cascade ? 20 : 26;
         unsigned root_before = calls(DEV(cc_root)), right_before = calls(DEV(cc_right));
+        unsigned left_before = calls(DEV(cc_left));
         set(DEV(cc_root), true);
         KP_CHECK(k_sem_take(&cascade_done, K_SECONDS(2)) == 0);
         drain();
@@ -399,16 +396,15 @@ static void trigger_cases(void) {
             const unsigned expected[] = {10,40,25,11,41,26,10,40,25,11,41,26,10,40,25,11,41,26,10,40};
             KP_CHECK(action_count == ARRAY_SIZE(expected));
             for (size_t n = 0; n < ARRAY_SIZE(expected); n++) KP_CHECK(actions[n].code == expected[n]);
-            KP_CHECK(calls(DEV(cc_root)) == root_before + 7);
-            KP_CHECK(calls(DEV(cc_right)) == right_before + 6);
         } else {
             for (unsigned n = 0; n < 13; n++) {
                 KP_CHECK(actions[2 * n].code == (n % 2 ? 11 : 10));
                 KP_CHECK(actions[2 * n + 1].code == (n % 2 ? 41 : 40));
             }
-            KP_CHECK(calls(DEV(cc_root)) == root_before + 13);
-            KP_CHECK(calls(DEV(cc_right)) == right_before);
         }
+        KP_CHECK(calls(DEV(cc_root)) == root_before + 13);
+        KP_CHECK(calls(DEV(cc_right)) == right_before + 13);
+        KP_CHECK(calls(DEV(cc_left)) == left_before + 13);
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)) && kp_rgb_condition_valid(DEV(cc_right)));
         finite_cascade = false;
         unsigned before = action_count;
@@ -438,18 +434,26 @@ static void selection_cases(void) {
     }
     if (kp_test_case("scoped-listener")) {
         unsigned samples_b = calls(DEV(cc_event_b)), root_samples = calls(DEV(cc_root));
+        unsigned notices_a = atomic_get(&notifications), notices_b = atomic_get(&notifications_b);
         KP_CHECK(raise_zmk_rgb_selector_selection_changed((struct zmk_rgb_selector_selection_changed){.selector = DEV(selector_a)}) >= 0);
         drain();
+        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b);
         KP_CHECK(calls(DEV(cc_event)) == event_samples + 1);
-        KP_CHECK(calls(DEV(cc_event_b)) == samples_b && calls(DEV(cc_root)) == root_samples);
+        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 1 && calls(DEV(cc_root)) == root_samples + 1);
         KP_CHECK(raise_zmk_rgb_selector_selection_changed((struct zmk_rgb_selector_selection_changed){.selector = DEV(selector_b)}) >= 0);
         drain();
-        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 1);
-        KP_CHECK(calls(DEV(cc_event)) == event_samples + 1 && calls(DEV(cc_root)) == root_samples);
+        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b + 1);
+        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 2);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples + 2 && calls(DEV(cc_root)) == root_samples + 2);
         event_samples = calls(DEV(cc_event));
-        unsigned before = atomic_get(&notifications);
+        samples_b = calls(DEV(cc_event_b)); root_samples = calls(DEV(cc_root));
         KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
-        drain(); KP_CHECK(atomic_get(&notifications) == before && calls(DEV(cc_event)) == event_samples + 1);
+        drain();
+        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b + 2);
+        unsigned passes = calls(DEV(cc_root)) - root_samples;
+        KP_CHECK(passes >= 1);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples + passes);
+        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + passes);
         expect_selection(true); return;
     }
     if (kp_test_case("coalesced")) {
@@ -473,7 +477,8 @@ static void selection_cases(void) {
     }
     if (kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) {
         pause(DEV(cc_event)); select_a(false);
-        irq_device = kp_test_case("external-unused-interruption") ? DEV(cc_unused) : DEV(cc_root);
+        if (kp_test_case("external-unused-interruption"))
+            atomic_set(&src(DEV(cc_unused))->value, true);
         irq_offload(interrupt, NULL); resume(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_unused)) == 0); return;
     }
@@ -546,7 +551,7 @@ static int auto_prepare(void) {
         kp_test_case("split-visibility") || kp_test_case("overlay-zero")) {
         atomic_set(&src(DEV(cc_root))->value, true);
         atomic_set(&src(DEV(cc_central))->value, true);
-        kp_rgb_condition_invalidate(DEV(cc_root));
+        kp_rgb_condition_invalidate();
     }
 #if DT_NODE_EXISTS(DT_NODELABEL(cc_noreg))
     atomic_set(&src(DEV(cc_noreg))->value, true);
@@ -627,10 +632,12 @@ static void special_cases(void) {
         KP_CHECK(!kp_rgb_overlay_covers_all(DEV(cc_transparent)));
         unsigned before = atomic_get(&notifications);
         unsigned samples = calls(DEV(cc_event));
+        unsigned root_samples = calls(DEV(cc_root));
         select_a(false); drain();
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
         KP_CHECK(atomic_get(&notifications) == before + 1);
-        KP_CHECK(calls(DEV(cc_event)) == samples + 1);
+        unsigned passes = calls(DEV(cc_root)) - root_samples;
+        KP_CHECK(passes >= 1 && calls(DEV(cc_event)) == samples + passes);
     } else if (kp_test_case("trigger-unregistered-root")) {
 #if DT_NODE_EXISTS(DT_NODELABEL(cc_noreg))
         KP_CHECK(device_is_ready(DEV(cc_noreg)));
@@ -701,11 +708,11 @@ static void stale_source_refresh(bool held) {
     }
     atomic_set(&src(DEV(cc_root))->pause, 1);
     zmk_rgb_matrix_set_inhibited(false);
-    if (held) kp_rgb_condition_invalidate(DEV(cc_root));
+    if (held) kp_rgb_condition_invalidate();
     KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
     KP_CHECK(atomic_get(&strip_colors) == before);
     atomic_set(&src(DEV(cc_root))->value, true);
-    irq_device = DEV(cc_root); irq_offload(interrupt, NULL);
+    irq_offload(interrupt, NULL);
     atomic_set(&src(DEV(cc_root))->pause, 1);
     /* Boot requested token 1; resume advanced it. Without held=true, these
      * completions must be rejected by token alone, not by outstanding holds. */

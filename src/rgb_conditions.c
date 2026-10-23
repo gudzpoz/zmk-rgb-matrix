@@ -9,7 +9,7 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 static struct k_spinlock schedule_lock;
-static atomic_t external_pending;
+static bool pending_request;
 static bool started, initialized, in_control;
 
 static uint64_t refresh_requested;
@@ -38,21 +38,9 @@ static void fault(struct kp_rgb_condition_registration *e, const char *reason) {
   e->fault = true;
 }
 
-void kp_rgb_condition_invalidate(const struct device *dev) {
+void kp_rgb_condition_invalidate(void) {
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  struct kp_rgb_condition_registration *e = lookup(dev);
-  if (!e) {
-    bool error = started || !dev;
-    k_spin_unlock(&schedule_lock, key);
-    __ASSERT(!error, "unregistered RGB condition");
-    if (error)
-      LOG_ERR("Invalid RGB condition notification");
-    return;
-  }
-
-  atomic_set(&e->pending, 1);
-  if (!on_worker())
-    atomic_set(&external_pending, 1);
+  pending_request = true;
   if (started && !on_worker()) {
     k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
@@ -62,7 +50,7 @@ void kp_rgb_condition_invalidate(const struct device *dev) {
 void kp_rgb_conditions_request_refresh(uint64_t token) {
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
   refresh_requested = token;
-  atomic_set(&external_pending, 1);
+  pending_request = true;
   if (started) {
     k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
@@ -85,7 +73,7 @@ bool kp_rgb_condition_valid(const struct device *dev) {
   if (!dev)
     return true;
   struct kp_rgb_condition_registration *e = lookup(dev);
-  return e && e->live && e->sampled && !e->fault;
+  return initialized && e && e->live && !e->fault;
 }
 
 bool kp_rgb_condition_value(const struct device *dev) {
@@ -94,7 +82,7 @@ bool kp_rgb_condition_value(const struct device *dev) {
     return false;
 
   struct kp_rgb_condition_registration *e = lookup(dev);
-  return e && e->sampled && !e->fault && e->value;
+  return initialized && e && e->live && !e->fault && e->value;
 }
 
 static void initialize_conditions(void) {
@@ -141,36 +129,11 @@ static void initialize_conditions(void) {
 
 static void evaluate(void) {
   STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
-    e->dirty = atomic_set(&e->pending, 0) || !e->sampled;
-  }
-
-  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     if (!e->live || e->fault)
       continue;
-    for (size_t i = 0; i < e->dep_count; i++) {
-      struct kp_rgb_condition_registration *dep = e->deps[i];
-      if (dep->fault) {
-        fault(e, "faulted dependency");
-        break;
-      }
-      e->dirty |= dep->dirty;
-    }
-    if (e->fault || !e->dirty)
-      continue;
-
     const struct kp_rgb_condition_api *api = e->dev->api;
-    bool active = api->sample(e->dev);
-    e->value = active;
-    e->sampled = true;
+    e->value = api->sample(e->dev);
   }
-}
-
-static bool pending(void) {
-  STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
-    if (e->live && !e->fault && atomic_get(&e->pending))
-      return true;
-  }
-  return false;
 }
 
 static void control_handler(struct k_work *work) {
@@ -181,16 +144,11 @@ static void control_handler(struct k_work *work) {
     initialized = true;
   }
 
-  atomic_set(&external_pending, 0);
   k_spinlock_key_t refresh_key = k_spin_lock(&schedule_lock);
+  pending_request = false;
   uint64_t refresh_token = refresh_requested;
   refresh_requested = 0;
   k_spin_unlock(&schedule_lock, refresh_key);
-  if (refresh_token) {
-    STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
-      if (e->live && !e->fault) atomic_set(&e->pending, 1);
-    }
-  }
   int64_t now = k_uptime_get();
   evaluate();
   bool changed = kp_rgb_overlay_refresh();
@@ -201,11 +159,11 @@ static void control_handler(struct k_work *work) {
 
   in_control = false;
   k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  bool refresh_complete = refresh_token && !pending() && !atomic_get(&external_pending);
+  bool refresh_complete = refresh_token && !pending_request;
   if (refresh_token && !refresh_complete && !refresh_requested) {
     refresh_requested = refresh_token;
   }
-  if (refresh_requested || pending() || atomic_get(&external_pending)) {
+  if (pending_request || refresh_requested) {
     k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
   }
   k_spin_unlock(&schedule_lock, key);

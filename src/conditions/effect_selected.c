@@ -26,7 +26,7 @@ static const struct kp_rgb_condition_api api = {
     .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample};
 #define INVALIDATE(inst)                                                       \
   if (event->selector == cfg_##inst.selector)                                  \
-    kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
+    kp_rgb_condition_invalidate();
 
 #define DEFINE(inst)                                                           \
   BUILD_ASSERT(                                                                \

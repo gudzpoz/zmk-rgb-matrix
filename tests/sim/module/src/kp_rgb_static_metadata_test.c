@@ -147,12 +147,7 @@ static int inspect_before_init(void) {
 #else
         ok = false;
 #endif
-        ok &= !record->pending && !record->live;
-        ok &= !record->fault && !record->sampled && !record->value && !record->dirty;
-        /* Exercise writable iterable storage without leaving engine state altered. */
-        record->dirty = true;
-        ok &= record->dirty;
-        record->dirty = false;
+        ok &= !record->live && !record->fault && !record->value;
         early_condition_count++;
     }
 #if DT_NODE_EXISTS(DT_NODELABEL(ordinal_boundary))
@@ -173,8 +168,8 @@ static int invalidate_before_provider_init(void) {
     size_t count = 0;
     STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, record) {
         ok &= !device_is_ready(record->dev);
-        kp_rgb_condition_invalidate(record->dev);
-        ok &= atomic_get(&record->pending) == 1;
+        kp_rgb_condition_invalidate();
+        ok &= !record->live && !record->fault && !record->value;
         count++;
     }
     early_invalidation_ok = ok && count == early_condition_count;
