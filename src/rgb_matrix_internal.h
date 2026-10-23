@@ -66,14 +66,18 @@ uint32_t kp_rgb_clock_ms(void);
 /* Set the offset a peripheral derived from RGB_CLOCK_CMD; any context. */
 void kp_rgb_set_clock_offset(int32_t offset_ms);
 
-void kp_rgb_conditions_request_refresh(uint64_t token);
-void kp_rgb_conditions_refreshed(uint64_t token);
+enum kp_rgb_request_reason {
+  KP_RGB_REQUEST_CONTROL = BIT(0),
+  KP_RGB_REQUEST_REPAINT = BIT(1),
+  KP_RGB_REQUEST_INPUT = BIT(2),
+  KP_RGB_REQUEST_OUTPUT = BIT(3),
+};
 
-/* Caller holds the matrix lock. A hold defers refresh completion until source
- * notifications have run; release after all synchronous consumers invalidate. */
-void kp_rgb_control_refresh_locked(void);
-void kp_rgb_control_refresh_hold_locked(void);
-void kp_rgb_control_refresh_release_locked(void);
+/* Any context; CONTROL advances the epoch even when already pending. */
+void kp_rgb_coordinator_request(uint32_t reasons);
+void kp_rgb_coordinator_start(void);
+/* Coordinator only, without the matrix lock. */
+void kp_rgb_conditions_run(void);
 
 /* Caller holds the matrix lock. */
 void kp_rgb_reconcile_power_locked(void);
@@ -84,7 +88,7 @@ void kp_rgb_overlay_targets_init(void);
 const size_t *kp_rgb_overlay_targets(const struct device *dev);
 size_t kp_rgb_overlay_target_count(const struct device *dev);
 
-/* refresh() runs on the control worker; dispatch() is central-only. */
+/* refresh() runs in the coordinator control phase; dispatch() is central-only. */
 bool kp_rgb_overlay_gate(const struct device *dev);
 bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);

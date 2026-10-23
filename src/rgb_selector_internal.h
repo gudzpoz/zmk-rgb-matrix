@@ -26,9 +26,6 @@ struct kp_rgb_selector {
   size_t effect_count;
   size_t effect_index;
   uint16_t initial_effect;
-  bool publish_changes;
-  bool notification_pending;
-  struct kp_rgb_selector *notification_next;
 };
 
 /* Identity metadata is available before device/provider readiness. Mutations
@@ -44,8 +41,7 @@ kp_rgb_selector_selected(const struct kp_rgb_selector *selector);
 uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
                                     uint16_t current, int16_t delta);
 
-/* Caller holds the matrix lock. Selection changes queue notifications for
- * publish_changes selectors; callbacks are delivered outside the lock. */
+/* Caller holds the matrix lock. */
 void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,
                                     const struct device *previous);
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector,

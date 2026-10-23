@@ -6,7 +6,6 @@
 
 #define DT_DRV_COMPAT keypaw_rgb_condition_effect_selected
 
-#include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
 
@@ -24,9 +23,6 @@ static bool sample(const struct device *dev) {
 
 static const struct kp_rgb_condition_api api = {
     .scope = KP_RGB_CONDITION_ANY_SIDE, .sample = sample};
-#define INVALIDATE(inst)                                                       \
-  if (event->selector == cfg_##inst.selector)                                  \
-    kp_rgb_condition_invalidate();
 
 #define DEFINE(inst)                                                           \
   BUILD_ASSERT(                                                                \
@@ -47,15 +43,5 @@ static const struct kp_rgb_condition_api api = {
   KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
-
-static int listener(const zmk_event_t *eh) {
-  const struct zmk_rgb_selector_selection_changed *event =
-      as_zmk_rgb_selector_selection_changed(eh);
-  DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
-  return ZMK_EV_EVENT_BUBBLE;
-}
-
-ZMK_LISTENER(kp_cond_effect_selected, listener);
-ZMK_SUBSCRIPTION(kp_cond_effect_selected, zmk_rgb_selector_selection_changed);
 
 #endif

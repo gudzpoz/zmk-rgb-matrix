@@ -8,18 +8,18 @@ import tempfile
 from native_build import SELECTORS, build, run
 
 SCENARIOS = (
-    'startup', 'dag', 'same-value', 'isr', 'external-timer', 'event-only',
+    'startup', 'dag', 'same-value', 'isr', 'external-timer', 'no-poll',
     'scope', 'unused-scope',
     'unready', 'chain', 'combinators', 'invalid-scope', 'short-circuit',
     'refresh', 'refresh-interrupted', 'early-refresh', 'finite-self-cascade', 'finite-multi-cascade',
     'trigger-startup', 'trigger-capture', 'trigger-errors',
-    'initial-shared', 'scoped-listener', 'third-party', 'coalesced', 'reentrant',
-    'trigger-mutation', 'resume-held', 'external-interruption',
+    'initial-shared', 'cross-selector', 'third-party', 'selection-burst',
+    'trigger-mutation', 'resume-selection', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
     'startup-unready-selector', 'startup-normalized-names', 'startup-auto',
     'startup-unrestored-settings', 'startup-settings-staged',
     'overlay-zero', 'trigger-no-table', 'trigger-actions', 'trigger-unregistered-root',
-    'stale-source-refresh', 'held-source-refresh',
+    'stale-source-refresh', 'pending-source',
 )
 FIXTURE = '''
 #include <dt-bindings/keypaw/rgb_matrix.h>
@@ -129,7 +129,8 @@ VARIANTS = {
 }; };
 ''', ''),
 }
-VARIANTS['held-source-refresh'] = VARIANTS['stale-source-refresh']
+VARIANTS['pending-source'] = VARIANTS['stale-source-refresh']
+VARIANTS['resume-selection'] = VARIANTS['stale-source-refresh']
 VARIANTS.update({
     'dag': ('diamond', '''
 &cc_root { conditions = <&cc_left &cc_right>; };

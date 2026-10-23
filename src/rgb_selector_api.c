@@ -4,52 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/rgb_selector.h>
 
 #include "rgb_matrix_internal.h"
 
-ZMK_EVENT_IMPL(zmk_rgb_selector_selection_changed);
-
-static struct kp_rgb_selector *notification_head;
-static void kp_rgb_selector_notify_work(struct k_work *work);
-static K_WORK_DEFINE(notification_work, kp_rgb_selector_notify_work);
-
 void kp_rgb_selector_publish_locked(struct kp_rgb_selector *selector,
                                     const struct device *previous) {
-  if (!selector->publish_changes || kp_rgb_selector_selected(selector) == previous)
-    return;
-  if (!selector->notification_pending) {
-    kp_rgb_control_refresh_hold_locked();
-    selector->notification_pending = true;
-    selector->notification_next = notification_head;
-    notification_head = selector;
-  } else {
-    kp_rgb_control_refresh_locked();
-  }
-  k_work_submit_to_queue(kp_rgb_work_q(), &notification_work);
-}
-
-static void kp_rgb_selector_notify_work(struct k_work *work) {
-  ARG_UNUSED(work);
-  for (;;) {
-    kp_rgb_matrix_lock();
-    struct kp_rgb_selector *selector = notification_head;
-    if (selector == NULL) {
-      kp_rgb_matrix_unlock();
-      return;
-    }
-    notification_head = selector->notification_next;
-    selector->notification_next = NULL;
-    selector->notification_pending = false;
-    const struct device *owner = selector->owner;
-    kp_rgb_matrix_unlock();
-    raise_zmk_rgb_selector_selection_changed(
-        (struct zmk_rgb_selector_selection_changed){.selector = owner});
-    kp_rgb_matrix_lock();
-    kp_rgb_control_refresh_release_locked();
-    kp_rgb_matrix_unlock();
-  }
+  if (kp_rgb_selector_selected(selector) != previous)
+    kp_rgb_coordinator_request(KP_RGB_REQUEST_CONTROL | KP_RGB_REQUEST_REPAINT);
 }
 
 const struct device *zmk_rgb_selector_get_selected(const struct device *selector) {

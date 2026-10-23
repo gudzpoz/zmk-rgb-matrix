@@ -128,8 +128,8 @@ def selected_runtime(root, name, fragment="", selectors=SELECTORS, extra_conf=""
     assert run.returncode == 0, run.stdout[-16000:]
     for marker in (
         "PASS selector selected condition initial/shared/local/central gates",
-        "PASS selector condition third-party event/refresh barrier/newer publication",
-        "PASS selector selected condition hidden/OFF/inhibited notifications",
+        "PASS selector condition control-epoch input/render barrier and convergence",
+        "PASS selector selected condition hidden/OFF/inhibited gates",
     ):
         assert marker in run.stdout, run.stdout
     assert "<err>" not in run.stdout, run.stdout
@@ -243,7 +243,7 @@ def main(root=None):
     run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
                      stderr=subprocess.STDOUT, log_path=root / "runtime.log")
     assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout[-12000:]
-    assert "PASS selector public API/notifications/coalescing" in run.stdout, run.stdout
+    assert "PASS selector public API/burst retained selections" in run.stdout, run.stdout
     ordered = ["a_static active=0", "a_motion reset", "a_motion active=1",
                "a_motion input before renders=0", "a_motion render elapsed=0 demand=1"]
     positions = [run.stdout.index(f"selector child {entry}") for entry in ordered]

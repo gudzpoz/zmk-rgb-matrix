@@ -8,14 +8,7 @@
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-static struct k_spinlock schedule_lock;
-static bool pending_request;
-static bool started, initialized, in_control;
-
-static uint64_t refresh_requested;
-static void control_handler(struct k_work *work);
-
-static K_WORK_DEFINE(control_work, control_handler);
+static bool initialized, in_control;
 
 static struct kp_rgb_condition_registration *lookup(const struct device *dev) {
   STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
@@ -39,22 +32,7 @@ static void fault(struct kp_rgb_condition_registration *e, const char *reason) {
 }
 
 void kp_rgb_condition_invalidate(void) {
-  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  pending_request = true;
-  if (started && !on_worker()) {
-    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
-  }
-  k_spin_unlock(&schedule_lock, key);
-}
-
-void kp_rgb_conditions_request_refresh(uint64_t token) {
-  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  refresh_requested = token;
-  pending_request = true;
-  if (started) {
-    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
-  }
-  k_spin_unlock(&schedule_lock, key);
+  kp_rgb_coordinator_request(KP_RGB_REQUEST_CONTROL);
 }
 
 bool kp_rgb_condition_require(const struct device *dev) {
@@ -136,19 +114,13 @@ static void evaluate(void) {
   }
 }
 
-static void control_handler(struct k_work *work) {
-  ARG_UNUSED(work);
+void kp_rgb_conditions_run(void) {
   in_control = true;
   if (!initialized) {
     initialize_conditions();
     initialized = true;
   }
 
-  k_spinlock_key_t refresh_key = k_spin_lock(&schedule_lock);
-  pending_request = false;
-  uint64_t refresh_token = refresh_requested;
-  refresh_requested = 0;
-  k_spin_unlock(&schedule_lock, refresh_key);
   int64_t now = k_uptime_get();
   evaluate();
   bool changed = kp_rgb_overlay_refresh();
@@ -158,23 +130,8 @@ static void control_handler(struct k_work *work) {
   kp_rgb_triggers_evaluate(now);
 
   in_control = false;
-  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  bool refresh_complete = refresh_token && !pending_request;
-  if (refresh_token && !refresh_complete && !refresh_requested) {
-    refresh_requested = refresh_token;
-  }
-  if (pending_request || refresh_requested) {
-    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
-  }
-  k_spin_unlock(&schedule_lock, key);
-  if (refresh_complete) kp_rgb_conditions_refreshed(refresh_token);
 }
 
 void kp_rgb_conditions_start(void) {
-  k_spinlock_key_t key = k_spin_lock(&schedule_lock);
-  if (!started) {
-    started = true;
-    k_work_submit_to_queue(kp_rgb_work_q(), &control_work);
-  }
-  k_spin_unlock(&schedule_lock, key);
+  kp_rgb_coordinator_start();
 }

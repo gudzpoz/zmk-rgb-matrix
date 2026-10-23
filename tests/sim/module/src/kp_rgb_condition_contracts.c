@@ -10,7 +10,6 @@
 #include <zmk/behavior.h>
 #include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
-#include <zmk/events/rgb_selector_selection_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
@@ -27,7 +26,7 @@ struct source_config {
 };
 K_SEM_DEFINE(sample_entered, 0, 1);
 K_SEM_DEFINE(sample_release, 0, 1);
-static atomic_t notifications, notifications_b, reenter, irq_calls;
+static atomic_t irq_calls;
 
 static void interrupt(const void *arg) {
     ARG_UNUSED(arg);
@@ -42,12 +41,12 @@ static bool sample(const struct device *dev) {
     KP_CHECK(k_current_get() == k_work_queue_thread_get(kp_rgb_work_q()));
     atomic_inc(&s->calls);
     bool value = atomic_get(&s->value);
+    if (cfg->selector)
+        value = zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
     if (atomic_cas(&s->pause, 1, 0)) {
         k_sem_give(&sample_entered);
         KP_CHECK(k_sem_take(&sample_release, K_SECONDS(2)) == 0);
     }
-    if (cfg->selector)
-        value = zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
     const struct kp_rgb_condition_registration *registration = cfg->registration;
     for (size_t i = 0; registration && i < registration->dep_count; i++) {
         if (s->short_circuit && !value) break;
@@ -180,8 +179,9 @@ static int pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_bin
         KP_CHECK(calls(DEV(cc_left)) == sentinel_left_calls);
         KP_CHECK(calls(DEV(cc_right)) == sentinel_right_calls);
     }
-    if (selector_mutation && binding->param1 == 10)
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    if (selector_mutation && (binding->param1 == 10 || binding->param1 == 11))
+        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a),
+            binding->param1 == 10 ? DEV(probe_c) : DEV(probe_a)) == 0);
     bool root_edge = binding->param1 == 10 || binding->param1 == 11;
     bool right_edge = binding->param1 == 25 || binding->param1 == 26;
     if (finite_cascade && mutation_budget && (root_edge || (multi_cascade && right_edge))) {
@@ -205,21 +205,6 @@ static const struct behavior_driver_api action_api = {
 BEHAVIOR_DT_DEFINE(DT_NODELABEL(ccact), NULL, NULL, NULL, NULL, POST_KERNEL,
                    KP_RGB_DEVICE_INIT_PRIORITY, &action_api);
 
-static int listener(const zmk_event_t *eh) {
-    const struct zmk_rgb_selector_selection_changed *ev = as_zmk_rgb_selector_selection_changed(eh);
-    if (ev->selector == DEV(selector_a)) {
-        atomic_inc(&notifications);
-        kp_rgb_condition_invalidate();
-        if (atomic_cas(&reenter, 1, 0))
-            KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-    } else if (ev->selector == DEV(selector_b)) {
-        atomic_inc(&notifications_b);
-        kp_rgb_condition_invalidate();
-    }
-    return ZMK_EV_EVENT_BUBBLE;
-}
-ZMK_LISTENER(cc_selection_listener, listener);
-ZMK_SUBSCRIPTION(cc_selection_listener, zmk_rgb_selector_selection_changed);
 
 static void expect_selection(bool a) {
     drain();
@@ -293,7 +278,7 @@ static void timing_prepare(void) {
         atomic_set(&src(root)->value, true);
         atomic_set(&src(DEV(cc_leaf))->value, false);
     }
-    if (kp_test_case("early-refresh")) kp_rgb_conditions_request_refresh(17);
+    if (kp_test_case("early-refresh")) kp_rgb_condition_invalidate();
     kp_rgb_condition_invalidate();
     KP_CHECK(calls(root) == 0);
 }
@@ -322,11 +307,11 @@ static void timing_cases(void) {
         resume(); KP_CHECK(calls(root) >= 3 && gate(DEV(ordinary)));
     } else if (kp_test_case("refresh-interrupted")) {
         pause(root); irq_offload(interrupt, NULL);
-        kp_rgb_conditions_request_refresh(22); resume();
+        kp_rgb_condition_invalidate(); resume();
         KP_CHECK(calls(root) >= 3 && kp_rgb_condition_valid(root));
     } else if (kp_test_case("refresh")) {
         unsigned before = calls(root);
-        kp_rgb_conditions_request_refresh(21); drain();
+        kp_rgb_condition_invalidate(); drain();
         KP_CHECK(calls(root) == before + 1 && calls(DEV(cc_unused)) == 0);
     } else {
         drain();
@@ -357,7 +342,7 @@ static void trigger_cases(void) {
         for (unsigned n = 0; n < action_count; n++)
             KP_CHECK(actions[n].code != 25 && actions[n].code != 26);
         kp_rgb_condition_invalidate();
-        kp_rgb_conditions_request_refresh(51); drain();
+        kp_rgb_condition_invalidate(); drain();
         KP_CHECK(action_count == 4);
         set(DEV(cc_root), false); set(DEV(cc_left), false); set(DEV(cc_leaf), false); drain();
         KP_CHECK(action_count == 8 && actions[4].code == 11 && actions[5].code == 21 &&
@@ -427,53 +412,55 @@ static void selection_cases(void) {
     wait_ready(); expect_selection(true);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     unsigned event_samples = calls(DEV(cc_event));
-    if (kp_test_case("event-only")) {
-        k_msleep(100);
-        KP_CHECK(calls(DEV(cc_event)) == event_samples);
+    if (kp_test_case("no-poll")) {
+        select_a(false); expect_selection(false);
+        unsigned settled = calls(DEV(cc_event));
+        KP_CHECK(settled == event_samples + 1);
+        k_msleep(100); drain();
+        KP_CHECK(calls(DEV(cc_event)) == settled);
         return;
     }
-    if (kp_test_case("scoped-listener")) {
+    if (kp_test_case("cross-selector")) {
         unsigned samples_b = calls(DEV(cc_event_b)), root_samples = calls(DEV(cc_root));
-        unsigned notices_a = atomic_get(&notifications), notices_b = atomic_get(&notifications_b);
-        KP_CHECK(raise_zmk_rgb_selector_selection_changed((struct zmk_rgb_selector_selection_changed){.selector = DEV(selector_a)}) >= 0);
-        drain();
-        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b);
+        select_a(false); expect_selection(false);
         KP_CHECK(calls(DEV(cc_event)) == event_samples + 1);
-        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 1 && calls(DEV(cc_root)) == root_samples + 1);
-        KP_CHECK(raise_zmk_rgb_selector_selection_changed((struct zmk_rgb_selector_selection_changed){.selector = DEV(selector_b)}) >= 0);
-        drain();
-        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b + 1);
+        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 1);
+        KP_CHECK(calls(DEV(cc_root)) == root_samples + 1);
+        KP_CHECK(gate(DEV(cc_event_b_gate)));
+        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+        drain(); expect_selection(false);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples + 2);
         KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 2);
-        KP_CHECK(calls(DEV(cc_event)) == event_samples + 2 && calls(DEV(cc_root)) == root_samples + 2);
-        event_samples = calls(DEV(cc_event));
-        samples_b = calls(DEV(cc_event_b)); root_samples = calls(DEV(cc_root));
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
-        drain();
-        KP_CHECK(atomic_get(&notifications) == notices_a + 1 && atomic_get(&notifications_b) == notices_b + 2);
-        unsigned passes = calls(DEV(cc_root)) - root_samples;
-        KP_CHECK(passes >= 1);
-        KP_CHECK(calls(DEV(cc_event)) == event_samples + passes);
-        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + passes);
-        expect_selection(true); return;
-    }
-    if (kp_test_case("coalesced")) {
-        pause(DEV(cc_root)); unsigned before = atomic_get(&notifications);
-        unsigned before_b = atomic_get(&notifications_b);
-        select_a(false); select_a(true); select_a(false);
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
-        KP_CHECK(atomic_get(&notifications) == before);
-        resume(); expect_selection(false);
-        KP_CHECK(atomic_get(&notifications) == before + 1);
-        KP_CHECK(atomic_get(&notifications_b) == before_b + 1);
+        KP_CHECK(calls(DEV(cc_root)) == root_samples + 2);
         KP_CHECK(!gate(DEV(cc_event_b_gate))); return;
     }
-    if (kp_test_case("reentrant")) {
-        atomic_set(&reenter, 1); select_a(false); drain();
-        expect_selection(true); KP_CHECK(atomic_get(&notifications) >= 2); return;
+    if (kp_test_case("selection-burst")) {
+        unsigned samples_b = calls(DEV(cc_event_b)), root_samples = calls(DEV(cc_root));
+        pause(DEV(cc_root));
+        select_a(false); select_a(true); select_a(false);
+        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+        resume(); expect_selection(false);
+        KP_CHECK(calls(DEV(cc_root)) == root_samples + 2);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples + 2);
+        KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 2);
+        KP_CHECK(!gate(DEV(cc_event_b_gate))); return;
     }
     if (kp_test_case("trigger-mutation")) {
-        selector_mutation = true; set(DEV(cc_root), true); drain();
-        expect_selection(peripheral()); return;
+        unsigned root_samples = calls(DEV(cc_root));
+        action_count = 0; selector_mutation = true;
+        set(DEV(cc_root), true); expect_selection(peripheral());
+        set(DEV(cc_root), false); expect_selection(true);
+        unsigned passes = peripheral() ? 2 : 4;
+        KP_CHECK(calls(DEV(cc_root)) == root_samples + passes);
+        KP_CHECK(calls(DEV(cc_event)) == event_samples + passes);
+        if (peripheral()) KP_CHECK(action_count == 0);
+        else {
+            const unsigned expected[] = {10, 40, 11, 41};
+            KP_CHECK(action_count == ARRAY_SIZE(expected));
+            for (size_t n = 0; n < ARRAY_SIZE(expected); n++)
+                KP_CHECK(actions[n].code == expected[n]);
+        }
+        return;
     }
     if (kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) {
         pause(DEV(cc_event)); select_a(false);
@@ -482,25 +469,9 @@ static void selection_cases(void) {
         irq_offload(interrupt, NULL); resume(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_unused)) == 0); return;
     }
-    if (kp_test_case("resume-held")) {
-        kp_rgb_matrix_lock();
-        kp_rgb_control_refresh_hold_locked();
-        kp_rgb_control_refresh_hold_locked();
-        kp_rgb_matrix_unlock();
-        zmk_rgb_matrix_set_inhibited(true);
-        select_a(false);
-        zmk_rgb_matrix_set_inhibited(false);
-        drain();
-        kp_rgb_conditions_refreshed(UINT64_MAX);
-        kp_rgb_matrix_lock(); kp_rgb_control_refresh_release_locked(); kp_rgb_matrix_unlock();
-        select_a(true); select_a(false); drain();
-        kp_rgb_conditions_refreshed(1);
-        kp_rgb_matrix_lock(); kp_rgb_control_refresh_release_locked(); kp_rgb_matrix_unlock();
-        expect_selection(false); return;
-    }
     if (!kp_test_case("initial-shared")) {
         select_a(false); expect_selection(false);
-        KP_CHECK(calls(DEV(cc_event)) > event_samples && atomic_get(&notifications) > 0);
+        KP_CHECK(calls(DEV(cc_event)) > event_samples);
         select_a(true); expect_selection(true);
     }
 }
@@ -630,12 +601,10 @@ static void special_cases(void) {
         KP_CHECK(kp_rgb_overlay_targets(DEV(cc_transparent)) != NULL);
         KP_CHECK(!gate(DEV(ordinary)) && !gate(DEV(cc_shared)));
         KP_CHECK(!kp_rgb_overlay_covers_all(DEV(cc_transparent)));
-        unsigned before = atomic_get(&notifications);
         unsigned samples = calls(DEV(cc_event));
         unsigned root_samples = calls(DEV(cc_root));
         select_a(false); drain();
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-        KP_CHECK(atomic_get(&notifications) == before + 1);
         unsigned passes = calls(DEV(cc_root)) - root_samples;
         KP_CHECK(passes >= 1 && calls(DEV(cc_event)) == samples + passes);
     } else if (kp_test_case("trigger-unregistered-root")) {
@@ -646,7 +615,7 @@ static void special_cases(void) {
         if (!peripheral()) KP_CHECK(action_count == 1 && actions[0].code == 30);
         unsigned before = action_count;
         atomic_set(&src(DEV(cc_noreg))->value, false);
-        kp_rgb_conditions_request_refresh(41); drain();
+        kp_rgb_condition_invalidate(); drain();
         KP_CHECK(action_count == before && calls(DEV(cc_noreg)) == 0);
         set(DEV(cc_root), true); drain();
         if (!peripheral()) {
@@ -697,37 +666,42 @@ static const struct led_strip_driver_api strip_api = {.update_rgb = strip_update
 DEVICE_DT_DEFINE(DT_NODELABEL(cc_strip), NULL, NULL, NULL, NULL, POST_KERNEL,
                  CONFIG_LED_STRIP_INIT_PRIORITY, &strip_api);
 
-static void stale_source_refresh(bool held) {
+static void stale_source_refresh(bool source_only, bool newer_resume) {
     wait_ready();
     KP_CHECK(atomic_get(&strip_colors) > 0);
-    zmk_rgb_matrix_set_inhibited(true); drain();
-    KP_CHECK(atomic_get(&strip_blacks) > 0 && atomic_get(&strip_pixel_one) == 0);
+    if (!source_only) {
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); drain();
+        KP_CHECK(atomic_get(&strip_blacks) > 0 && atomic_get(&strip_pixel_one) == 0);
+    }
     unsigned before = atomic_get(&strip_colors);
-    if (held) {
-        kp_rgb_matrix_lock(); kp_rgb_control_refresh_hold_locked(); kp_rgb_matrix_unlock();
+    unsigned samples = calls(DEV(cc_root));
+    if (source_only) atomic_set(&src(DEV(cc_root))->value, true);
+    atomic_set(&src(DEV(cc_root))->pause, 1);
+    if (source_only) kp_rgb_condition_invalidate();
+    else KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
+    KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
+    KP_CHECK(atomic_get(&strip_colors) == before);
+    atomic_set(&src(DEV(cc_root))->value, !source_only);
+    irq_offload(interrupt, NULL);
+    if (newer_resume) {
+        select_a(false);
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
     }
     atomic_set(&src(DEV(cc_root))->pause, 1);
-    zmk_rgb_matrix_set_inhibited(false);
-    if (held) kp_rgb_condition_invalidate();
-    KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
-    KP_CHECK(atomic_get(&strip_colors) == before);
-    atomic_set(&src(DEV(cc_root))->value, true);
-    irq_offload(interrupt, NULL);
-    atomic_set(&src(DEV(cc_root))->pause, 1);
-    /* Boot requested token 1; resume advanced it. Without held=true, these
-     * completions must be rejected by token alone, not by outstanding holds. */
-    kp_rgb_conditions_refreshed(1);
-    kp_rgb_conditions_refreshed(UINT64_MAX);
-    kp_rgb_conditions_refreshed(0);
     k_sem_give(&sample_release);
     KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
+    KP_CHECK(calls(DEV(cc_root)) == samples + 2);
     KP_CHECK(atomic_get(&strip_colors) == before);
-    KP_CHECK(!gate(DEV(ordinary)));
-    if (held) {
+    if (!source_only) KP_CHECK(!gate(DEV(ordinary)));
+    if (newer_resume) {
+        select_a(true); select_a(false);
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+        KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
         atomic_set(&src(DEV(cc_root))->pause, 1);
-        kp_rgb_matrix_lock(); kp_rgb_control_refresh_release_locked(); kp_rgb_matrix_unlock();
         k_sem_give(&sample_release);
         KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
+        KP_CHECK(calls(DEV(cc_root)) == samples + 3);
         KP_CHECK(atomic_get(&strip_colors) == before);
     }
     k_sem_give(&sample_release);
@@ -735,15 +709,22 @@ static void stale_source_refresh(bool held) {
     while (atomic_get(&strip_colors) == before && k_uptime_get() < until) k_msleep(1);
     drain();
     KP_CHECK(atomic_get(&strip_colors) == before + 1);
-    KP_CHECK(gate(DEV(ordinary)) && atomic_get(&strip_pixel_one) == 0xffffff);
+    KP_CHECK(calls(DEV(cc_root)) == samples + (newer_resume ? 3 : 2));
+    KP_CHECK(gate(DEV(ordinary)) == !source_only);
+    /* The central-gated underlay has no received gate word on this peripheral. */
+    if (source_only) KP_CHECK(gate(DEV(selector_a)) == !peripheral());
+    uint32_t pixel = source_only ? (peripheral() ? 0 : 0x00ff00) : 0xffffff;
+    KP_CHECK(atomic_get(&strip_pixel_one) == pixel);
+    if (newer_resume) expect_selection(false);
     KP_CHECK(irq_calls == 1);
 }
 #endif
 
 void kp_test_conditions_run(void) {
-    if (kp_test_case("stale-source-refresh") || kp_test_case("held-source-refresh")) {
+    if (kp_test_case("stale-source-refresh") || kp_test_case("pending-source") ||
+        kp_test_case("resume-selection")) {
 #if DT_HAS_COMPAT_STATUS_OKAY(test_rgb_condition_contract_strip)
-        stale_source_refresh(kp_test_case("held-source-refresh"));
+        stale_source_refresh(kp_test_case("pending-source"), kp_test_case("resume-selection"));
 #else
         KP_CHECK(false);
 #endif
@@ -766,10 +747,9 @@ void kp_test_conditions_run(void) {
         wait_ready(); KP_CHECK(calls(DEV(cc_unused)) == 0);
         KP_CHECK(calls(DEV(cc_central)) == (peripheral() ? 0 : 1));
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)));
-    } else if (kp_test_case("initial-shared") || kp_test_case("event-only") ||
-        kp_test_case("scoped-listener") || kp_test_case("third-party") ||
-        kp_test_case("coalesced") || kp_test_case("reentrant") ||
-        kp_test_case("trigger-mutation") || kp_test_case("resume-held") ||
+    } else if (kp_test_case("initial-shared") || kp_test_case("no-poll") ||
+        kp_test_case("cross-selector") || kp_test_case("third-party") ||
+        kp_test_case("selection-burst") || kp_test_case("trigger-mutation") ||
         kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) selection_cases();
     else KP_CHECK(false);
 }

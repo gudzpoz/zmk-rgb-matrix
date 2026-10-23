@@ -129,7 +129,7 @@ def main():
                                 stderr=subprocess.STDOUT, timeout=30,
                                 log_path=unique_log(root, f"{name}-{scenario}"))
             assert result.returncode == 0, result.stdout[-20000:]
-            markers = ("restored before startup notification", "legacy records ignored",
+            markers = ("restored at selector readiness", "legacy records ignored",
                        "independent save despite persistent failure",
                        "addressed save/reset/reload isolation", "global reset/reload")
             if scenario == "existing":

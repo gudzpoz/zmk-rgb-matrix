@@ -163,14 +163,14 @@ static int64_t kp_rgb_output_retry_deadline_ms;
 static bool kp_rgb_output_urgent_black;
 static int64_t kp_rgb_next_frame_ms = INT64_MAX;
 static struct k_spinlock kp_rgb_schedule_lock;
-static bool kp_rgb_scene_requested;
-static bool kp_rgb_pass_active;
-static bool kp_rgb_pass_requested;
+static uint32_t kp_rgb_reasons;
+static uint64_t kp_rgb_control_epoch;
+static uint64_t kp_rgb_evaluated_epoch;
+static bool kp_rgb_control_enabled;
+static bool kp_rgb_control_evaluated;
+static bool kp_rgb_coordinator_active;
 static bool kp_rgb_scene_dirty = true;
 static bool kp_rgb_scene_animating;
-static uint64_t kp_rgb_refresh_token;
-static bool kp_rgb_refresh_pending;
-static size_t kp_rgb_refresh_holds;
 static enum zmk_activity_state kp_rgb_activity_state = ZMK_ACTIVITY_ACTIVE;
 
 /* shared - local, in ms; 0 on the central/standalone. Written by the split
@@ -219,83 +219,74 @@ void kp_rgb_set_clock_offset(int32_t offset_ms) {
 #define KP_RGB_LOCK_WAIT_MS 8
 #define KP_RGB_LOCK_RETRY_MS 1
 
-static void kp_rgb_output_handler(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(kp_output_work, kp_rgb_output_handler);
+static void kp_rgb_coordinator_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(kp_coordinator_work, kp_rgb_coordinator_handler);
 
-/* Scheduling lock held; no matrix lock is needed to request a pass. */
+/* Scheduling lock held; never acquire the matrix lock from here. */
 static int kp_rgb_schedule_locked(int64_t deadline_ms) {
   if (deadline_ms == INT64_MAX) return 0;
   int64_t delay_ms = MAX(INT64_C(0), deadline_ms - k_uptime_get());
-  int err = k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_output_work,
-                                      delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
-  return err;
+  return k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_coordinator_work,
+                                    delay_ms ? K_MSEC(delay_ms) : K_NO_WAIT);
 }
 
-static void kp_rgb_request_output_pass(bool scene_changed) {
+static bool kp_rgb_control_fresh_locked(void) {
+  return kp_rgb_control_enabled && kp_rgb_control_evaluated &&
+         kp_rgb_evaluated_epoch == kp_rgb_control_epoch &&
+         !(kp_rgb_reasons & KP_RGB_REQUEST_CONTROL);
+}
+
+static bool kp_rgb_requests_runnable_locked(void) {
+  return (kp_rgb_control_enabled && (kp_rgb_reasons & KP_RGB_REQUEST_CONTROL)) ||
+         (kp_rgb_control_fresh_locked() &&
+          (kp_rgb_reasons & (KP_RGB_REQUEST_REPAINT | KP_RGB_REQUEST_INPUT))) ||
+         (kp_rgb_reasons & KP_RGB_REQUEST_OUTPUT);
+}
+
+void kp_rgb_coordinator_request(uint32_t reasons) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
-  kp_rgb_pass_requested = true;
-  kp_rgb_scene_requested |= scene_changed;
-  int err = kp_rgb_pass_active ? 0 : kp_rgb_schedule_locked(k_uptime_get());
+  kp_rgb_reasons |= reasons;
+  if (reasons & KP_RGB_REQUEST_CONTROL) kp_rgb_control_epoch++;
+  int err = !kp_rgb_coordinator_active && kp_rgb_requests_runnable_locked()
+                ? kp_rgb_schedule_locked(k_uptime_get()) : 0;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
-  if (err < 0) LOG_ERR("RGB output queue invariant violated (%d)", err);
+  if (err < 0) LOG_ERR("RGB coordinator queue invariant violated (%d)", err);
 }
 
-void zmk_rgb_matrix_flush(void) { kp_rgb_request_output_pass(true); }
-
-void kp_rgb_control_refresh_locked(void) {
-  kp_rgb_refresh_pending = true;
-  kp_rgb_refresh_token++;
-  if (!kp_rgb_refresh_holds)
-    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
-}
-
-void kp_rgb_control_refresh_hold_locked(void) {
-  kp_rgb_refresh_holds++;
-  kp_rgb_control_refresh_locked();
-}
-
-void kp_rgb_control_refresh_release_locked(void) {
-  __ASSERT(kp_rgb_refresh_holds, "unbalanced RGB control refresh release");
-  if (--kp_rgb_refresh_holds == 0)
-    kp_rgb_conditions_request_refresh(kp_rgb_refresh_token);
-}
-
-void kp_rgb_conditions_refreshed(uint64_t token) {
-  kp_rgb_matrix_lock();
-  if (kp_rgb_refresh_pending && !kp_rgb_refresh_holds &&
-      token == kp_rgb_refresh_token) {
-    kp_rgb_refresh_pending = false;
-    zmk_rgb_matrix_flush();
+void kp_rgb_coordinator_start(void) {
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  int err = 0;
+  if (!kp_rgb_control_enabled) {
+    kp_rgb_control_enabled = true;
+    kp_rgb_reasons |= KP_RGB_REQUEST_CONTROL | KP_RGB_REQUEST_REPAINT;
+    kp_rgb_control_epoch++;
+    if (!kp_rgb_coordinator_active) err = kp_rgb_schedule_locked(k_uptime_get());
   }
-  kp_rgb_matrix_unlock();
-}
-
-static void kp_rgb_begin_output_pass(void) {
-  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
-  kp_rgb_pass_active = true;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
+  if (err < 0) LOG_ERR("RGB coordinator queue invariant violated (%d)", err);
 }
 
-static bool kp_rgb_take_scene_request(void) {
-  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
-  bool requested = kp_rgb_scene_requested;
-  kp_rgb_scene_requested = false;
-  kp_rgb_pass_requested = false;
-  k_spin_unlock(&kp_rgb_schedule_lock, key);
-  return requested;
+void zmk_rgb_matrix_flush(void) {
+  kp_rgb_coordinator_request(KP_RGB_REQUEST_REPAINT);
 }
 
-static void kp_rgb_finish_output_pass(int64_t deadline_ms, bool lock_retry) {
+static void kp_rgb_finish_pass(int64_t scene_deadline, int64_t black_deadline,
+                               bool lock_retry) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  int64_t deadline_ms;
   if (lock_retry) {
-    kp_rgb_pass_requested = true;
-  } else if (kp_rgb_pass_requested) {
-    deadline_ms = k_uptime_get();
+    deadline_ms = k_uptime_get() + KP_RGB_LOCK_RETRY_MS;
+    if (kp_rgb_control_enabled && (kp_rgb_reasons & KP_RGB_REQUEST_CONTROL))
+      deadline_ms = k_uptime_get();
+  } else {
+    deadline_ms = MIN(black_deadline,
+                      kp_rgb_control_fresh_locked() ? scene_deadline : INT64_MAX);
+    if (kp_rgb_requests_runnable_locked()) deadline_ms = k_uptime_get();
   }
   int err = kp_rgb_schedule_locked(deadline_ms);
-  kp_rgb_pass_active = false;
+  kp_rgb_coordinator_active = false;
   k_spin_unlock(&kp_rgb_schedule_lock, key);
-  if (err < 0) LOG_ERR("RGB output queue invariant violated (%d)", err);
+  if (err < 0) LOG_ERR("RGB coordinator queue invariant violated (%d)", err);
 }
 
 /* Prioritize key handling over RGB feedback: every event is copied here and
@@ -474,27 +465,48 @@ static void kp_rgb_attempt_output_locked(void) {
   }
 }
 
-static void kp_rgb_output_handler(struct k_work *work) {
+static void kp_rgb_coordinator_handler(struct k_work *work) {
   ARG_UNUSED(work);
-  kp_rgb_begin_output_pass();
+  k_spinlock_key_t key = k_spin_lock(&kp_rgb_schedule_lock);
+  kp_rgb_coordinator_active = true;
+  bool control = kp_rgb_control_enabled && (kp_rgb_reasons & KP_RGB_REQUEST_CONTROL);
+  uint64_t epoch = kp_rgb_control_epoch;
+  if (control) kp_rgb_reasons &= ~KP_RGB_REQUEST_CONTROL;
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+
+  if (control) {
+    kp_rgb_conditions_run();
+    key = k_spin_lock(&kp_rgb_schedule_lock);
+    if (epoch == kp_rgb_control_epoch && !(kp_rgb_reasons & KP_RGB_REQUEST_CONTROL)) {
+      kp_rgb_evaluated_epoch = epoch;
+      kp_rgb_control_evaluated = true;
+    }
+    k_spin_unlock(&kp_rgb_schedule_lock, key);
+  }
+
   if (k_mutex_lock(&kp_rgb_lock, K_MSEC(KP_RGB_LOCK_WAIT_MS)) != 0) {
     LOG_WRN("Failed to obtain RGB matrix lock");
-    kp_rgb_finish_output_pass(k_uptime_get() + KP_RGB_LOCK_RETRY_MS, true);
+    kp_rgb_finish_pass(INT64_MAX, INT64_MAX, true);
     return;
   }
 
-  kp_rgb_scene_dirty |= kp_rgb_take_scene_request();
+  key = k_spin_lock(&kp_rgb_schedule_lock);
+  bool fresh = kp_rgb_control_fresh_locked();
+  if (fresh) {
+    kp_rgb_scene_dirty |= (kp_rgb_reasons & KP_RGB_REQUEST_REPAINT) != 0;
+    kp_rgb_reasons &= ~(KP_RGB_REQUEST_REPAINT | KP_RGB_REQUEST_INPUT);
+  }
+  kp_rgb_reasons &= ~KP_RGB_REQUEST_OUTPUT;
+  k_spin_unlock(&kp_rgb_schedule_lock, key);
+
   bool allowed = atomic_get(&kp_rgb_output_allowed);
   int64_t now_ms = k_uptime_get();
-  bool ready = allowed && !kp_rgb_refresh_pending;
   bool painted = false;
-  if (!allowed || ready) {
-    painted = kp_rgb_scene_pass_locked(now_ms, ready, now_ms >= kp_rgb_next_frame_ms);
+  if (fresh) {
+    painted = kp_rgb_scene_pass_locked(now_ms, allowed, now_ms >= kp_rgb_next_frame_ms);
   }
-  bool transfer_ready = !allowed || ready || kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK;
-  if (transfer_ready)
+  if (fresh || kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK)
     kp_rgb_attempt_output_locked();
-
   if (painted) {
     if (kp_rgb_scene_animating) {
       if (kp_rgb_next_frame_ms == INT64_MAX) kp_rgb_next_frame_ms = now_ms;
@@ -509,10 +521,14 @@ static void kp_rgb_output_handler(struct k_work *work) {
     }
   }
 
-  int64_t next_ms = MIN(ready ? kp_rgb_next_frame_ms : INT64_MAX,
-                        transfer_ready ? kp_rgb_output_deadline_locked() : INT64_MAX);
-  if (ready && kp_rgb_pending_available()) next_ms = k_uptime_get();
-  kp_rgb_finish_output_pass(next_ms, false);
+  int64_t scene_deadline = allowed ? kp_rgb_next_frame_ms : INT64_MAX;
+  int64_t black_deadline = INT64_MAX;
+  if (kp_rgb_output_pending == KP_RGB_OUTPUT_BLACK)
+    black_deadline = kp_rgb_output_deadline_locked();
+  else
+    scene_deadline = MIN(scene_deadline, kp_rgb_output_deadline_locked());
+  if (allowed && kp_rgb_pending_available()) scene_deadline = k_uptime_get();
+  kp_rgb_finish_pass(scene_deadline, black_deadline, false);
   kp_rgb_matrix_unlock();
 
   uint32_t dropped = kp_rgb_pending_take_dropped();
@@ -574,14 +590,13 @@ void kp_rgb_reconcile_power_locked(void) {
     }
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_dirty = true;
-    kp_rgb_control_refresh_locked();
+    kp_rgb_coordinator_request(KP_RGB_REQUEST_CONTROL | KP_RGB_REQUEST_REPAINT);
   } else {
     kp_rgb_next_frame_ms = INT64_MAX;
     kp_rgb_scene_animating = false;
-    kp_rgb_refresh_pending = false;
     kp_rgb_request_black_locked();
+    kp_rgb_coordinator_request(KP_RGB_REQUEST_OUTPUT | KP_RGB_REQUEST_REPAINT);
   }
-  zmk_rgb_matrix_flush();
 }
 
 static bool kp_rgb_pending_push(const struct kp_rgb_key_event *ev) {
@@ -638,7 +653,7 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
         .pressed = pos_ev->state,
         .timestamp_ms = pos_ev->timestamp,
     };
-    if (kp_rgb_pending_push(&event)) kp_rgb_request_output_pass(false);
+    if (kp_rgb_pending_push(&event)) kp_rgb_coordinator_request(KP_RGB_REQUEST_INPUT);
     return ZMK_EV_EVENT_BUBBLE;
   }
 
@@ -654,7 +669,8 @@ static int kp_rgb_matrix_event_listener(const zmk_event_t *eh) {
         kp_rgb_request_black_locked();
         kp_rgb_output_urgent_black = true;
         kp_rgb_attempt_output_locked();
-        if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE) zmk_rgb_matrix_flush();
+        if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE)
+          kp_rgb_coordinator_request(KP_RGB_REQUEST_OUTPUT);
       } else if (atomic_get(&kp_rgb_output_allowed) &&
                  old_cap != kp_rgb_brightness_cap_locked()) {
         zmk_rgb_matrix_flush();
@@ -805,7 +821,8 @@ static int kp_rgb_matrix_init(void) {
   if (kp_rgb_has_leds()) {
     kp_rgb_request_black_locked();
     kp_rgb_attempt_output_locked();
-    if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE) zmk_rgb_matrix_flush();
+    if (kp_rgb_output_pending != KP_RGB_OUTPUT_NONE)
+      kp_rgb_coordinator_request(KP_RGB_REQUEST_OUTPUT);
   }
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();

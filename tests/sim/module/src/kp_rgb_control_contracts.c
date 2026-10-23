@@ -9,7 +9,7 @@
 #include <zephyr/init.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
-#include <zmk/events/rgb_selector_selection_changed.h>
+
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_internal.h"
 #include "rgb_selector_sync_internal.h"
@@ -705,7 +705,6 @@ static void scoped_reset(void) {
     KP_CHECK(callback_count() == count);
     kp_rgb_matrix_unlock();
 }
-static atomic_t events_a, events_b;
 static void check_reset_parameters(void) {
     const struct kp_rgb_effect_common_data *a = kp_rgb_effect_data(DEV(probe_a));
     const struct kp_rgb_effect_common_data *c = kp_rgb_effect_data(DEV(probe_c));
@@ -722,7 +721,6 @@ static void prestart_reset_prepare(void) {
     KP_CHECK(a != NULL && a->effect_count == 2 && a->initial_effect == 99);
     kp_rgb_matrix_lock();
     unsigned callbacks = callback_count();
-    unsigned publications = atomic_get(&events_a);
     KP_CHECK(kp_rgb_selector_select_locked(a, 1) == 1);
     struct kp_rgb_hsb changed = {31, 41, 51};
     kp_rgb_effect_data(DEV(probe_a))->color = changed;
@@ -732,9 +730,8 @@ static void prestart_reset_prepare(void) {
     kp_rgb_selector_overlays_defaults_locked();
     KP_CHECK(a->effect_index == a->initial_effect && kp_rgb_selector_selected(a) == NULL);
     check_reset_parameters();
-    KP_CHECK(!a->publish_changes && zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    KP_CHECK(!a->notification_pending && callback_count() == callbacks);
-    KP_CHECK(atomic_get(&events_a) == publications);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    KP_CHECK(callback_count() == callbacks);
     kp_rgb_matrix_unlock();
 }
 static void reset_fallback(void) {
@@ -748,9 +745,7 @@ static void reset_fallback(void) {
     kp_rgb_matrix_unlock();
     k_sleep(K_MSEC(50));
     kp_rgb_matrix_lock();
-    KP_CHECK(!a->notification_pending);
     unsigned callbacks = callback_count();
-    unsigned publications = atomic_get(&events_a);
     struct kp_rgb_hsb changed = {31, 41, 51};
     kp_rgb_effect_data(DEV(probe_a))->color = changed;
     kp_rgb_effect_data(DEV(probe_c))->color = changed;
@@ -759,63 +754,29 @@ static void reset_fallback(void) {
     KP_CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
     KP_CHECK(kp_rgb_selector_selected(a) == DEV(probe_a) && a->effect_index == 0);
     check_reset_parameters();
-    KP_CHECK(callback_count() == callbacks && atomic_get(&events_a) == publications);
-    KP_CHECK(a->notification_pending == (start == 1));
+    KP_CHECK(callback_count() == callbacks);
     kp_rgb_matrix_unlock();
-    k_sleep(K_MSEC(50));
-    KP_CHECK(atomic_get(&events_a) == publications + (start == 1 ? 1 : 0));
 }
 static void reset_prestart_result(void) {
     wait_ready();
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     check_reset_parameters();
-    KP_CHECK(atomic_get(&events_a) == 1);
 }
-
-static bool reenter;
-static int listener(const zmk_event_t *eh) {
-    const struct zmk_rgb_selector_selection_changed *ev = as_zmk_rgb_selector_selection_changed(eh);
-    KP_CHECK(ev != NULL && !k_is_in_isr());
-    if (ev->selector == DEV(selector_a)) {
-        KP_CHECK(zmk_rgb_selector_get_selected(ev->selector) != NULL);
-        atomic_inc(&events_a);
-        if (reenter) {
-            reenter = false;
-            KP_CHECK(zmk_rgb_selector_select(ev->selector, DEV(probe_a)) == 0);
-        }
-    } else if (ev->selector == DEV(selector_b)) atomic_inc(&events_b);
-    return ZMK_EV_EVENT_BUBBLE;
-}
-ZMK_LISTENER(control_contract_listener, listener);
-ZMK_SUBSCRIPTION(control_contract_listener, zmk_rgb_selector_selection_changed);
 static void publication(void) {
-    wait_ready(); KP_CHECK(atomic_get(&events_a) == 1 && atomic_get(&events_b) == 1);
-    kp_rgb_matrix_lock();
+    wait_ready();
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
-    KP_CHECK(atomic_get(&events_a) == 1 && atomic_get(&events_b) == 1);
-    kp_rgb_matrix_unlock(); k_sleep(K_MSEC(50));
-    KP_CHECK(atomic_get(&events_a) == 2 && atomic_get(&events_b) == 2);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-    kp_rgb_matrix_lock();
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+    KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_b)) == 0);
     KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
-    kp_rgb_matrix_unlock(); k_sleep(K_MSEC(50));
-    KP_CHECK(atomic_get(&events_a) == 3);
-    kp_rgb_matrix_lock();
-    struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
-    a->publish_changes = false;
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-    KP_CHECK(!a->notification_pending);
-    kp_rgb_matrix_unlock(); k_sleep(K_MSEC(50));
-    KP_CHECK(atomic_get(&events_a) == 3);
-    kp_rgb_matrix_lock(); a->publish_changes = true; reenter = true;
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
-    kp_rgb_matrix_unlock(); k_sleep(K_MSEC(50));
-    KP_CHECK(atomic_get(&events_a) == 5 && !reenter);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
 }
 static void owner_callbacks(void) {
     wait_ready(); KP_CHECK(zmk_rgb_matrix_off() == 0); k_sleep(K_MSEC(50));

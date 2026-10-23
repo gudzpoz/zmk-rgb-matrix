@@ -30,7 +30,7 @@ zephyr_library_sources_ifdef(CONFIG_KEYPAW_SIM_STATIC_METADATA_TEST
 if(CONFIG_KEYPAW_SIM_ENGINE_CONTRACTS)
   zephyr_ld_options(-Wl,--wrap=k_work_reschedule_for_queue)
   zephyr_ld_options(-Wl,--wrap=k_work_submit_to_queue)
-  zephyr_ld_options(-Wl,--wrap=kp_rgb_conditions_request_refresh)
+  zephyr_ld_options(-Wl,--wrap=z_impl_k_mutex_lock)
 endif()
 if(CONFIG_KEYPAW_SIM_SINGLETON_SPLIT_TEST)
   zephyr_ld_options(-Wl,--wrap=zmk_behavior_invoke_binding)

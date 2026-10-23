@@ -12,7 +12,6 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
-#include <zmk/events/rgb_selector_selection_changed.h>
 #include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
 #include <drivers/behavior.h>
@@ -309,22 +308,6 @@ static void check_restored(void) {
   check_defaults();
 }
 
-static bool boot_checked;
-static int selection(const zmk_event_t *event) {
-  ARG_UNUSED(event);
-  if (!strcmp(settings_case, "boundary-failure")) {
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    return ZMK_EV_EVENT_BUBBLE;
-  }
-  if (!boot_checked) {
-    check_restored();
-    boot_checked = true;
-    printk("PASS scoped settings restored before startup notification\n");
-  }
-  return ZMK_EV_EVENT_BUBBLE;
-}
-ZMK_LISTENER(scoped_settings_probe, selection);
-ZMK_SUBSCRIPTION(scoped_settings_probe, zmk_rgb_selector_selection_changed);
 
 static void perturb_and_reload(void) {
   const struct device *effects[] = {DEV(probe_a), DEV(probe_b), DEV(probe_c),
@@ -884,7 +867,7 @@ static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(c);
   if (!strcmp(settings_case, "boundary-failure")) {
     k_sleep(K_MSEC(100));
-    CHECK(initial_load_done && !boot_checked);
+    CHECK(initial_load_done);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
 #if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
     CHECK(!device_is_ready(DEV(probe_b)));
@@ -901,7 +884,6 @@ static void scenario(void *a, void *b, void *c) {
     CHECK(device_init(DEV(selector_a)) == 0);
 #endif
     k_sleep(K_MSEC(200));
-    CHECK(!boot_checked);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
     CHECK(kp_rgb_global.brightness == 61);
@@ -917,13 +899,14 @@ static void scenario(void *a, void *b, void *c) {
     check_defaults();
     k_sleep(K_MSEC(200));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    CHECK(!boot_checked);
     printk("PASS settings boundary-failure\n");
     exit(0);
   }
-  for (unsigned i = 0; i < 100 && !boot_checked; i++) k_sleep(K_MSEC(5));
-  CHECK(boot_checked);
+  for (unsigned i = 0; i < 100 && !zmk_rgb_selector_get_selected(DEV(selector_a)); i++)
+    k_sleep(K_MSEC(5));
+  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) != NULL);
   check_restored();
+  printk("PASS scoped settings restored at selector readiness\n");
   if (strcmp(settings_case, "existing")) extended_case();
   obsolete_parameters();
   uint8_t legacy_state[36] = {2};
@@ -995,7 +978,7 @@ static void scenario(void *a, void *b, void *c) {
   durable_selection(SELECTOR_B_PATH "state", B_STATIC_NAME);
   CHECK(durable_brightness() == 100);
   perturb_and_reload();
-  CHECK(saves > 0 && boot_checked);
+  CHECK(saves > 0);
   printk("PASS scoped settings global reset/reload\n");
   exit(0);
 }

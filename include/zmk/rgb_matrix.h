@@ -293,8 +293,8 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   DEVICE_DT_DEFINE(node_id, NULL, NULL, &cfg_inst##_data, &cfg_inst##_cfg,     \
                    POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, callbacks_expr)
 
-/* Conditions are sampled on the control worker, never by a renderer. A variable
- * source must invalidate after a synchronized update; there is no polling fallback.
+/* Conditions are sampled during coordinator control evaluation, not rendering.
+ * A variable source must invalidate after a synchronized update; there is no polling.
  * Timed providers must arrange their own wakeups and invalidate when due.
  */
 enum kp_rgb_condition_scope {
@@ -312,9 +312,11 @@ struct kp_rgb_condition_api {
 /* Any-context, non-blocking request to resample all eligible live conditions.
  * Requests coalesce: intermediate source transitions need not be observed.
  * Early requests are subsumed by mandatory initial sampling.
+ * Pending evaluation defers new scene lifecycle, input and painting. Repeated
+ * invalidation may delay them indefinitely; an already-admitted scene may finish.
  */
 void kp_rgb_condition_invalidate(void);
-/* Control-worker only. Returns the cached value without invoking a provider.
+/* Control-evaluation only. Returns the cached value without invoking a provider.
  */
 bool kp_rgb_condition_value(const struct device *condition);
 

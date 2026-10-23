@@ -17,8 +17,10 @@ SCENARIOS = (
     'slow-failure', 'boot-off', 'boot-on', 'boot-inhibited', 'unready',
     'retry-lock', 'requests', 'healthy-mutation', 'mutation-before-lock',
     'urgent-black-success', 'participation-backoff',
-    'refresh-barrier', 'stale-refresh', 'selection-holds', 'resume-held',
-    'resume-participation',
+    'refresh-barrier', 'pending-control', 'resume-pending',
+    'resume-participation', 'scene-entry-freshness', 'control-during-driver',
+    'control-at-completion', 'pending-control-black',
+    'pending-control-black-retry',
     'static-bottom', 'multi-prefix', 'invalidate', 'animating-bottom', 'cover',
     'brightness', 'idle', 'child-change', 'gate-change', 'registry-holes',
     'lifecycle-batch',
@@ -171,7 +173,7 @@ def main():
             for _ in range(args.repeat):
                 result = run(args.build_dir, name, scenario)
                 if scenario in ('submit-failure', 'finish-failure'):
-                    assert result.stdout.count('RGB output queue invariant violated (-5)') == 1, result.stdout
+                    assert result.stdout.count('RGB coordinator queue invariant violated (-5)') == 1, result.stdout
     print('Native engine contracts passed.')
 
 

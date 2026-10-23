@@ -210,7 +210,6 @@ static int kp_selector_start(const struct device *dev) {
   int err = kp_rgb_selector_resolve_locked(&data->selector, requested_slot);
   data->ready = err == 0;
   if (data->ready) {
-    data->selector.publish_changes = true;
     kp_rgb_selector_publish_locked(&data->selector, NULL);
   }
   kp_rgb_matrix_unlock();
