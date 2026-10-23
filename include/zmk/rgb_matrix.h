@@ -142,10 +142,9 @@ struct kp_rgb_key_event {
  * geometry remain full-strip. Return true from render while another timed
  * update is needed; return false only after painting a valid static/terminal
  * image. False does not deactivate the participant. Settled participants must
- * still paint on requested composition, but the engine may skip a settled
- * participant that sits below a still-animating one on later animation frames;
- * invalidate or return true from on_event if its output can change while
- * settled. Return true from on_event when the event requires a repaint. Input
+ * still paint whenever composition is requested, including frames driven by
+ * another participant's animation. Request a repaint when settled output changes;
+ * return true from on_event when the event requires a repaint. Input
  * is copied, best effort, and routed to participants active at delivery, not
  * capture time. Queue overflow or output suppression may discard either half of
  * a key pair.
@@ -502,11 +501,12 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
 /* Runtime-only output gate for the local strip; default false. Does not change
  * logical ON/user intent, settings, or split commands. One external policy
  * aggregator must own the setter. Thread context only, including before matrix
- * initialization. Returns 0 once accepted, not once hardware is black; failed
- * black transfers retry at 100..1000 ms. A completed setter prevents subsequent
- * colored submissions until released. Release preserves outstanding transfer
- * backoff and resumes current logical intent without advancing animation time
- * spent inhibited. Event-driven control and overlay synchronization remain live
+ * initialization. Returns 0 once accepted, not once hardware is black. An
+ * allowed-to-blocked transition requests one black transfer; failure is logged
+ * without automatic retry.
+ * A completed setter prevents subsequent colored submissions until released.
+ * Release resumes current logical intent without advancing animation time spent
+ * inhibited. Event-driven control and overlay synchronization remain live
  * even while logically OFF. Pending key feedback is discarded while inhibited.
  * An in-flight render or feedback pass may finish computing. */
 int zmk_rgb_matrix_set_inhibited(bool inhibited);
@@ -542,5 +542,7 @@ int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
 /* Request a scene pass: reconcile activity and repaint if output is eligible.
  * Notify after a synchronized source update changes pixels or animation demand.
+ * Strip failures do not retry automatically; a later repaint can submit again.
+ * This request does not retry a failed blackout while output remains blocked.
  * Any-context, non-blocking and coalescing. */
 void zmk_rgb_matrix_flush(void);

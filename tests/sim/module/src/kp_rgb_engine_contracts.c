@@ -208,6 +208,8 @@ DT_INST_FOREACH_STATUS_OKAY(CHILD)
 
 static atomic_t block_condition;
 static atomic_t capture_matrix_lock, pause_matrix_lock;
+static atomic_t probe_control_lock;
+K_SEM_DEFINE(control_lock_entered, 0, 1);
 static struct k_mutex *matrix_mutex;
 K_SEM_DEFINE(lock_entered, 0, 1);
 K_SEM_DEFINE(lock_release, 0, 1);
@@ -215,6 +217,10 @@ K_SEM_DEFINE(lock_release, 0, 1);
 int __real_z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout);
 int __wrap_z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout) {
     if (atomic_cas(&capture_matrix_lock, 1, 0)) matrix_mutex = mutex;
+    if (mutex == matrix_mutex) {
+        KP_CHECK(K_TIMEOUT_EQ(timeout, K_FOREVER));
+        if (atomic_cas(&probe_control_lock, 1, 0)) k_sem_give(&control_lock_entered);
+    }
     if (mutex == matrix_mutex && k_current_get() == &kp_rgb_work_q()->thread &&
         atomic_cas(&pause_matrix_lock, 1, 0)) {
         k_sem_give(&lock_entered);
@@ -389,35 +395,35 @@ static void raw_sleep(unsigned expected_writes) {
 static void sleep_contract(const char *name) {
     bool off = !strcmp(name, "sleep-off");
     bool failed = !strcmp(name, "sleep-failure");
-    bool debt = !strcmp(name, "sleep-debt") || !strcmp(name, "sleep-resume-debt");
-    bool resume = !strcmp(name, "sleep-resume-debt");
+    bool prior_failure = !strcmp(name, "sleep-after-color-failure") || !strcmp(name, "sleep-failure-resume");
+    bool resume = !strcmp(name, "sleep-failure-resume");
     if (off) { KP_CHECK(zmk_rgb_matrix_off() == 0); settled(); }
     if (!strcmp(name, "sleep-inhibited")) { KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); settled(); }
     if (!strcmp(name, "sleep-idle")) idle(true);
     unsigned n = atomic_get(&writes);
-    if (debt) {
-        atomic_set(&fail_count, 2); zmk_rgb_matrix_flush(); wait_writes(n + 2); settled();
-        KP_CHECK(transfers[n].result == -EIO && transfers[n + 1].result == -EIO);
-        KP_CHECK(transfers[n + 1].start >= transfers[n].finish + 99);
-        n += 2;
+    if (prior_failure) {
+        atomic_set(&fail_count, 1); repaint();
+        KP_CHECK(transfers[n].result == -EIO);
+        n++;
     }
-    if (failed || debt) atomic_set(&fail_count, 1);
+    if (failed || prior_failure) atomic_set(&fail_count, 1);
     unsigned p = paints(0);
     raw_sleep(n + 1); check_all(n, 0); state_is(!off, false);
-    KP_CHECK(transfers[n].result == ((failed || debt) ? -EIO : 0));
-    if (debt) KP_CHECK(transfers[n].start < transfers[n - 1].finish + 200);
+    KP_CHECK(transfers[n].result == ((failed || prior_failure) ? -EIO : 0));
     raw_sleep(n + 1); settled(); KP_CHECK(paints(0) == p);
-    if (failed || debt) {
-        int delay = debt ? 400 : 100;
-        if (resume) idle(false);
-        sleep_until(transfers[n].finish + delay - 1);
-        KP_CHECK(atomic_get(&writes) == n + 1);
-        wait_writes(n + 2); settled();
-        KP_CHECK(transfers[n + 1].start >= transfers[n].finish + delay - 1);
-        KP_CHECK(transfers[n + 1].start <= transfers[n].finish + delay + 1);
-        KP_CHECK(transfers[n + 1].result == 0); check_all(n + 1, resume ? 17 : 0);
-        KP_CHECK(paints(0) == p + resume);
-        if (!resume) raw_sleep(n + 2);
+    if (failed || prior_failure) {
+        sleep_until(transfers[n].finish + 150); settled();
+        kp_rgb_condition_invalidate(); zmk_rgb_matrix_flush(); settled();
+        KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p);
+        raw_sleep(n + 1);
+        if (resume) {
+            idle(false); wait_writes(n + 2); settled();
+            check_all(n + 1, 17);
+            KP_CHECK(paints(0) == p + 1 && obs[0].elapsed == 0);
+            raw_sleep(n + 3); check_all(n + 2, 0);
+            idle(false); wait_writes(n + 4); settled();
+            check_all(n + 3, 17);
+        }
     }
     if (!strcmp(name, "sleep-inhibited")) {
         KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0); settled();
@@ -491,16 +497,50 @@ static void completion_boundary(void) {
     }
 }
 static bool setter_on;
+static bool setter_off;
 static bool setter_sleep;
 static unsigned setter_sleep_writes;
 static void setter(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c); k_sem_give(&setter_entered);
     if (setter_sleep) raw_sleep(setter_sleep_writes);
+    else if (setter_off) KP_CHECK(zmk_rgb_matrix_off() == 0);
     else KP_CHECK((setter_on ? zmk_rgb_matrix_on() : zmk_rgb_matrix_set_inhibited(true)) == 0);
     k_sem_give(&setter_done);
 }
 K_THREAD_STACK_DEFINE(setter_stack, 2048);
 static struct k_thread setter_thread;
+static void held_control_lock(void) {
+    unsigned n = atomic_get(&writes), p = paints(0);
+    atomic_set(&capture_matrix_lock, 1);
+    kp_rgb_matrix_lock();
+    setter_off = true;
+    atomic_set(&probe_control_lock, 1);
+    k_thread_create(&setter_thread, setter_stack, K_THREAD_STACK_SIZEOF(setter_stack),
+                    setter, NULL, NULL, NULL, 4, 0, K_NO_WAIT);
+    KP_CHECK(k_sem_take(&setter_entered, K_SECONDS(5)) == 0);
+    KP_CHECK(k_sem_take(&control_lock_entered, K_SECONDS(5)) == 0);
+    KP_CHECK(k_sem_take(&setter_done, K_MSEC(30)) == -EAGAIN);
+    KP_CHECK(atomic_get(&writes) == n && paints(0) == p);
+    kp_rgb_matrix_unlock();
+    KP_CHECK(k_sem_take(&setter_done, K_SECONDS(5)) == 0);
+    KP_CHECK(k_thread_join(&setter_thread, K_SECONDS(1)) == 0);
+    wait_writes(n + 1); settled(); check_all(n, 0);
+    KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p);
+}
+
+static void natural_frame_failure(void) {
+    unsigned n = atomic_get(&writes), p = paints(0);
+    atomic_set(&fail_count, 1); wait_writes(n + 3);
+    for (unsigned i = 0; i < 3; i++) {
+        check_all(n + i, 17);
+        KP_CHECK(transfers[n + i].result == (i ? 0 : -EIO));
+        if (i) {
+            int64_t delta = transfers[n + i].start - transfers[n + i - 1].start;
+            KP_CHECK(delta >= 15 && delta <= 17);
+        }
+    }
+    KP_CHECK(paints(0) == p + 3 && obs[0].elapsed == 16);
+}
 static void serialization(bool in_render, bool on) {
     setter_on = on;
     unsigned n = atomic_get(&writes);
@@ -522,29 +562,47 @@ static void serialization(bool in_render, bool on) {
         KP_CHECK(paints(0) == p && atomic_get(&writes) == w);
     } else {
         wait_writes(n + 2); settled();
-        KP_CHECK(transfers[n].result == -EIO && transfers[n + 1].start >= transfers[n].finish + 100 - 1);
+        KP_CHECK(transfers[n].result == -EIO && transfers[n + 1].result == 0);
+        KP_CHECK(transfers[n + 1].start < transfers[n].finish + 100);
         check_all(n, 0); check_all(n + 1, 17);
     }
 }
-static void backoff(bool black, bool slow) {
-    unsigned n = atomic_get(&writes), p = paints(0);
-    atomic_set(&fail_count, 7);
+static void one_shot_failure(bool black, bool slow) {
+    unsigned n = atomic_get(&writes), p = paints(0), e = events(0);
+    atomic_set(&fail_count, 1);
     atomic_set(&transfer_delay, slow ? 37 : 0);
     if (black) KP_CHECK(zmk_rgb_matrix_off() == 0); else zmk_rgb_matrix_flush();
-    wait_writes(n + 8); settled();
-    static const int delay[] = {100, 200, 400, 800, 1000, 1000, 1000};
-    for (unsigned i = 0; i < 8; i++) {
-        check_all(n + i, black ? 0 : 17);
-        KP_CHECK(transfers[n + i].result == (i == 7 ? 0 : -EIO));
-        if (i) KP_CHECK(transfers[n + i].start >= transfers[n + i - 1].finish + delay[i - 1] - 1 &&
-                       transfers[n + i].start <= transfers[n + i - 1].finish + delay[i - 1] + 1);
-    }
+    wait_writes(n + 1); settled();
+    KP_CHECK(transfers[n].result == -EIO); check_all(n, black ? 0 : 17);
     KP_CHECK(paints(0) == p + !black);
-    unsigned w = atomic_get(&writes); sleep_until(k_uptime_get() + 120); KP_CHECK(atomic_get(&writes) == w);
-    if (black) { atomic_set(&transfer_delay, 0); KP_CHECK(zmk_rgb_matrix_on() == 0); wait_writes(w + 1); }
-    else { atomic_set(&fail_count, 1); atomic_set(&transfer_delay, 0); repaint(); unsigned first = atomic_get(&writes) - 1;
-           wait_writes(first + 2); KP_CHECK(transfers[first + 1].start >= transfers[first].finish + 99 &&
-                                         transfers[first + 1].start <= transfers[first].finish + 101); }
+    sleep_until(transfers[n].finish + 150); settled();
+    kp_rgb_condition_invalidate(); settled();
+    position(false, 123); settled();
+    sleep_until(k_uptime_get() + 150); settled();
+    KP_CHECK(events(0) == e + !black);
+    KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + !black);
+    atomic_set(&transfer_delay, 0);
+    if (black) {
+        zmk_rgb_matrix_flush(); settled();
+        sleep_until(k_uptime_get() + 150); settled();
+        KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p);
+        KP_CHECK(zmk_rgb_matrix_on() == 0); wait_writes(n + 2); settled();
+        check_all(n + 1, 17);
+        KP_CHECK(zmk_rgb_matrix_off() == 0); wait_writes(n + 3); settled();
+        check_all(n + 2, 0);
+        KP_CHECK(atomic_get(&writes) == n + 3 && paints(0) == p + 1);
+    } else {
+        kp_rgb_matrix_lock(); obs[0].color = (struct led_rgb){200, 80, 40};
+        kp_rgb_global.brightness = 50; kp_rgb_matrix_unlock();
+        repaint();
+        for (unsigned i = 0; i < KP_LED_COUNT; i++)
+            check_pixel(n + 1, i, (struct led_rgb){100, 40, 20});
+        KP_CHECK(atomic_get(&writes) == n + 2 && paints(0) == p + 2);
+        repaint();
+        for (unsigned i = 0; i < KP_LED_COUNT; i++)
+            check_pixel(n + 2, i, (struct led_rgb){100, 40, 20});
+        KP_CHECK(atomic_get(&writes) == n + 3 && paints(0) == p + 3);
+    }
 }
 static void pending_control(bool resume) {
     unsigned e = events(0);
@@ -680,13 +738,13 @@ static void control_during_driver(void) {
     KP_CHECK(transfers[n + 1].condition_epoch > epoch && obs[0].event_epoch > epoch);
 }
 
-static void pending_control_black(bool retry) {
+static void pending_control_black(bool failed) {
     unsigned n = atomic_get(&writes), p = paints(0), e = events(0);
     atomic_set(&block_condition, 1); kp_rgb_condition_invalidate();
     KP_CHECK(k_sem_take(&block_entered, K_SECONDS(5)) == 0);
     unsigned epoch = atomic_get(&condition_samples);
     kp_rgb_condition_invalidate();
-    if (retry) atomic_set(&fail_count, 1);
+    if (failed) atomic_set(&fail_count, 1);
     KP_CHECK(zmk_rgb_matrix_off() == 0);
     atomic_set(&block_condition, 1);
     k_sem_give(&block_release);
@@ -694,9 +752,9 @@ static void pending_control_black(bool retry) {
     KP_CHECK(atomic_get(&condition_samples) > epoch);
     KP_CHECK(atomic_get(&writes) == n + 1);
     check_all(n, 0);
-    KP_CHECK(transfers[n].result == (retry ? -EIO : 0));
+    KP_CHECK(transfers[n].result == (failed ? -EIO : 0));
     KP_CHECK(paints(0) == p && events(0) == e);
-    if (retry) {
+    if (failed) {
         unsigned active = atomic_get(&obs[0].activations);
         unsigned inactive = atomic_get(&obs[0].deactivations);
         unsigned resets = atomic_get(&obs[0].resets);
@@ -708,16 +766,15 @@ static void pending_control_black(bool retry) {
         k_sem_give(&block_release);
         KP_CHECK(k_sem_take(&block_entered, K_SECONDS(5)) == 0);
         KP_CHECK(atomic_get(&condition_samples) > epoch);
-        KP_CHECK(atomic_get(&writes) == n + 2 && transfers[n + 1].result == 0);
-        KP_CHECK(transfers[n + 1].start >= transfers[n].finish + 100);
-        check_all(n + 1, 0);
+        KP_CHECK(atomic_get(&writes) == n + 1);
         KP_CHECK(paints(0) == p && events(0) == e);
         KP_CHECK(atomic_get(&obs[0].activations) == active);
         KP_CHECK(atomic_get(&obs[0].deactivations) == inactive);
         KP_CHECK(atomic_get(&obs[0].resets) == resets);
     }
     k_sem_give(&block_release); settled();
-    KP_CHECK(atomic_get(&writes) == n + 1 + retry);
+    sleep_until(k_uptime_get() + 150); settled();
+    KP_CHECK(atomic_get(&writes) == n + 1);
     KP_CHECK(paints(0) == p && events(0) == e);
 }
 
@@ -746,7 +803,7 @@ static void resume_participation(void) {
     KP_CHECK(paints(0) == p && events(0) == e && paints(3) == 1 && events(3) == 1);
     KP_CHECK(obs[3].elapsed == 0 && obs[3].timestamp == 123 && atomic_get(&obs[3].resets) == resets + 1);
 }
-static void prefix(const char *name) {
+static void fresh_composition(const char *name) {
     if (!strcmp(name, "cover")) {
         gate("etop"); unsigned resets = atomic_get(&obs[0].resets);
         gate("ecover"); check_all(atomic_get(&writes) - 1, 9);
@@ -762,27 +819,40 @@ static void prefix(const char *name) {
         KP_CHECK(atomic_get(&obs[0].resets) == resets && obs[0].elapsed == 0);
         return;
     }
-    if (!strcmp(name, "multi-prefix") || !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) gate("emid");
-    if (!strcmp(name, "cover")) gate("ecover");
+    bool middle = !strcmp(name, "layered-fresh") || !strcmp(name, "gate-change") || !strcmp(name, "registry-holes");
+    if (!strcmp(name, "static-flush")) {
+        unsigned p = paints(0), n = atomic_get(&writes);
+        set_color(0, (struct led_rgb){.r = 99});
+        sleep_until(k_uptime_get() + 150); settled();
+        KP_CHECK(paints(0) == p && atomic_get(&writes) == n);
+        repaint(); KP_CHECK(paints(0) == p + 1 && atomic_get(&writes) == n + 1);
+        check_all(n, 99); return;
+    }
+    if (middle) gate("emid");
     gate("etop");
     unsigned p = paints(0), mid = paints(1), top = paints(2), n = atomic_get(&writes);
-    uint8_t red = !strcmp(name, "cover") ? 9 : (!strcmp(name, "multi-prefix") || !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) ? 40 : 17;
-    check_pixel(n - 1, 0, (struct led_rgb){.r = red});
+    check_pixel(n - 1, 0, (struct led_rgb){.r = middle ? 40 : 17});
     check_pixel(n - 1, 1, (struct led_rgb){.b = 200});
     set_color(0, (struct led_rgb){.r = 99});
-    wait_writes(n + 3);
-    KP_CHECK(paints(0) == p && paints(1) == mid && paints(2) >= top + 3);
-    check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = red});
-    if (!strcmp(name, "invalidate") || !strcmp(name, "child-change")) {
-        repaint(); KP_CHECK(paints(0) == p + 1); check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 99});
+    wait_writes(n + 3); settled();
+    unsigned frames = atomic_get(&writes) - n;
+    KP_CHECK(paints(0) == p + frames && paints(1) == mid + (middle ? frames : 0));
+    KP_CHECK(paints(2) == top + frames);
+    check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = middle ? 40 : 99});
+    check_pixel(atomic_get(&writes) - 1, 1, (struct led_rgb){.b = 200});
+    if (!strcmp(name, "child-change")) {
+        repaint(); check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 99});
     } else if (!strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) {
+        mid = paints(1);
         gate("emid"); KP_CHECK(paints(1) == mid && atomic_get(&obs[1].deactivations) == 1);
         check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 99});
     } else if (!strcmp(name, "brightness")) {
         kp_rgb_matrix_lock(); kp_rgb_global.brightness = 50; kp_rgb_matrix_unlock(); repaint();
-        check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 49});
         unsigned w = atomic_get(&writes); wait_writes(w + 3);
-        check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 49});
+        for (unsigned tx = w - 1; tx < w + 3; tx++) {
+            check_pixel(tx, 0, (struct led_rgb){.r = 49});
+            check_pixel(tx, 1, (struct led_rgb){.b = 100});
+        }
     }
 }
 static void lifecycle(void) {
@@ -821,10 +891,16 @@ static void composition(const char *name) {
     KP_CHECK(events(0) == e + 1 && events(4) == f + 1);
     KP_CHECK(obs[0].timestamp == -123 && obs[4].timestamp == -123);
     unsigned p = paints(0), q = paints(4), n = atomic_get(&writes);
+    unsigned first = atomic_get(&child_paints[0]), second = atomic_get(&child_paints[1]);
     kp_rgb_matrix_lock(); obs[0].animate = true; kp_rgb_matrix_unlock();
     zmk_rgb_matrix_flush(); wait_writes(n + 3); settled();
-    KP_CHECK(paints(0) >= p + 3 && paints(4) >= q + 3);
-    KP_CHECK(atomic_get(&child_paints[0]) >= 3 && atomic_get(&child_paints[1]) >= 3);
+    unsigned frames = atomic_get(&writes) - n;
+    KP_CHECK(paints(0) == p + frames && paints(4) == q + frames);
+    KP_CHECK(atomic_get(&child_paints[0]) == first + frames);
+    KP_CHECK(atomic_get(&child_paints[1]) == second + frames);
+    for (unsigned tx = n; tx < n + frames; tx++)
+        for (unsigned i = 0; i < KP_LED_COUNT; i++)
+            check_pixel(tx, i, (struct led_rgb){25, 12, 4});
 }
 #if DT_NODE_EXISTS(DT_NODELABEL(engine_solid))
 static void solid_composition(void) {
@@ -843,30 +919,32 @@ static void solid_composition(void) {
     sleep_until(k_uptime_get() + 80); settled();
     KP_CHECK(atomic_get(&writes) == n && paints(0) == p);
 
-    /* Only B changes: the settled prefix must be invalidated. B80 yields
-     * (204,122,40), blend (86,45,14), output (36,18,5).
-     */
+    /* B80 yields (204,122,40), blend (86,45,14), output (36,18,5). */
     atomic_set(&fail_count, 2);
     color.b = 80;
     KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
-    wait_writes(n + 3); settled();
+    wait_writes(n + 1); settled();
     for (unsigned tx = n; tx < n + 3; tx++) {
+        if (tx != n) repaint();
         KP_CHECK(transfers[tx].result == (tx == n + 2 ? 0 : -EIO));
         for (unsigned i = 0; i < KP_LED_COUNT; i++)
             check_pixel(tx, i, i == 1 ? (struct led_rgb){36, 18, 5} : (struct led_rgb){7, 0, 0});
-        if (tx > n) KP_CHECK(transfers[tx].start >= transfers[tx - 1].finish + (tx == n + 1 ? 99 : 199));
+        KP_CHECK(paints(0) == p + tx - n + 1);
+        sleep_until(transfers[tx].finish + 150); settled();
+        KP_CHECK(atomic_get(&writes) == tx + 1);
     }
-    /* The driver overwrites Scratch on every attempt; Scene remains scaled once. */
-    KP_CHECK(strip_mutates && paints(0) == p + 1);
+    KP_CHECK(strip_mutates && paints(0) == p + 3);
     n += 3;
-    sleep_until(k_uptime_get() + 120); settled();
-    KP_CHECK(atomic_get(&writes) == n && paints(0) == p + 1);
+    repaint();
+    for (unsigned i = 0; i < KP_LED_COUNT; i++)
+        check_pixel(n, i, i == 1 ? (struct led_rgb){36, 18, 5} : (struct led_rgb){7, 0, 0});
+    n++;
     color.b = 0;
     KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
     wait_writes(n + 1); settled();
     for (unsigned i = 0; i < KP_LED_COUNT; i++)
         check_pixel(n, i, i == 1 ? (struct led_rgb){4, 0, 0} : (struct led_rgb){7, 0, 0});
-    KP_CHECK(paints(0) == p + 2);
+    KP_CHECK(paints(0) == p + 5);
 }
 #endif
 
@@ -899,9 +977,10 @@ void kp_test_engine_run(void) {
         unsigned idle_cap = DT_PROP(DT_NODELABEL(rgb_matrix), idle_brightness);
         if (idling) cap = MIN(cap, idle_cap);
         bool logical = !off && !sleeping && (!idling || idle_cap != 0);
-        wait_writes(2); settled();
-        KP_CHECK(transfers[0].result == -EIO && transfers[1].start >= transfers[0].finish + 99);
-        check_all(1, logical && !inhibited ? 17 * cap / 100 : 0);
+        settled(); sleep_until(transfers[0].finish + 150); settled();
+        KP_CHECK(transfers[0].result == -EIO);
+        KP_CHECK(atomic_get(&writes) == 1 + (logical && !inhibited));
+        if (logical && !inhibited) check_all(1, 17 * cap / 100);
         KP_CHECK(paints(0) == (logical && !inhibited)); state_is(!off, logical);
         if (sleeping || idling) {
             unsigned n = atomic_get(&writes);
@@ -918,7 +997,7 @@ void kp_test_engine_run(void) {
         !strcmp(name, "starved") || !strcmp(name, "slow-render") || !strcmp(name, "slow-driver") ||
         !strcmp(name, "slow-early") || !strcmp(name, "animating-bottom") || !strcmp(name, "rollover") ||
         !strcmp(name, "idempotent") || !strcmp(name, "boundary") || !strcmp(name, "stale-early") ||
-        !strcmp(name, "off") || !strcmp(name, "inhibited") || !strcmp(name, "resume");
+        !strcmp(name, "off") || !strcmp(name, "inhibited") || !strcmp(name, "resume") || !strcmp(name, "natural-frame-failure");
     if (!strcmp(name, "rollover")) kp_rgb_set_clock_offset((int32_t)(UINT32_MAX - kp_rgb_clock_ms() - 7));
     setup(animation);
     if (!strcmp(name, "sleep-serialization") || !strcmp(name, "sleep-render-serialization")) {
@@ -937,24 +1016,26 @@ void kp_test_engine_run(void) {
         KP_CHECK(transfers[n + 1].start >= epoch + 15 && transfers[n + 1].start <= epoch + 17);
         kp_test_complete();
     }
-    if (!strcmp(name, "black-retry") || !strcmp(name, "black-slow")) backoff(true, !strcmp(name, "black-slow"));
-    else if (!strcmp(name, "color-backoff") || !strcmp(name, "slow-failure")) backoff(false, !strcmp(name, "slow-failure"));
+    if (!strcmp(name, "black-one-shot") || !strcmp(name, "black-slow")) one_shot_failure(true, !strcmp(name, "black-slow"));
+    else if (!strcmp(name, "static-failure") || !strcmp(name, "slow-failure")) one_shot_failure(false, !strcmp(name, "slow-failure"));
+    else if (!strcmp(name, "natural-frame-failure")) natural_frame_failure();
+    else if (!strcmp(name, "held-control-lock")) held_control_lock();
     else if (!strcmp(name, "output-serialization") || !strcmp(name, "render-serialization") || !strcmp(name, "black-resume"))
         serialization(!strcmp(name, "render-serialization"), !strcmp(name, "black-resume"));
     else if (!strcmp(name, "pending-control") || !strcmp(name, "refresh-barrier") || !strcmp(name, "resume-pending"))
         pending_control(!strcmp(name, "resume-pending"));
     else if (!strcmp(name, "scene-entry-freshness")) scene_entry_freshness();
     else if (!strcmp(name, "control-during-driver")) control_during_driver();
-    else if (!strcmp(name, "pending-control-black") || !strcmp(name, "pending-control-black-retry"))
-        pending_control_black(!strcmp(name, "pending-control-black-retry"));
+    else if (!strcmp(name, "pending-control-black") || !strcmp(name, "pending-control-black-one-shot"))
+        pending_control_black(!strcmp(name, "pending-control-black-one-shot"));
     else if (!strcmp(name, "control-at-completion")) {
         control_at_completion = true; completion_boundary();
     }
     else if (!strcmp(name, "resume-participation")) resume_participation();
     else if (!strncmp(name, "composition-", 12) || !strcmp(name, "filters")) composition(name);
-    else if (!strcmp(name, "static-bottom") || !strcmp(name, "multi-prefix") || !strcmp(name, "invalidate") ||
+    else if (!strcmp(name, "static-bottom") || !strcmp(name, "layered-fresh") || !strcmp(name, "static-flush") ||
              !strcmp(name, "cover") || !strcmp(name, "brightness") || !strcmp(name, "child-change") ||
-             !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) prefix(name);
+             !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) fresh_composition(name);
     else if (!strcmp(name, "lifecycle")) lifecycle();
     else if (!strcmp(name, "lifecycle-batch")) lifecycle_batch();
     else if (!strcmp(name, "periodic") || !strcmp(name, "rollover") || !strcmp(name, "idempotent") || !strcmp(name, "animating-bottom")) {
@@ -977,46 +1058,55 @@ void kp_test_engine_run(void) {
     else if (!strcmp(name, "idle-policy") || !strcmp(name, "intent") || !strcmp(name, "idle") ||
              !strcmp(name, "idle-phase")) {
         idle_contract(!strcmp(name, "idle-phase"));
-    } else if (!strcmp(name, "color-failure") || !strcmp(name, "latest-scene") || !strcmp(name, "participation-backoff") ||
-               !strcmp(name, "requests") || !strcmp(name, "retry-lock") || !strcmp(name, "mutation-before-lock")) {
-        unsigned n = atomic_get(&writes); atomic_set(&fail_count, 1); repaint();
-        int64_t due = transfers[n].finish + 100;
-        unsigned p = paints(0);
-        if (!strcmp(name, "retry-lock")) {
-            kp_rgb_matrix_lock(); sleep_until(due + 20);
-            KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p);
-            kp_rgb_matrix_unlock();
-        } else if (!strcmp(name, "participation-backoff")) gate("ecover");
-        else if (!strcmp(name, "mutation-before-lock")) {
-            sleep_until(due - 1); kp_rgb_matrix_lock(); sleep_until(due + 2);
-            KP_CHECK(atomic_get(&writes) == n + 1);
-            obs[0].color = (struct led_rgb){.r = 99}; zmk_rgb_matrix_flush();
-            kp_rgb_matrix_unlock(); p++;
-        } else if (!strcmp(name, "latest-scene")) {
-            set_color(0, (struct led_rgb){.r = 99}); zmk_rgb_matrix_flush(); settled(); p++;
+    } else if (!strcmp(name, "color-failure")) {
+        one_shot_failure(false, false);
+    } else if (!strcmp(name, "fresh-scene") || !strcmp(name, "participation-after-failure") ||
+               !strcmp(name, "requests") || !strcmp(name, "flush-held-lock") || !strcmp(name, "mutation-held-lock")) {
+        unsigned n = atomic_get(&writes), p = paints(0);
+        atomic_set(&fail_count, 1); repaint();
+        KP_CHECK(transfers[n].result == -EIO && paints(0) == p + 1);
+        sleep_until(transfers[n].finish + 150); settled();
+        KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + 1);
+        if (!strcmp(name, "participation-after-failure")) {
+            gate("ecover"); check_all(n + 1, 9);
+            KP_CHECK(paints(0) == p + 1 && paints(3) == 1);
         } else if (!strcmp(name, "requests")) {
             kp_rgb_matrix_lock(); atomic_set(&input_replenish, 5);
             for (unsigned i = 0; i < 15; i++) { position(true, i); zmk_rgb_matrix_flush(); }
-            kp_rgb_matrix_unlock();
-            settled(); p = paints(0); KP_CHECK(events(0) == 20);
+            kp_rgb_matrix_unlock(); settled(); settled();
+            KP_CHECK(events(0) == 20 && paints(0) >= p + 3);
+            KP_CHECK(atomic_get(&writes) == n + paints(0) - p);
+            for (unsigned tx = n + 1; tx < atomic_get(&writes); tx++) check_all(tx, 17);
+        } else {
+            bool held = strcmp(name, "fresh-scene") != 0;
+            if (held) atomic_set(&capture_matrix_lock, 1);
+            kp_rgb_matrix_lock();
+            if (held) atomic_set(&pause_matrix_lock, 1);
+            zmk_rgb_matrix_flush();
+            if (held) {
+                KP_CHECK(k_sem_take(&lock_entered, K_SECONDS(5)) == 0);
+                KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + 1);
+                k_sem_give(&lock_release);
+            }
+            obs[0].color = (struct led_rgb){.r = 99};
+            kp_rgb_matrix_unlock(); wait_writes(n + 2); settled();
+            KP_CHECK(atomic_get(&writes) == n + 2 && paints(0) == p + 2);
+            check_all(n + 1, 99);
         }
-        if (k_uptime_get() < due - 1) { sleep_until(due - 1); KP_CHECK(atomic_get(&writes) == n + 1); }
-        wait_writes(n + 2); KP_CHECK(paints(0) == p);
-        check_all(n + 1, !strcmp(name, "participation-backoff") ? 9 : !strcmp(name, "latest-scene") || !strcmp(name, "mutation-before-lock") ? 99 : 17);
     } else if (!strcmp(name, "urgent-black") || !strcmp(name, "urgent-black-success") || !strcmp(name, "coalesced-gates")) {
         unsigned n = atomic_get(&writes); atomic_set(&fail_count, 1); repaint();
         if (!strcmp(name, "coalesced-gates")) {
             kp_rgb_matrix_lock(); KP_CHECK(zmk_rgb_matrix_off() == 0); KP_CHECK(zmk_rgb_matrix_on() == 0);
             KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
-            kp_rgb_matrix_unlock(); settled(); KP_CHECK(atomic_get(&writes) == n + 1);
+            kp_rgb_matrix_unlock(); settled(); KP_CHECK(atomic_get(&writes) == n + 2);
         } else {
             bool failure = !strcmp(name, "urgent-black"); if (failure) atomic_set(&fail_count, 1);
             KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0); wait_writes(n + 2);
             KP_CHECK(transfers[n + 1].start < transfers[n].finish + 100); check_all(n + 1, 0);
             KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0); wait_writes(n + 3);
             check_all(n + 2, 17);
-            if (failure) KP_CHECK(transfers[n + 2].start >= transfers[n + 1].finish + 199);
-            else KP_CHECK(transfers[n + 2].start < transfers[n].finish + 100);
+            KP_CHECK(transfers[n + 1].result == (failure ? -EIO : 0));
+            KP_CHECK(transfers[n + 2].start < transfers[n + 1].finish + 100);
         }
     } else if (!strcmp(name, "slow-render") || !strcmp(name, "slow-driver") || !strcmp(name, "slow-early") || !strcmp(name, "starved")) {
         unsigned n = atomic_get(&writes);
@@ -1037,18 +1127,25 @@ void kp_test_engine_run(void) {
         int64_t expected = epoch + ((finished - epoch) / 16 + 1) * 16;
         wait_writes(n + 2);
         KP_CHECK(transfers[n + 1].start >= expected - 1 && transfers[n + 1].start <= expected + 1);
-    } else if (!strcmp(name, "lock-retry")) {
-        unsigned n = atomic_get(&writes); kp_rgb_matrix_lock(); zmk_rgb_matrix_flush();
-        sleep_until(k_uptime_get() + 20); KP_CHECK(atomic_get(&writes) == n);
-        kp_rgb_matrix_unlock(); wait_writes(n + 1);
-    } else if (!strcmp(name, "lock-fairness")) {
+    } else if (!strcmp(name, "worker-held-lock")) {
+        unsigned n = atomic_get(&writes), p = paints(0);
+        atomic_set(&capture_matrix_lock, 1); kp_rgb_matrix_lock();
+        atomic_set(&pause_matrix_lock, 1); zmk_rgb_matrix_flush();
+        KP_CHECK(k_sem_take(&lock_entered, K_SECONDS(5)) == 0);
+        KP_CHECK(atomic_get(&writes) == n && paints(0) == p);
+        k_sem_give(&lock_release);
+        kp_rgb_matrix_unlock(); wait_writes(n + 1); settled();
+        KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + 1);
+        check_all(n, 17);
+    } else if (!strcmp(name, "worker-blocked-input")) {
         unsigned n = atomic_get(&writes), p = paints(0), e = events(0);
-        unsigned schedules = atomic_get(&output_schedules);
+        atomic_set(&capture_matrix_lock, 1);
         kp_rgb_matrix_lock();
         obs[0].color = (struct led_rgb){.r = 99};
+        atomic_set(&pause_matrix_lock, 1);
         position(true, -321); zmk_rgb_matrix_flush();
-        barrier();
-        KP_CHECK(atomic_get(&output_schedules) >= schedules + 2);
+        KP_CHECK(k_sem_take(&lock_entered, K_SECONDS(5)) == 0);
+        k_sem_give(&lock_release);
         KP_CHECK(atomic_get(&writes) == n && paints(0) == p && events(0) == e);
         kp_rgb_matrix_unlock(); wait_writes(n + 1); settled();
         KP_CHECK(atomic_get(&writes) == n + 1 && paints(0) == p + 1);
@@ -1107,7 +1204,7 @@ void kp_test_engine_run(void) {
         unsigned w = atomic_get(&writes); position(true, 123); settled();
         sleep_until(k_uptime_get() + 160); KP_CHECK(atomic_get(&writes) == w);
     } else if (!strcmp(name, "healthy-mutation") || !strcmp(name, "source-invalidate") || !strcmp(name, "status-only")) {
-        if (!strcmp(name, "status-only")) prefix("multi-prefix");
+        if (!strcmp(name, "status-only")) fresh_composition("layered-fresh");
         else { set_color(0, (struct led_rgb){.r = 99}); unsigned n = atomic_get(&writes);
                zmk_rgb_matrix_flush(); wait_writes(n + 1); check_all(n, 99); repaint(); check_all(n + 1, 99); }
     } else if (!strcmp(name, "stale") || !strcmp(name, "boundary") || !strcmp(name, "stale-early")) {
