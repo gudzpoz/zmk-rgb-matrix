@@ -19,7 +19,6 @@
 #include <zmk/rgb_matrix.h>
 
 #include "rgb_matrix_internal.h"
-#include "rgb_selector_sync_internal.h"
 #include "rgb_replication_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -85,7 +84,13 @@ static int on_keymap_binding_convert_central_state_dependent_params(
     return -EWOULDBLOCK;
   kp_rgb_matrix_lock();
   int ret = 0;
-  switch (binding->param1) {
+  uint32_t command = binding->param1;
+  if ((command & 0xffffu) == RGB_OVL_STATE_CMD) {
+    if (KP_RGB_OVERLAY_COMMAND_WORD(command) >= KP_RGB_OVERLAY_WORDS)
+      ret = -EINVAL;
+    command = RGB_OVL_STATE_CMD;
+  }
+  switch (command) {
   case RGB_TOG_CMD:
     binding->param1 = kp_rgb_global.user_on ? RGB_OFF_CMD : RGB_ON_CMD;
     break;
@@ -114,6 +119,13 @@ static int on_keymap_binding_convert_central_state_dependent_params(
 
 static int on_keymap_binding_pressed_command(uint32_t command,
                                              uint32_t argument) {
+  if ((command & 0xffffu) == RGB_OVL_STATE_CMD) {
+    size_t word = KP_RGB_OVERLAY_COMMAND_WORD(command);
+    if (word >= KP_RGB_OVERLAY_WORDS)
+      return -EINVAL;
+    kp_rgb_overlay_set_word(word, argument);
+    return 0;
+  }
   int ret;
   switch (command) {
   case RGB_TOG_CMD:
@@ -146,14 +158,6 @@ static int on_keymap_binding_pressed_command(uint32_t command,
     if (argument != 0)
       return -EINVAL;
     kp_rgb_reset_state();
-    kp_rgb_matrix_lock();
-    kp_rgb_split_global_dirty_locked();
-    kp_rgb_split_selectors_dirty_locked();
-    kp_rgb_matrix_unlock();
-    return 0;
-  case RGB_OVL_STATE_CMD:
-    kp_rgb_overlay_set_word(RGB_OVL_STATE_WORD(argument),
-                            RGB_OVL_STATE_BITS(argument));
     return 0;
   case RGB_CLOCK_CMD:
     /* Valid modulo 2^32 while the true offset is under 2^31 ms. */
@@ -164,9 +168,6 @@ static int on_keymap_binding_pressed_command(uint32_t command,
   }
   if (ret < 0)
     return ret;
-  kp_rgb_matrix_lock();
-  kp_rgb_split_global_dirty_locked();
-  kp_rgb_matrix_unlock();
   kp_rgb_save_state();
   return ret;
 }
@@ -179,14 +180,14 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                 : on_keymap_binding_pressed_command(
                       kp_rgb_invocation_command(binding->param1),
                       binding->param2);
-  kp_rgb_invocation_finish(binding);
+  kp_rgb_invocation_finish(binding, ret);
   return ret;
 }
 
 static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  kp_rgb_invocation_finish(binding);
+  kp_rgb_invocation_finish(binding, ZMK_BEHAVIOR_OPAQUE);
   return ZMK_BEHAVIOR_OPAQUE;
 }
 

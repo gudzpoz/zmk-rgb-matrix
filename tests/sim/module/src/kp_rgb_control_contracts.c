@@ -12,7 +12,6 @@
 
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_internal.h"
-#include "rgb_selector_sync_internal.h"
 #include "native_contract.h"
 
 BUILD_ASSERT(KP_RGB_DEVICE_INIT_PRIORITY == 99);
@@ -89,7 +88,7 @@ static bool user_on(void) {
 static void matrix_defaults(void) {
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     KP_CHECK(kp_rgb_selector_registry_count() == 0);
-    KP_CHECK(KP_RGB_OVERLAY_WORDS == 1);
+    KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     int32_t initial = (int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30);
     KP_CHECK(kp_rgb_config.initial_brightness == CLAMP(initial, 0, 100));
     KP_CHECK(kp_rgb_global.brightness == CLAMP(initial, 0, 100));
@@ -231,13 +230,8 @@ static void canonical_metadata_before_start(void) {
     KP_CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &b) == -ENODEV);
     KP_CHECK(kp_rgb_selector_binding_convert(DEV(ordinary), &b) == -ENODEV);
     KP_CHECK(kp_rgb_selector_binding_convert(NULL, &b) == -ENODEV);
-    struct kp_rgb_selector_snapshot snapshot;
-    size_t cursor = 0;
     kp_rgb_matrix_lock();
     KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a)) == NULL);
-    KP_CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == -ENODEV);
-    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot) == -ENODEV);
-    KP_CHECK(cursor == 0);
     kp_rgb_matrix_unlock();
 }
 static void early_prepare(void) {
@@ -297,13 +291,8 @@ static void one_child(void) {
     }
     struct kp_rgb_selector *selector = kp_rgb_selector_overlay_state_locked(DEV(single_control));
     KP_CHECK(selector && selector->owner == DEV(single_control) && selector->effect_count == 1);
-    struct kp_rgb_selector_snapshot snapshot;
-    size_t cursor = 0;
-    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(single_control), &cursor, &snapshot) == 1);
-    KP_CHECK(snapshot.control == DEV(single_control) && snapshot.slot == 0);
-    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(single_control), &cursor, &snapshot) == 0);
-    KP_CHECK(kp_rgb_selector_snapshot_locked(DEV(ordinary), &snapshot) == -ENODEV);
-    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(ordinary), &cursor, &snapshot) == -ENODEV);
+    KP_CHECK(kp_rgb_selector_at(selector, 0) == DEV(single_effect));
+    KP_CHECK(kp_rgb_selector_at(selector, 1) == NULL);
     kp_rgb_matrix_unlock();
     KP_CHECK(zmk_rgb_selector_reset(DEV(ordinary)) == -ENODEV);
     KP_CHECK(kp_rgb_selector_binding_apply(DEV(ordinary), RGB_RESET_CMD, 0) == -ENODEV);
@@ -328,12 +317,6 @@ static void registry(void) {
     struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(DEV(selector_b));
     KP_CHECK(a && b && a != b);
     KP_CHECK(a->owner == DEV(selector_a) && b->owner == DEV(selector_b));
-    struct kp_rgb_selector_snapshot snapshot;
-    KP_CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
-    KP_CHECK(snapshot.control == DEV(selector_a));
-    size_t cursor = 0;
-    KP_CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_b), &cursor, &snapshot) == 1);
-    KP_CHECK(snapshot.control == DEV(selector_b));
     KP_CHECK(a->effect_count == 2 && b->effect_count == 2);
     KP_CHECK(kp_rgb_selector_at(a, 0) == DEV(probe_a));
     KP_CHECK(kp_rgb_selector_at(a, 1) == DEV(probe_c));
@@ -652,6 +635,51 @@ static void canonical_validation(void) {
     KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == before_a.duration_ms);
     kp_rgb_matrix_unlock();
 }
+static void overlay_words(void) {
+    wait_ready();
+    kp_rgb_matrix_lock();
+    KP_CHECK(KP_RGB_OVERLAY_COUNT == 65 && KP_RGB_OVERLAY_WORDS == 3);
+    KP_CHECK(RGB_OVL_STATE_CMD == 0x101);
+    uint32_t expected[3] = {0};
+    for (size_t word = 0; word < 3; word++) kp_rgb_overlay_set_word(word, 0);
+    const uint32_t payloads[] = {BIT(31), 1, UINT32_MAX, 0x80010001u, 0};
+    for (size_t word = 0; word < 3; word++) {
+        uint32_t command = KP_RGB_OVERLAY_WORD_COMMAND(word);
+        KP_CHECK(command == (0x101u | ((uint32_t)word << 16)));
+        KP_CHECK(KP_RGB_OVERLAY_COMMAND_WORD(command) == word);
+        for (size_t p = 0; p < ARRAY_SIZE(payloads); p++) {
+            struct zmk_behavior_binding b = binding(DEV(rgb_matrix), command, payloads[p]);
+            KP_CHECK(convert(&b) == 0);
+            KP_CHECK(b.param1 == command && b.param2 == payloads[p]);
+            KP_CHECK(strcmp(b.behavior_dev, DEV(rgb_matrix)->name) == 0);
+            for (size_t i = 0; i < 3; i++) KP_CHECK(kp_rgb_overlay_get_word(i) == expected[i]);
+            KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == 0);
+            expected[word] = payloads[p];
+            for (size_t i = 0; i < 3; i++) KP_CHECK(kp_rgb_overlay_get_word(i) == expected[i]);
+            KP_CHECK(!kp_rgb_overlay_set_word(word, payloads[p]));
+            KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == 0);
+        }
+        expected[word] = BIT(31) | BIT(word);
+        KP_CHECK(kp_rgb_overlay_set_word(word, expected[word]));
+    }
+    const size_t invalid[] = {3, 4, UINT16_MAX};
+    for (size_t i = 0; i < ARRAY_SIZE(invalid); i++) {
+        uint32_t command = KP_RGB_OVERLAY_WORD_COMMAND(invalid[i]);
+        struct zmk_behavior_binding b = binding(DEV(rgb_matrix), command, UINT32_MAX);
+        KP_CHECK(convert(&b) == -EINVAL);
+        KP_CHECK(b.param1 == command && b.param2 == UINT32_MAX);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == -EINVAL);
+    }
+    const uint32_t plain[] = {RGB_TOG_CMD, RGB_ON_CMD, RGB_OFF_CMD, RGB_BRI_CMD,
+        RGB_BRD_CMD, RGB_BRT_SET_CMD, RGB_RESET_CMD, RGB_CLOCK_CMD};
+    for (size_t i = 0; i < ARRAY_SIZE(plain); i++) {
+        struct zmk_behavior_binding b = binding(DEV(rgb_matrix), plain[i] | BIT(16), 0);
+        KP_CHECK(convert(&b) == -ENOTSUP);
+        KP_CHECK(behavior_keymap_binding_pressed(&b, (struct zmk_behavior_binding_event){0}) == -ENOTSUP);
+    }
+    for (size_t i = 0; i < 3; i++) KP_CHECK(kp_rgb_overlay_get_word(i) == expected[i]);
+    kp_rgb_matrix_unlock();
+}
 static void global_commands(void) {
     wait_ready(); kp_rgb_matrix_lock();
     KP_CHECK(strcmp(DEV(rgb_matrix)->name, "rgb") == 0);
@@ -894,9 +922,10 @@ static void local_only(void) {
     k_sleep(K_MSEC(1500));
     KP_CHECK(atomic_get(&selector_sends) == sends);
     KP_CHECK(atomic_get(&storage_writes) == writes);
+    KP_CHECK(behavior_keymap_binding_released(&b, (struct zmk_behavior_binding_event){0}) == 0);
     KP_CHECK(invoke(DEV(selector_a), RGB_EFS_CMD, 1) == 0);
     k_sleep(K_MSEC(1500));
-    KP_CHECK(atomic_get(&selector_sends) > sends);
+    KP_CHECK(atomic_get(&selector_sends) == sends + 1);
     KP_CHECK(atomic_get(&storage_writes) > writes);
 #else
     KP_CHECK(false);
@@ -946,6 +975,7 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-canonical-validation")) canonical_validation();
     else if (kp_test_case("control-normalize-commands")) normalize_commands();
     else if (kp_test_case("control-global-commands")) global_commands();
+    else if (kp_test_case("control-overlay-words") || kp_test_case("control-overlay-words-peripheral")) overlay_words();
     else if (kp_test_case("control-reset")) scoped_reset();
     else if (kp_test_case("control-reset-fallback-noop") || kp_test_case("control-reset-fallback-notify")) reset_fallback();
     else if (kp_test_case("control-reset-prestart")) reset_prestart_result();

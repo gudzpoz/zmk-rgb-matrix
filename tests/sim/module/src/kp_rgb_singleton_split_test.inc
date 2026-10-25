@@ -13,13 +13,22 @@ struct singleton_send {
 static struct singleton_send singleton_sent[512];
 static unsigned singleton_count;
 static uint32_t singleton_remote_brightness[2], singleton_remote_power[2];
-static uint16_t singleton_remote_words[2][2];
+static uint32_t singleton_remote_mask[2][KP_RGB_OVERLAY_WORDS];
+#define SINGLETON_PASS (2 + KP_RGB_OVERLAY_WORDS)
 static unsigned singleton_clocks[2];
-static atomic_t singleton_connected, singleton_alternate, singleton_query_error;
+static uint32_t singleton_expected_mask = UINT32_C(0xabcd1234);
+static uint32_t singleton_expected_word(size_t word) {
+    if (!word) return singleton_expected_mask;
+    if (singleton_expected_mask == UINT32_C(0x12345678)) return UINT32_C(0x12345678) ^ word;
+    return word == 1 ? UINT32_C(0x80000001) : 1;
+}
+static atomic_t singleton_connected, singleton_alternate, singleton_query_error,
+    singleton_fail_persistently;
 static uint32_t singleton_fail_command;
-static int singleton_fail_word = -1, singleton_race_phase = -1;
-static unsigned singleton_duration, singleton_progress;
-static bool singleton_mutate, singleton_fail_once;
+static unsigned singleton_duration;
+static bool singleton_fail_once, singleton_mutate_on_failure;
+static int singleton_mutation_phase = -1;
+static bool singleton_mutation_once;
 static zmk_split_transport_central_status_changed_cb_t singleton_cb;
 K_MUTEX_DEFINE(singleton_records_lock);
 K_SEM_DEFINE(singleton_packet_done, 0, 512);
@@ -107,6 +116,10 @@ static void singleton_ordinary(uint32_t command, uint32_t value) {
 static void singleton_latest(void) {
     singleton_ordinary(RGB_OFF_CMD, 0);
     singleton_ordinary(RGB_BRT_SET_CMD, 19);
+    kp_rgb_matrix_lock();
+    for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++)
+        kp_rgb_overlay_set_word(word, UINT32_C(0x12345678) ^ word);
+    kp_rgb_matrix_unlock();
 }
 static int singleton_send_command(uint8_t source, struct zmk_split_transport_central_command cmd) {
     if (source >= 2 || !(atomic_get(&singleton_connected) & BIT(source))) return -ENOTCONN;
@@ -121,20 +134,8 @@ static int singleton_send_command(uint8_t source, struct zmk_split_transport_cen
     uint32_t command = kp_rgb_invocation_command(cmd.data.invoke_behavior.param1);
     uint32_t argument = cmd.data.invoke_behavior.param2;
     bool fail = !ordinary && !source && command == singleton_fail_command &&
-        (command != RGB_OVL_STATE_CMD || singleton_fail_word < 0 ||
-         (argument >> 16) == singleton_fail_word);
-    bool mutate = false;
-    if (!ordinary && !source) {
-        if (command == RGB_CLOCK_CMD) {
-            mutate = singleton_mutate && singleton_race_phase == 4;
-        } else {
-            mutate = singleton_mutate &&
-                (singleton_race_phase < 0 ? fail : singleton_progress == singleton_race_phase);
-            if (!fail) singleton_progress++;
-        }
-        if (mutate) singleton_mutate = false;
-    }
-    if (fail && singleton_fail_once) singleton_fail_command = 0;
+                (atomic_get(&singleton_fail_persistently) || singleton_fail_once);
+    if (fail && singleton_fail_once) singleton_fail_once = false;
     k_mutex_lock(&singleton_records_lock, K_FOREVER);
     CHECK(singleton_count < ARRAY_SIZE(singleton_sent));
     unsigned index = singleton_count++;
@@ -142,18 +143,33 @@ static int singleton_send_command(uint8_t source, struct zmk_split_transport_cen
         .source = source, .command = command, .argument = argument,
         .start = k_uptime_get(), .accepted = !fail, .ordinary = ordinary};
     k_mutex_unlock(&singleton_records_lock);
-    if (mutate) singleton_latest();
     k_mutex_lock(&singleton_records_lock, K_FOREVER);
     if (!fail) {
         if (command == RGB_BRT_SET_CMD) singleton_remote_brightness[source] = argument;
         else if (command == RGB_ON_CMD || command == RGB_OFF_CMD) singleton_remote_power[source] = command;
         else if (command == RGB_CLOCK_CMD) singleton_clocks[source]++;
         else {
-            CHECK(command == RGB_OVL_STATE_CMD && (argument >> 16) < 2);
-            singleton_remote_words[source][argument >> 16] = argument;
+            CHECK((command & 0xffffu) == RGB_OVL_STATE_CMD);
+            size_t word = KP_RGB_OVERLAY_COMMAND_WORD(command);
+            CHECK(word < KP_RGB_OVERLAY_WORDS);
+            singleton_remote_mask[source][word] = argument;
         }
     }
     k_mutex_unlock(&singleton_records_lock);
+    bool mutate = !ordinary && !source && singleton_mutation_once &&
+        ((singleton_mutation_phase == 0 && command == RGB_BRT_SET_CMD) ||
+         (singleton_mutation_phase == 1 && (command == RGB_ON_CMD || command == RGB_OFF_CMD)) ||
+         (singleton_mutation_phase == 2 && command == KP_RGB_OVERLAY_WORD_COMMAND(
+             !strcmp(split_case, "race-final") ? KP_RGB_OVERLAY_WORDS - 1 :
+             !strcmp(split_case, "race-later") ? 1 : 0)));
+    if (mutate) {
+        singleton_mutation_once = false;
+        singleton_latest();
+    }
+    if (fail && singleton_mutate_on_failure) {
+        singleton_mutate_on_failure = false;
+        singleton_latest();
+    }
     if (singleton_duration) k_sleep(K_MSEC(singleton_duration));
     k_mutex_lock(&singleton_records_lock, K_FOREVER);
     singleton_sent[index].end = k_uptime_get();
@@ -198,24 +214,29 @@ ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER(singleton_mock, &singleton_transport_api, 0
 ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER(singleton_alt_mock, &singleton_alt_api, 0);
 static void singleton_connect(unsigned mask) {
     atomic_set(&singleton_connected, mask);
-    struct zmk_split_transport_status value = singleton_status();
-    if (atomic_get(&singleton_alternate))
-        value.connections = ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED;
-    CHECK(singleton_cb(&singleton_mock, value) == 0);
+    CHECK(singleton_cb(&singleton_mock, singleton_status()) == 0);
+    CHECK(singleton_cb(&singleton_alt_mock, singleton_alt_status()) == 0);
 }
 static void singleton_masks(void) {
     int64_t until = k_uptime_get() + 1000;
-    while (kp_rgb_overlay_get_word(0) != 0x1234 || kp_rgb_overlay_get_word(1) != 0xabcd) {
+    for (;;) {
+        bool ready = true;
+        kp_rgb_matrix_lock();
+        for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++)
+            ready &= kp_rgb_overlay_get_word(word) == singleton_expected_word(word);
+        kp_rgb_matrix_unlock();
+        if (ready) break;
         CHECK(k_uptime_get() < until); k_sleep(K_MSEC(1));
     }
-    CHECK(KP_RGB_OVERLAY_WORDS == 2);
+    if (KP_RGB_OVERLAY_WORDS > 1) CHECK(KP_RGB_OVERLAY_COUNT == 65);
 }
 static void singleton_remote(uint32_t brightness, uint32_t power) {
     k_mutex_lock(&singleton_records_lock, K_FOREVER);
     for (unsigned i = 0; i < 2; i++) {
         CHECK(singleton_remote_brightness[i] == brightness);
         CHECK(singleton_remote_power[i] == power);
-        CHECK(singleton_remote_words[i][0] == 0x1234 && singleton_remote_words[i][1] == 0xabcd);
+        for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++)
+            CHECK(singleton_remote_mask[i][word] == singleton_expected_word(word));
     }
     k_mutex_unlock(&singleton_records_lock);
     unsigned settled_commands = 0;
@@ -245,118 +266,221 @@ static void singleton_wait_stream(unsigned minimum) {
                                              k_uptime_get() < until);
     }
 }
-static unsigned singleton_phase(const char *name) {
-    if (strstr(name, "complete")) return 4;
-    if (strstr(name, "mask-1")) return 3;
-    if (strstr(name, "mask-0") || strstr(name, "overlay")) return 2;
-    if (strstr(name, "power")) return 1;
-    return 0;
-}
-static uint32_t singleton_phase_command(unsigned phase) {
-    return phase == 0 ? RGB_BRT_SET_CMD : phase == 1 ? RGB_ON_CMD : RGB_OVL_STATE_CMD;
-}
-static void singleton_repair(void) {
-    unsigned phase = singleton_phase(split_case);
-    singleton_race_phase = phase;
-    singleton_mutate = phase < 4;
-    if (strstr(split_case, "failed")) {
-        CHECK(phase < 4);
-        singleton_fail_command = singleton_phase_command(phase);
-        singleton_fail_word = phase == 3 ? 1 : 0;
-        singleton_fail_once = true;
-    }
-    singleton_connect(3);
-    singleton_wait_stream(4);
-    if (phase == 4) {
-        k_sleep(K_MSEC(250)); singleton_mutate = true;
-    }
-    singleton_wait_stream(8);
-    k_sleep(K_MSEC(250)); singleton_remote(19, RGB_OFF_CMD);
-    unsigned accepted = 0, failed = 0;
-    const uint32_t commands[] = {RGB_BRT_SET_CMD, RGB_ON_CMD, RGB_OVL_STATE_CMD, RGB_OVL_STATE_CMD,
-                                RGB_BRT_SET_CMD, RGB_OFF_CMD, RGB_OVL_STATE_CMD, RGB_OVL_STATE_CMD};
-    const uint32_t arguments[] = {61, 0, RGB_OVL_STATE_VAL(0, 0x1234), RGB_OVL_STATE_VAL(1, 0xabcd),
-                                 19, 0, RGB_OVL_STATE_VAL(0, 0x1234), RGB_OVL_STATE_VAL(1, 0xabcd)};
+static unsigned singleton_state_count(unsigned source) {
+    unsigned count = 0;
     for (unsigned i = 0; i < singleton_records(); i++) {
         struct singleton_send sent = singleton_record(i);
-        if (sent.source || sent.ordinary || sent.command == RGB_CLOCK_CMD) continue;
-        CHECK(accepted < ARRAY_SIZE(commands));
-        CHECK(sent.command == commands[accepted] && sent.argument == arguments[accepted]);
-        if (sent.accepted) accepted++; else failed++;
+        count += sent.source == source && !sent.ordinary && sent.command != RGB_CLOCK_CMD &&
+                 sent.complete;
     }
-    CHECK(accepted == 8 && failed == !!strstr(split_case, "failed"));
+    return count;
 }
-static void singleton_frozen(void) {
-    unsigned phase = singleton_phase(split_case);
-    singleton_fail_command = singleton_phase_command(phase);
-    singleton_fail_word = phase == 3 ? 1 : 0;
-    singleton_fail_once = true;
-    singleton_connect(3);
+static void singleton_wait_source(unsigned source, unsigned minimum) {
     int64_t until = k_uptime_get() + 5000;
-    bool failed = false, peer_captured = false;
-    while (!failed || !peer_captured) {
+    while (singleton_state_count(source) < minimum) {
+        CHECK(k_uptime_get() < until);
+        CHECK(k_sem_take(&singleton_packet_done, K_MSEC(100)) == 0 || k_uptime_get() < until);
+    }
+}
+static void singleton_wait_idle(void) {
+    int64_t deadline = k_uptime_get() + 8000;
+    int64_t quiet_since = k_uptime_get();
+    unsigned previous = 0;
+    while (k_uptime_get() - quiet_since < 1200) {
+        unsigned count = 0;
+        bool pending = false;
         for (unsigned i = 0; i < singleton_records(); i++) {
             struct singleton_send sent = singleton_record(i);
-            failed |= !sent.source && !sent.accepted && sent.complete;
-            peer_captured |= sent.source == 1 && sent.command == RGB_BRT_SET_CMD &&
-                             sent.argument == 61 && sent.accepted && sent.complete;
+            if (sent.ordinary || sent.command == RGB_CLOCK_CMD) continue;
+            count++;
+            pending |= !sent.complete;
         }
-        CHECK(k_uptime_get() < until); k_sleep(K_MSEC(1));
+        if (count != previous || pending) quiet_since = k_uptime_get();
+        previous = count;
+        CHECK(k_uptime_get() < deadline);
+        k_sleep(K_MSEC(10));
     }
-    kp_rgb_matrix_lock(); kp_rgb_global.brightness = 19; kp_rgb_matrix_unlock();
-    CHECK(zmk_rgb_matrix_off() == 0);
-    singleton_wait_stream(4); k_sleep(K_MSEC(250)); singleton_remote(61, RGB_ON_CMD);
-    unsigned old_end = singleton_records();
-    singleton_connect(0); k_sleep(K_MSEC(150)); singleton_connect(3);
-    singleton_wait_stream(8); k_sleep(K_MSEC(250)); singleton_remote(19, RGB_OFF_CMD);
-    bool refreshed = false;
-    for (unsigned i = old_end; i < singleton_records(); i++) {
-        struct singleton_send sent = singleton_record(i);
-        refreshed |= !sent.source && !sent.ordinary && sent.accepted &&
-                     sent.command == RGB_BRT_SET_CMD && sent.argument == 19;
-    }
-    CHECK(refreshed);
 }
-static void singleton_pacing(void) {
-    singleton_fail_command = singleton_phase_command(singleton_phase(split_case));
-    singleton_fail_word = strstr(split_case, "overlay-1") ? 1 : -1;
-    singleton_mutate = strstr(split_case, "race") != NULL;
-    singleton_connect(3); k_sleep(K_MSEC(6000));
-    k_mutex_lock(&singleton_records_lock, K_FOREVER);
-    CHECK(singleton_remote_brightness[1] == (strstr(split_case, "race") ? 19 : 61));
-    CHECK(singleton_clocks[0] >= 4 && singleton_clocks[1] >= 4);
-    k_mutex_unlock(&singleton_records_lock);
-    struct singleton_send previous = {0};
-    unsigned failures = 0, consecutive = 0;
-    const unsigned delays[] = {50, 100, 200, 400, 800, 1000};
+static void singleton_current_retry(void) {
+    const char *phase = split_case + strlen("current-retry-");
+    size_t word = !strcmp(phase, "later") ? 1 : !strcmp(phase, "final") ? KP_RGB_OVERLAY_WORDS - 1 : 0;
+    CHECK(word < KP_RGB_OVERLAY_WORDS);
+    singleton_fail_command = !strcmp(phase, "brightness") ? RGB_BRT_SET_CMD :
+        !strcmp(phase, "power") ? RGB_ON_CMD : KP_RGB_OVERLAY_WORD_COMMAND(word);
+    singleton_fail_once = true;
+    singleton_mutate_on_failure = true;
+    singleton_connect(3);
+    singleton_wait_source(0, SINGLETON_PASS + 1);
+    singleton_wait_source(1, SINGLETON_PASS);
+    if (!strcmp(phase, "later") || !strcmp(phase, "final")) {
+        unsigned prior_words = 0;
+        bool failed_word = false;
+        for (unsigned i = 0; i < singleton_records(); i++) {
+            struct singleton_send sent = singleton_record(i);
+            if (sent.source || sent.ordinary) continue;
+            if (!sent.accepted) {
+                CHECK(sent.command == KP_RGB_OVERLAY_WORD_COMMAND(word));
+                CHECK(sent.argument == singleton_expected_word(word));
+                failed_word = true;
+                break;
+            }
+            if ((sent.command & 0xffffu) == RGB_OVL_STATE_CMD) {
+                CHECK(sent.command == KP_RGB_OVERLAY_WORD_COMMAND(prior_words));
+                CHECK(sent.argument == singleton_expected_word(prior_words));
+                prior_words++;
+            }
+        }
+        CHECK(failed_word && prior_words == word);
+    }
+    int64_t failed_at = -1;
+    bool retry_after_deadline = false, retry_latest = false;
+    uint32_t latest_command = !strcmp(phase, "brightness") ? RGB_BRT_SET_CMD :
+        !strcmp(phase, "power") ? RGB_OFF_CMD : KP_RGB_OVERLAY_WORD_COMMAND(word);
+    uint32_t latest_argument = !strcmp(phase, "brightness") ? 19 :
+        !strcmp(phase, "power") ? 0 : (UINT32_C(0x12345678) ^ word);
     for (unsigned i = 0; i < singleton_records(); i++) {
         struct singleton_send sent = singleton_record(i);
-        if (sent.source || sent.ordinary || sent.command == RGB_CLOCK_CMD || !sent.complete) continue;
-        if (previous.complete)
-            CHECK(sent.start >= previous.end + (previous.accepted ? 50 : delays[MIN(consecutive - 1, 5)]));
-        if (!sent.accepted) { failures++; consecutive++; } else consecutive = 0;
-        previous = sent;
+        if (!sent.source && !sent.ordinary && sent.command != RGB_CLOCK_CMD) {
+            if (!sent.accepted && sent.command == singleton_fail_command) failed_at = sent.end;
+            else if (sent.accepted && failed_at >= 0) {
+                if (!retry_latest) {
+                    CHECK(sent.start >= failed_at + 1000);
+                    CHECK(sent.command == latest_command && sent.argument == latest_argument);
+                }
+                retry_after_deadline |= sent.start >= failed_at + 1000;
+                retry_latest |= sent.command == latest_command && sent.argument == latest_argument;
+            }
+        }
     }
-    CHECK(failures >= 7);
-    singleton_fail_command = 0; singleton_wait_stream(strstr(split_case, "race") ? 8 : 4); k_sleep(K_MSEC(350));
-    singleton_remote(strstr(split_case, "race") ? 19 : 61,
-                     strstr(split_case, "race") ? RGB_OFF_CMD : RGB_ON_CMD);
+    CHECK(failed_at >= 0 && retry_after_deadline && retry_latest);
+    singleton_expected_mask = UINT32_C(0x12345678);
+    singleton_wait_idle();
+    singleton_remote(19, RGB_OFF_CMD);
+    unsigned targets[2] = {singleton_state_count(0) + SINGLETON_PASS, singleton_state_count(1) + SINGLETON_PASS};
+    singleton_connect(0); k_sleep(K_MSEC(150)); singleton_connect(3);
+    singleton_wait_source(0, targets[0]);
+    singleton_wait_source(1, targets[1]);
+    k_sleep(K_MSEC(250));
+    singleton_remote(19, RGB_OFF_CMD);
+}
+static void singleton_persistent_failure(void) {
+    singleton_fail_command = RGB_BRT_SET_CMD;
+    atomic_set(&singleton_fail_persistently, 1);
+    singleton_connect(3);
+    singleton_wait_source(1, SINGLETON_PASS);
+    int64_t deadline = k_uptime_get() + 5000;
+    for (;;) {
+        unsigned failures = 0;
+        int64_t previous_failure = -1;
+        for (unsigned i = 0; i < singleton_records(); i++) {
+            struct singleton_send sent = singleton_record(i);
+            if (sent.source || sent.ordinary || sent.accepted || !sent.complete) continue;
+            if (previous_failure >= 0) CHECK(sent.start >= previous_failure + 1000);
+            previous_failure = sent.end;
+            failures++;
+        }
+        k_mutex_lock(&singleton_records_lock, K_FOREVER);
+        bool clocks_progressed = singleton_clocks[0] >= 2 && singleton_clocks[1] >= 2;
+        bool peer_completed = singleton_remote_brightness[1] == 61 &&
+            singleton_remote_power[1] == RGB_ON_CMD &&
+            singleton_remote_mask[1][0] == singleton_expected_word(0);
+        for (size_t word = 1; word < KP_RGB_OVERLAY_WORDS; word++)
+            peer_completed &= singleton_remote_mask[1][word] == singleton_expected_word(word);
+        k_mutex_unlock(&singleton_records_lock);
+        if (clocks_progressed && failures >= 2) {
+            CHECK(peer_completed);
+            break;
+        }
+        CHECK(k_uptime_get() < deadline);
+        k_sleep(K_MSEC(10));
+    }
+    atomic_set(&singleton_fail_persistently, 0);
+    singleton_wait_idle();
+    singleton_remote(61, RGB_ON_CMD);
+}
+static void singleton_race(void) {
+    const char *phase = split_case + strlen("race-");
+    singleton_expected_mask = UINT32_C(0x12345678);
+    singleton_mutation_phase = !strcmp(phase, "brightness") ? 0 :
+        !strcmp(phase, "power") ? 1 : 2;
+    singleton_mutation_once = true;
+    singleton_connect(3);
+    singleton_wait_source(0, 2 * SINGLETON_PASS);
+    singleton_wait_source(1, SINGLETON_PASS);
+    singleton_wait_idle();
+    singleton_remote(19, RGB_OFF_CMD);
+}
+static void singleton_pacing(void) {
+    bool retry = strstr(split_case, "race") == NULL;
+    if (retry) {
+        singleton_fail_command = strstr(split_case, "overlay") ? KP_RGB_OVERLAY_WORD_COMMAND(0) :
+            strstr(split_case, "power") ? RGB_ON_CMD : RGB_BRT_SET_CMD;
+        singleton_fail_once = true;
+    }
+    uint32_t failed_command = singleton_fail_command;
+    singleton_connect(3);
+    singleton_wait_source(0, SINGLETON_PASS + (retry ? 1 : 0));
+    singleton_wait_source(1, SINGLETON_PASS);
+    k_sleep(K_MSEC(1200));
+    CHECK(singleton_clocks[0] >= 1 && singleton_clocks[1] >= 1);
+    int64_t previous_success = -1;
+    for (unsigned i = 0; i < singleton_records(); i++) {
+        struct singleton_send sent = singleton_record(i);
+        if (sent.ordinary || sent.command == RGB_CLOCK_CMD || !sent.complete || !sent.accepted) continue;
+        if (previous_success >= 0) CHECK(sent.start >= previous_success + 50);
+        previous_success = sent.end;
+    }
+    if (retry) {
+        bool retried = false;
+        int64_t failed_at = -1;
+        for (unsigned i = 0; i < singleton_records(); i++) {
+            struct singleton_send sent = singleton_record(i);
+            if (!sent.source && !sent.ordinary && !sent.accepted) failed_at = sent.end;
+            if (!sent.source && !sent.ordinary && sent.accepted &&
+                sent.command == failed_command && failed_at >= 0)
+                retried |= sent.start >= failed_at + 1000;
+        }
+        CHECK(retried);
+    }
     singleton_connect(0); k_sleep(K_MSEC(150));
     unsigned before = singleton_records();
+    unsigned targets[2] = {singleton_state_count(0) + SINGLETON_PASS, singleton_state_count(1) + SINGLETON_PASS};
     singleton_global(RGB_BRT_SET_CMD, 77);
     atomic_set(&singleton_alternate, 1); singleton_connect(3);
     k_sleep(K_MSEC(20)); CHECK(singleton_records() == before);
-    k_sleep(K_MSEC(1500));
-    singleton_remote(77, strstr(split_case, "race") ? RGB_OFF_CMD : RGB_ON_CMD);
-    singleton_connect(0); k_sleep(K_MSEC(100));
-    before = singleton_records(); k_sleep(K_MSEC(1100)); CHECK(singleton_records() == before);
+    singleton_wait_source(0, targets[0]); singleton_wait_source(1, targets[1]);
+    singleton_wait_idle(); singleton_remote(77, RGB_ON_CMD);
+    targets[0] = singleton_state_count(0) + SINGLETON_PASS;
+    targets[1] = singleton_state_count(1) + SINGLETON_PASS;
+    atomic_set(&singleton_alternate, 0); singleton_connect(3);
+    singleton_wait_source(0, targets[0]); singleton_wait_source(1, targets[1]);
+    singleton_wait_idle(); singleton_remote(77, RGB_ON_CMD);
+}
+static void singleton_global_isolation(void) {
+    singleton_connect(3);
+    singleton_wait_source(0, SINGLETON_PASS); singleton_wait_source(1, SINGLETON_PASS);
+    singleton_wait_idle();
+    unsigned before = singleton_records();
+    singleton_global(RGB_BRT_SET_CMD, 77);
+    singleton_global(RGB_OFF_CMD, 0);
+    k_sleep(K_MSEC(350));
+    for (unsigned i = before; i < singleton_records(); i++) {
+        struct singleton_send sent = singleton_record(i);
+        CHECK(sent.ordinary || sent.command == RGB_CLOCK_CMD);
+    }
+    unsigned targets[2] = {singleton_state_count(0) + SINGLETON_PASS, singleton_state_count(1) + SINGLETON_PASS};
+    singleton_connect(0); k_sleep(K_MSEC(150)); singleton_connect(3);
+    singleton_wait_source(0, targets[0]); singleton_wait_source(1, targets[1]);
+    k_sleep(K_MSEC(250)); singleton_remote(77, RGB_OFF_CMD);
 }
 static void singleton_negative_query(void) {
-    singleton_connect(3); singleton_wait_stream(4); k_sleep(K_MSEC(250));
+    singleton_connect(3); singleton_wait_stream(SINGLETON_PASS); k_sleep(K_MSEC(250));
     atomic_set(&singleton_query_error, 1); k_sleep(K_MSEC(150));
     unsigned before = singleton_records();
     k_sleep(K_MSEC(1200)); CHECK(singleton_records() == before);
-    atomic_set(&singleton_query_error, 0); singleton_wait_stream(8);
+    atomic_set(&singleton_query_error, 0);
+    singleton_connect(0); k_sleep(K_MSEC(150)); singleton_connect(3);
+    singleton_wait_stream(2 * SINGLETON_PASS);
     k_sleep(K_MSEC(250)); singleton_remote(61, RGB_ON_CMD);
 }
 static void singleton_unready(void) {
@@ -365,7 +489,27 @@ static void singleton_unready(void) {
     singleton_connect(3); k_sleep(K_MSEC(1300)); CHECK(singleton_records() == 0);
     CHECK(device_init(DEV(rgb_matrix)) == 0 && device_is_ready(DEV(rgb_matrix)));
     singleton_masks(); singleton_global(RGB_BRT_SET_CMD, 61);
-    singleton_wait_stream(8); k_sleep(K_MSEC(350)); singleton_remote(61, RGB_ON_CMD);
+    singleton_wait_stream(SINGLETON_PASS); k_sleep(K_MSEC(350)); singleton_remote(61, RGB_ON_CMD);
+}
+static void singleton_check_order(void) {
+    unsigned phase[2] = {0};
+    int64_t success_at = -1, failed_at[2] = {-1, -1};
+    for (unsigned i = 0; i < singleton_records(); i++) {
+        struct singleton_send sent = singleton_record(i);
+        if (sent.ordinary || sent.command == RGB_CLOCK_CMD) continue;
+        CHECK(sent.complete);
+        if (success_at >= 0) CHECK(sent.start >= success_at + 50);
+        if (failed_at[sent.source] >= 0) CHECK(sent.start >= failed_at[sent.source] + 1000);
+        if (!sent.accepted) { failed_at[sent.source] = sent.end; continue; }
+        failed_at[sent.source] = -1;
+        success_at = sent.end;
+        unsigned *step = &phase[sent.source];
+        if (*step == 0) CHECK(sent.command == RGB_BRT_SET_CMD);
+        else if (*step == 1) CHECK(sent.command == RGB_ON_CMD || sent.command == RGB_OFF_CMD);
+        else CHECK(sent.command == KP_RGB_OVERLAY_WORD_COMMAND(*step - 2));
+        *step = (*step + 1) % SINGLETON_PASS;
+    }
+    CHECK(phase[0] == 0 && phase[1] == 0);
 }
 static void singleton_split(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c); k_sleep(K_MSEC(100));
@@ -374,11 +518,14 @@ static void singleton_split(void *a, void *b, void *c) {
     if (!strcmp(split_case, "unready")) singleton_unready();
     else {
         singleton_masks(); singleton_global(RGB_BRT_SET_CMD, 61);
-        if (!strncmp(split_case, "revision-", 9)) singleton_repair();
-        else if (!strncmp(split_case, "frozen-", 7)) singleton_frozen();
+        if (!strncmp(split_case, "current-retry-", 14)) singleton_current_retry();
+        else if (!strncmp(split_case, "race-", 5)) singleton_race();
+        else if (!strcmp(split_case, "persistent-failure")) singleton_persistent_failure();
+        else if (!strcmp(split_case, "global-isolation")) singleton_global_isolation();
         else if (!strcmp(split_case, "query-error")) singleton_negative_query();
         else singleton_pacing();
     }
+    singleton_check_order();
     printk("PASS singleton split %s\n", split_case); exit(0);
 }
 K_THREAD_DEFINE(singleton_split_thread, 4096, singleton_split, NULL, NULL, NULL, 8, 0, 0);

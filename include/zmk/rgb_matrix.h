@@ -386,7 +386,8 @@ kp_rgb_overlay_callbacks(const struct device *dev) {
 
 /* Both halves must use the same enabled overlay sequence for split gate bits. */
 #define KP_RGB_OVERLAY_COUNT DT_CHILD_NUM_STATUS_OKAY(KP_RGB_NODE)
-#define KP_RGB_OVERLAY_WORDS MAX(1, (KP_RGB_OVERLAY_COUNT + 15) / 16)
+BUILD_ASSERT(KP_RGB_OVERLAY_COUNT <= UINT16_MAX + 1u,
+             "enabled RGB overlay indices must fit uint16_t");
 #define KP_RGB_OVERLAY_INDEX(node_id)                                          \
   UTIL_CAT(kp_rgb_overlay_index_, DT_DEP_ORD(node_id))
 #define KP_RGB_OVERLAY_INDEX_ENTRY(node_id) KP_RGB_OVERLAY_INDEX(node_id),

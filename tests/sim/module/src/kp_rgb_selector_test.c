@@ -16,7 +16,6 @@
 #include <zmk/events/position_state_changed.h>
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_internal.h"
-#include "rgb_selector_sync_internal.h"
 
 struct probe_config {
   struct kp_rgb_effect_common_config common;
@@ -214,24 +213,17 @@ static void isr_boundaries(struct k_timer *unused) {
 
 K_TIMER_DEFINE(boundary_timer, isr_boundaries, NULL);
 
-static void scoped_snapshot_roundtrip(void) {
-  const struct device *selector_a = DEV(selector_a);
-  const struct device *selector_b = DEV(selector_b);
-  struct kp_rgb_selector_snapshot captured_a, captured_b;
+static void addressed_parameter_roundtrip(void) {
   kp_rgb_matrix_lock();
-  struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(selector_a);
-  struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(selector_b);
+  struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
+  struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(DEV(selector_b));
   CHECK(a != NULL && b != NULL);
-  const struct device *captured_member = kp_rgb_selector_selected(a);
-  struct kp_rgb_hsb initial_color = kp_rgb_effect_data(captured_member)->color;
-  struct kp_rgb_hsb snapshot_color = initial_color;
-  snapshot_color.b = 47;
-  CHECK(kp_rgb_set_color_locked(captured_member, &snapshot_color) == 0);
-  CHECK(kp_rgb_selector_snapshot_locked(selector_a, &captured_a) == 0);
-  CHECK(captured_a.color.b == 47);
-  CHECK(kp_rgb_selector_snapshot_locked(selector_b, &captured_b) == 0);
-  uint16_t original_slot = captured_a.slot;
   const struct device *original_member = kp_rgb_selector_selected(a);
+  struct kp_rgb_hsb initial_color = kp_rgb_effect_data(original_member)->color;
+  struct kp_rgb_hsb expected_color = initial_color;
+  expected_color.b = 47;
+  uint32_t expected_period = kp_rgb_effect_period(original_member);
+  uint16_t original_slot = a->effect_index;
   uint16_t alternate_slot = UINT16_MAX;
   for (size_t i = 0; i < a->effect_count; i++) {
     if (i != original_slot && kp_rgb_selector_at(a, i) != NULL) {
@@ -244,44 +236,33 @@ static void scoped_snapshot_roundtrip(void) {
   struct kp_rgb_hsb other_color = kp_rgb_effect_data(other_member)->color;
   uint32_t other_period = kp_rgb_effect_period(other_member);
   CHECK(kp_rgb_selector_select_locked(a, alternate_slot) == 1);
-  struct kp_rgb_hsb changed_color = captured_a.color;
+  struct kp_rgb_hsb changed_color = expected_color;
   changed_color.h = (changed_color.h + 1) % 360;
   changed_color.b = 23;
   CHECK(kp_rgb_set_color_locked(original_member, &changed_color) == 0);
-  uint32_t changed_period = captured_a.period_ms > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS
-                                ? captured_a.period_ms - 1
-                                : captured_a.period_ms + 1;
+  uint32_t changed_period = expected_period > CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS
+                                ? expected_period - 1 : expected_period + 1;
   CHECK(kp_rgb_set_period_locked(original_member, changed_period) == 0);
-  kp_rgb_matrix_unlock();
-
-  struct zmk_behavior_binding color_binding, period_binding, selection_binding;
-  kp_rgb_selector_snapshot_binding(&captured_a, 0, &color_binding);
-  kp_rgb_selector_snapshot_binding(&captured_a, 1, &period_binding);
-  kp_rgb_selector_snapshot_binding(&captured_a, 2, &selection_binding);
-  CHECK(color_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
-                                    RGB_SELECTOR_COLOR_CMD, original_slot));
-  CHECK(period_binding.param1 == KP_RGB_SELECTOR_MEMBER_COMMAND(
-                                     RGB_SELECTOR_PERIOD_CMD, original_slot));
-  kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_selected(a) != original_member);
-  CHECK(kp_rgb_selector_dispatch_locked(a, color_binding.param1, color_binding.param2) == 0);
-  CHECK(kp_rgb_selector_dispatch_locked(a, period_binding.param1, period_binding.param2) == 0);
+  CHECK(kp_rgb_selector_dispatch_locked(
+            a, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, original_slot),
+            RGB_COLOR_HSB_VAL(expected_color.h, expected_color.s, expected_color.b)) == 0);
+  CHECK(kp_rgb_selector_dispatch_locked(
+            a, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, original_slot),
+            expected_period) == 0);
   CHECK(kp_rgb_selector_selected(a) != original_member && a->effect_index == alternate_slot);
-  CHECK(kp_rgb_effect_data(original_member)->color.h == captured_a.color.h);
-  CHECK(kp_rgb_effect_data(original_member)->color.s == captured_a.color.s);
-  CHECK(kp_rgb_effect_data(original_member)->color.b == captured_a.color.b);
-  CHECK(kp_rgb_effect_period(original_member) == captured_a.period_ms);
+  CHECK(kp_rgb_effect_data(original_member)->color.h == expected_color.h);
+  CHECK(kp_rgb_effect_data(original_member)->color.s == expected_color.s);
+  CHECK(kp_rgb_effect_data(original_member)->color.b == expected_color.b);
+  CHECK(kp_rgb_effect_period(original_member) == expected_period);
   CHECK(kp_rgb_selector_selected(b) == other_member);
   CHECK(kp_rgb_effect_data(other_member)->color.h == other_color.h);
   CHECK(kp_rgb_effect_data(other_member)->color.s == other_color.s);
   CHECK(kp_rgb_effect_data(other_member)->color.b == other_color.b);
   CHECK(kp_rgb_effect_period(other_member) == other_period);
-  CHECK(kp_rgb_selector_dispatch_locked(a, selection_binding.param1,
-                                         selection_binding.param2) == 0);
+  CHECK(kp_rgb_selector_dispatch_locked(a, RGB_EFS_CMD, original_slot) == 0);
   CHECK(kp_rgb_selector_selected(a) == original_member && a->effect_index == original_slot);
   CHECK(kp_rgb_set_color_locked(original_member, &initial_color) == 0);
   kp_rgb_matrix_unlock();
-  CHECK(captured_b.control == DEV(selector_b));
 }
 
 static void controls(void) {
@@ -329,7 +310,7 @@ static void controls(void) {
   invoke(DEV(preview_selector), RGB_EFS_CMD, 0);
   CHECK(preview_slot() == 0);
   kp_rgb_matrix_unlock();
-  scoped_snapshot_roundtrip();
+  addressed_parameter_roundtrip();
   converted(DEV(selector_a), RGB_EFF_CMD, 0, DEV(selector_a), RGB_EFS_CMD, 1);
   converted(DEV(selector_b), RGB_EFS_CMD, 1,
             DEV(selector_b), RGB_EFS_CMD, 1);

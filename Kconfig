@@ -137,12 +137,17 @@ config KEYPAW_RGB_SPLIT_SYNC
     depends on KEYPAW_RGB_MATRIX
     depends on ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
     help
-      Reconnect and transport changes push global user power, brightness,
-      overlay gates and every selector's selected member, color and period.
-      Successful selector control commands also request a fresh snapshot, even
-      when the selected member is unchanged. Local selector/parameter APIs do
-      not request synchronization. Selector snapshots use independent retries
-      per source/selector so one failed target cannot block the others.
+      Reconnect and transport changes replay global user power, brightness,
+      synchronized overlay gates and every controlled composition's member
+      colors, periods and selection, including inactive members. Overlapping
+      converted invocations and failed converted callbacks request repair when
+      their invocation group finishes. Ordinary isolated successful commands,
+      direct callbacks and local APIs do not request repair.
+
+      Each attempt samples current state. Replay repeats until generation is
+      unchanged and no converted invocation remains outstanding. Successful
+      state sends are paced 50 ms apart; observed failures retry that peripheral
+      after 1 second without blocking other peripherals or clock correction.
 
       Built for the split central only; control remains live while output is
       off, inhibited, hidden or has no local LEDs. Both halves must use matching
@@ -161,7 +166,7 @@ config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
     help
       How often the connected-source set is sampled without radio traffic.
       Disconnects shorter than this period may be missed. Observed reconnects
-      and transport changes request fresh snapshots after the settle delay.
+      and transport changes request full replay after the settle delay.
 
 config KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS
     int "Delay before pushing to a newly connected peripheral (ms)"

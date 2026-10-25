@@ -94,8 +94,14 @@ bool kp_rgb_overlay_covers_all(const struct device *dev);
 bool kp_rgb_overlay_refresh(void);
 void kp_rgb_overlay_dispatch(void);
 const struct device *const *kp_rgb_overlay_list(void);
-bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value);
-uint16_t kp_rgb_overlay_get_word(uint16_t word);
+#define KP_RGB_OVERLAY_WORDS MAX(1, DIV_ROUND_UP(KP_RGB_OVERLAY_COUNT, 32))
+#define KP_RGB_OVERLAY_WORD_COMMAND(index) \
+  (RGB_OVL_STATE_CMD | ((uint32_t)(index) << 16))
+#define KP_RGB_OVERLAY_COMMAND_WORD(command) ((uint32_t)(command) >> 16)
+
+/* Word indices must be less than KP_RGB_OVERLAY_WORDS. */
+bool kp_rgb_overlay_set_word(size_t index, uint32_t bits);
+uint32_t kp_rgb_overlay_get_word(size_t index);
 
 bool kp_rgb_condition_require(const struct device *dev);
 bool kp_rgb_condition_valid(const struct device *dev);
@@ -113,12 +119,6 @@ static inline void kp_rgb_triggers_evaluate(int64_t now_ms) {
 #endif
 
 #define RGB_BRT_SET_CMD 0x107
-
-/* param2 encoding for RGB_OVL_STATE_CMD: one 16-bit state word. */
-#define RGB_OVL_STATE_VAL(word, value)                                         \
-  (((uint32_t)(word) << 16) | ((uint32_t)(value) & 0xFFFFu))
-#define RGB_OVL_STATE_WORD(param) ((uint16_t)((param) >> 16))
-#define RGB_OVL_STATE_BITS(param) ((uint16_t)(param))
 
 int kp_rgb_save_state(void);
 int kp_rgb_save_selector_state(const struct device *selector, bool reset);

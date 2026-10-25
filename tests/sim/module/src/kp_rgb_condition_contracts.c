@@ -9,6 +9,7 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/rgb_selector.h>
+#include <zmk/rgb_matrix.h>
 #include <zmk/events/position_state_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"
 #include "../../../../src/rgb_persist_internal.h"
@@ -521,21 +522,22 @@ static void overlay_cases(void) {
     KP_CHECK(gate(DEV(cc_half)) && !kp_rgb_overlay_covers_all(DEV(cc_half)));
     KP_CHECK(kp_rgb_overlay_covers_all(DEV(preview_selector)));
     const struct kp_rgb_overlay_common_data *data = DEV(cc_remote)->data;
-    unsigned word = data->index / 16;
-    uint16_t bit = BIT(data->index % 16);
+    uint32_t bit = BIT(data->index);
+    uint32_t expected_mask = kp_rgb_overlay_get_word(0);
     if (peripheral()) {
         KP_CHECK(calls(DEV(cc_central)) == 0 && !gate(DEV(cc_remote)));
-        KP_CHECK(kp_rgb_overlay_set_word(word, bit));
-        KP_CHECK(gate(DEV(cc_remote)) && kp_rgb_overlay_get_word(word) == bit);
-        KP_CHECK(!kp_rgb_overlay_set_word(word, bit));
+        KP_CHECK(kp_rgb_overlay_set_word(0, bit));
+        expected_mask = bit;
+        KP_CHECK(gate(DEV(cc_remote)) && kp_rgb_overlay_get_word(0) == bit);
+        KP_CHECK(!kp_rgb_overlay_set_word(0, bit));
         set(DEV(cc_root), false); drain();
         KP_CHECK(!gate(DEV(ordinary)) && gate(DEV(cc_remote)));
     } else {
         KP_CHECK(calls(DEV(cc_central)) == 1 && gate(DEV(cc_remote)));
         set(DEV(cc_central), false); drain(); KP_CHECK(!gate(DEV(cc_remote)));
+        expected_mask &= ~bit;
     }
-    KP_CHECK(!kp_rgb_overlay_set_word(KP_RGB_OVERLAY_WORDS, UINT16_MAX));
-    KP_CHECK(kp_rgb_overlay_get_word(KP_RGB_OVERLAY_WORDS) == 0);
+    KP_CHECK(kp_rgb_overlay_get_word(0) == expected_mask);
     set(DEV(cc_root), true); drain();
     KP_CHECK(zmk_rgb_matrix_off() == 0); drain(); KP_CHECK(gate(DEV(ordinary)));
     zmk_rgb_matrix_set_inhibited(true); drain(); KP_CHECK(gate(DEV(ordinary)));

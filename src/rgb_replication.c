@@ -14,6 +14,7 @@
 #include "rgb_replication_internal.h"
 
 #include "rgb_matrix_internal.h"
+#include "rgb_split_sync_internal.h"
 
 BUILD_ASSERT(((RGB_TOG_CMD | RGB_ON_CMD | RGB_OFF_CMD | RGB_BRI_CMD | RGB_BRD_CMD |
                RGB_HUI_CMD | RGB_HUD_CMD | RGB_SAI_CMD | RGB_SAD_CMD | RGB_SPI_CMD |
@@ -28,6 +29,8 @@ BUILD_ASSERT((KP_RGB_INVOCATION_MARKER & 0xffff0000u) == 0,
 static struct k_spinlock kp_rgb_replication_lock;
 static uint64_t kp_rgb_generation;
 static uint32_t kp_rgb_outstanding;
+static uint64_t kp_rgb_repair_epoch;
+static bool kp_rgb_exceptional_group;
 
 void kp_rgb_replication_changed_locked(void) {
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_replication_lock);
@@ -52,6 +55,7 @@ struct kp_rgb_replication_status kp_rgb_replication_status_locked(void) {
   struct kp_rgb_replication_status status = {
       .generation = kp_rgb_generation,
       .outstanding = kp_rgb_outstanding,
+      .repair_epoch = kp_rgb_repair_epoch,
   };
   k_spin_unlock(&kp_rgb_replication_lock, key);
   return status;
@@ -75,21 +79,31 @@ int kp_rgb_invocation_begin(struct zmk_behavior_binding *binding) {
     k_spin_unlock(&kp_rgb_replication_lock, key);
     return -EOVERFLOW;
   }
+  kp_rgb_exceptional_group |= kp_rgb_outstanding != 0;
   kp_rgb_outstanding++;
   binding->param1 |= KP_RGB_INVOCATION_MARKER;
   k_spin_unlock(&kp_rgb_replication_lock, key);
   return 0;
 }
 
-void kp_rgb_invocation_finish(struct zmk_behavior_binding *binding) {
+void kp_rgb_invocation_finish(struct zmk_behavior_binding *binding, int result) {
   if (binding == NULL || !(binding->param1 & KP_RGB_INVOCATION_MARKER))
     return;
   binding->param1 &= ~KP_RGB_INVOCATION_MARKER;
+  bool repair = false;
   k_spinlock_key_t key = k_spin_lock(&kp_rgb_replication_lock);
   __ASSERT(kp_rgb_outstanding > 0, "RGB invocation count underflow");
   if (kp_rgb_outstanding > 0) {
+    kp_rgb_exceptional_group |= result < 0;
     kp_rgb_outstanding--;
     kp_rgb_generation++;
+    if (kp_rgb_outstanding == 0 && kp_rgb_exceptional_group) {
+      kp_rgb_repair_epoch++;
+      kp_rgb_exceptional_group = false;
+      repair = true;
+    }
   }
   k_spin_unlock(&kp_rgb_replication_lock, key);
+  if (repair)
+    kp_rgb_split_sync_wake();
 }

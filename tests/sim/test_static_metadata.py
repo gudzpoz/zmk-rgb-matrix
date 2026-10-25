@@ -11,7 +11,7 @@ from native_build import MODULE, build
 from native_process import run_logged
 
 FIXTURE = Path(__file__).resolve().parent / "config-static-metadata"
-CASES = ("dense", "zero-leds", "zero-overlays", "disabled-overlays", "ordinal-boundary")
+CASES = ("dense", "dense-peripheral", "zero-leds", "zero-overlays", "disabled-overlays", "ordinal-boundary")
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     print(f"Static metadata artifacts: {root}", flush=True)
     cases = list(dict.fromkeys(args.case or CASES))
     for name in cases:
-        fixture = 'dense' if name == 'ordinal-boundary' else name
+        fixture = 'dense' if name in ('ordinal-boundary', 'dense-peripheral') else name
         fragment = f'#include "{FIXTURE / (fixture + ".overlay")}"\n'
         if name == 'ordinal-boundary':
             fragment += '/ { ordinal_boundary: ordinal_boundary {}; };\n&rgb_conditions {\n'
@@ -34,8 +34,11 @@ def main():
                 f'ordinal_{i} {{ compatible = "test,rgb-static-condition-b"; }};'
                 for i in range(128))
             fragment += '\n};\n'
-        result = build(root, name, fragment, selectors="", extra_conf=
-                       "\nCONFIG_KEYPAW_SIM_STATIC_METADATA_TEST=y\nCONFIG_ZMK_HID_INDICATORS=y\n")
+        conf = "\nCONFIG_KEYPAW_SIM_STATIC_METADATA_TEST=y\nCONFIG_ZMK_HID_INDICATORS=y\n"
+        if name == 'dense-peripheral':
+            fragment += '&sm00 { local; }; &sm06 { local; };\n'
+            conf += 'CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n'
+        result = build(root, name, fragment, selectors="", extra_conf=conf)
         if result.returncode:
             raise AssertionError(f"Build failed: {root / (name + '-build.log')}\n"
                                  + result.stdout[-16000:])

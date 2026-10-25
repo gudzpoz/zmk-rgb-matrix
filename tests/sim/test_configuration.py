@@ -151,6 +151,15 @@ DIAGNOSTICS = {
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
+for count in (0, 1, 32, 33, 64, 65):
+    fragment = '''&rgb_matrix {
+    /delete-node/ preview_selector; /delete-node/ fixture_overlay;
+    /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
+''' + '\n'.join(
+        f'overlay_{i} {{ compatible = "keypaw,rgb-overlay-battery"; all-leds; }};'
+        for i in range(count)) + '\n};'
+    CASES[f"overlay-count-{count}"] = (True, fragment)
+
 for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
     for cap in (-1, 0, 100, 101):
         name = f"{prop}-{cap}"

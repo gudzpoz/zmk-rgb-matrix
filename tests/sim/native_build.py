@@ -65,6 +65,26 @@ SELECTORS = '''
 &kscan { events = <>; };
 '''
 
+# The preview gallery has dozens of members; replay tests need only its two gate inputs.
+COMPACT_PREVIEW = '''
+&rgb_matrix {
+    /delete-node/ preview_selector;
+    preview_selector: preview_selector {
+        compatible = "keypaw,rgb-overlay";
+        controllable; #binding-cells = <2>; label = "rgbs";
+        all-leds; initial-effect = <0>;
+        fx_solid: fx_solid {
+            compatible = "keypaw,rgb-matrix-solid";
+            color = <0xff0000>; duration = <4000>;
+        };
+        fx_breathe: fx_breathe {
+            compatible = "keypaw,rgb-matrix-breathe";
+            mode = "brightness"; color = <0x0000ff>;
+        };
+    };
+};
+'''
+
 
 def build(root, name, fragment, runtime=False, selectors=None, extra_conf=""):
     root = Path(root)

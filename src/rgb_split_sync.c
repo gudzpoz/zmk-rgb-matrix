@@ -4,227 +4,133 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/iterable_sections.h>
 #include <zephyr/sys/util.h>
-
-#include <dt-bindings/keypaw/rgb_matrix.h>
 #include <zmk/behavior.h>
 #include <zmk/split/central.h>
 #include <zmk/split/transport/central.h>
 
+#include <dt-bindings/keypaw/rgb_matrix.h>
+
 #include "rgb_matrix_internal.h"
-#include "rgb_selector_sync_internal.h"
+#include "rgb_replication_internal.h"
+#include "rgb_selector_internal.h"
+#include "rgb_split_sync_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define KP_RGB_SYNC_SOURCES MAX(ZMK_SPLIT_CENTRAL_PERIPHERAL_COUNT, 1)
-#define KP_RGB_SYNC_STEP_DELAY_MS 50
-#define KP_RGB_SYNC_MAX_BACKOFF_MS 1000
-#define KP_RGB_SYNC_BACKOFF_SHIFT_MAX 5
-
-static const struct device *const kp_rgb_sync_endpoint = DEVICE_DT_GET(KP_RGB_NODE);
+#define KP_RGB_SYNC_SLOTS (2 * KP_RGB_SYNC_SOURCES)
+#define KP_RGB_SYNC_PACE_MS 50
+#define KP_RGB_SYNC_RETRY_MS 1000
+#define KP_RGB_SYNC_YIELD_MS 1
 
 enum kp_rgb_sync_phase {
   KP_RGB_SYNC_BRIGHTNESS,
   KP_RGB_SYNC_POWER,
-  KP_RGB_SYNC_OVERLAYS,
+  KP_RGB_SYNC_GATES,
+  KP_RGB_SYNC_COLOR,
+  KP_RGB_SYNC_PERIOD,
+  KP_RGB_SYNC_SELECTION,
 };
 
-enum kp_rgb_sync_emit {
-  KP_RGB_SYNC_EMIT_SENT,  /* one command sent; the phase already advanced */
-  KP_RGB_SYNC_EMIT_RETRY, /* transient failure; the same command stays armed */
-  KP_RGB_SYNC_EMIT_DONE,  /* nothing left to send for this source */
-};
-
-static uint64_t kp_rgb_global_revision;
-
-struct kp_rgb_global_snapshot {
-  uint64_t revision;
-  bool user_on;
-  uint8_t brightness;
-};
-
-static void kp_rgb_global_snapshot_locked(struct kp_rgb_global_snapshot *snapshot) {
-  *snapshot = (struct kp_rgb_global_snapshot){
-      .revision = kp_rgb_global_revision,
-      .user_on = kp_rgb_global.user_on, .brightness = kp_rgb_global.brightness};
-}
-
-struct kp_rgb_sync_selector {
-  const struct device *owner;
-  uint64_t revision;
-  uint64_t reset_generation;
-};
-
-#define KP_RGB_SYNC_SELECTOR(node_id) {.owner = DEVICE_DT_GET(node_id)},
-static struct kp_rgb_sync_selector kp_rgb_sync_selectors[] = {
-    KP_RGB_FOREACH_SELECTOR(KP_RGB_SYNC_SELECTOR)
-    {0},
-};
-#define KP_RGB_SYNC_SELECTOR_CAPACITY MAX(ARRAY_SIZE(kp_rgb_sync_selectors) - 1, 1)
-
-static size_t kp_rgb_sync_selector_count(void) {
-  return ARRAY_SIZE(kp_rgb_sync_selectors) - 1;
-}
-
-struct kp_rgb_sync_selector_progress {
-  bool pending;
-  bool captured;
-  bool synced;
-  uint8_t step;
-  uint8_t retry_count;
-  int64_t ready_at;
-  uint64_t revision;
-  uint64_t reset_generation;
-  uint64_t completed_reset_generation;
-  bool sweep;
-  size_t member_cursor;
-  struct kp_rgb_selector_snapshot snapshot;
-};
+static const struct device *const kp_rgb_sync_endpoint = DEVICE_DT_GET(KP_RGB_NODE);
 
 struct kp_rgb_sync_source {
-  bool seen;           /* present at the last sample */
-  bool pending;        /* a sync is in flight for this source */
-  uint8_t retry_count; /* consecutive failed sends for the in-flight command */
-  uint16_t mask_word;  /* next overlay word to push this time round */
-  int64_t ready_at;
+  bool seen;
+  bool pending;
+  bool generation_captured;
   enum kp_rgb_sync_phase phase;
-  bool global_captured;
-  struct kp_rgb_global_snapshot global;
-  int64_t selectors_ready_at;
-  struct kp_rgb_sync_selector_progress selectors[KP_RGB_SYNC_SELECTOR_CAPACITY];
+  size_t gate_word;
+  size_t selector_index;
+  size_t member_index;
+  uint64_t generation;
+  int64_t ready_at;
+  int64_t clock_due;
 };
 
-static void kp_rgb_sync_poll_handler(struct k_work *work);
-static void kp_rgb_sync_step_handler(struct k_work *work);
-static void kp_rgb_sync_clock_handler(struct k_work *work);
-static void kp_rgb_sync_selector_step_handler(struct k_work *work);
-
-static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_poll, kp_rgb_sync_poll_handler);
-static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_step, kp_rgb_sync_step_handler);
-static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_clock, kp_rgb_sync_clock_handler);
-/* Source progress belongs to the RGB work queue; revisions use the matrix mutex. */
 static struct kp_rgb_sync_source kp_rgb_sync_sources[KP_RGB_SYNC_SOURCES];
 static const struct zmk_split_transport_central *kp_rgb_sync_transport;
+static void kp_rgb_sync_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_work, kp_rgb_sync_handler);
+static atomic_t kp_rgb_sync_initialized;
+static size_t kp_rgb_sync_cursor;
+static uint64_t kp_rgb_sync_consumed_repair_epoch;
+static int64_t kp_rgb_sync_next_state_at;
+static int64_t kp_rgb_sync_poll_due;
 
-static K_WORK_DELAYABLE_DEFINE(kp_rgb_sync_selector_step,
-                               kp_rgb_sync_selector_step_handler);
-static size_t kp_rgb_sync_selector_cursor;
-
-void kp_rgb_split_selector_dirty_locked(const struct device *selector) {
-  for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++) {
-    if (kp_rgb_sync_selectors[i].owner == selector) {
-      kp_rgb_sync_selectors[i].revision++;
-      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
-                                  K_NO_WAIT);
-      return;
-    }
-  }
-}
-
-void kp_rgb_split_global_dirty_locked(void) {
-  kp_rgb_global_revision++;
-  k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_step, K_NO_WAIT);
-}
-
-void kp_rgb_split_selector_reset_locked(const struct device *selector) {
-  for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++) {
-    if (kp_rgb_sync_selectors[i].owner == selector) {
-      kp_rgb_sync_selectors[i].reset_generation++;
-      kp_rgb_split_selector_dirty_locked(selector);
-      return;
-    }
-  }
-}
-
-void kp_rgb_split_selectors_dirty_locked(void) {
-  for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++)
-    kp_rgb_split_selector_reset_locked(kp_rgb_sync_selectors[i].owner);
-}
-
-static void kp_rgb_sync_selectors_reset(struct kp_rgb_sync_source *source) {
-  memset(source->selectors, 0, sizeof(source->selectors));
-}
-
-static void kp_rgb_sync_selectors_refresh(int64_t now) {
-  kp_rgb_matrix_lock();
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[s];
-    if (!source->seen)
-      continue;
-    if (!source->pending &&
-        source->global.revision != kp_rgb_global_revision) {
-      source->pending = true;
-      source->global_captured = false;
-      source->phase = KP_RGB_SYNC_BRIGHTNESS;
-      source->mask_word = 0;
-    }
-    for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++) {
-      struct kp_rgb_sync_selector_progress *st = &source->selectors[i];
-      if (!st->pending &&
-          (!st->synced || st->revision != kp_rgb_sync_selectors[i].revision ||
-           st->completed_reset_generation != kp_rgb_sync_selectors[i].reset_generation)) {
-        st->pending = true;
-        st->captured = false;
-        st->step = 0;
-        st->retry_count = 0;
-        st->ready_at = MAX(st->ready_at, MAX(now, source->selectors_ready_at));
-        st->sweep = st->completed_reset_generation !=
-                    kp_rgb_sync_selectors[i].reset_generation;
-        st->member_cursor = 0;
-        st->revision = kp_rgb_sync_selectors[i].revision;
-        st->reset_generation = kp_rgb_sync_selectors[i].reset_generation;
-      }
-    }
-  }
-  kp_rgb_matrix_unlock();
-}
-
-/* Registration order is priority order, and a NULL get_status means "always
- * available". active_transport is private to the split central, so the transport
- * has to be re-derived here. */
+/* Pinned ZMK selects the first available registered transport; observation can race enqueue. */
 static const struct zmk_split_transport_central *kp_rgb_sync_pick_transport(void) {
-  STRUCT_SECTION_FOREACH(zmk_split_transport_central, t) {
-    if (t->api == NULL || t->api->send_command == NULL ||
-        t->api->get_available_source_ids == NULL) {
+  STRUCT_SECTION_FOREACH(zmk_split_transport_central, transport) {
+    if (transport->api == NULL || transport->api->send_command == NULL ||
+        transport->api->get_available_source_ids == NULL) {
       continue;
     }
-    if (t->api->get_status != NULL && !t->api->get_status().available) {
+    if (transport->api->get_status != NULL &&
+        !transport->api->get_status().available) {
       continue;
     }
-    return t;
+    return transport;
   }
   return NULL;
 }
 
-static void kp_rgb_sync_refresh(void) {
-  const struct zmk_split_transport_central *t = kp_rgb_sync_pick_transport();
+static int kp_rgb_sync_queue(k_timeout_t delay, bool external) {
+  int result;
+  if (external) {
+    result = k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_work,
+                                         delay);
+  } else {
+    result = k_work_schedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_work,
+                                        delay);
+  }
+  if (result < 0) {
+    LOG_ERR("Unable to schedule split sync work (err %d)", result);
+  }
+  return result;
+}
 
-  if (t != kp_rgb_sync_transport) {
-    /* A different transport now owns the source ids, so what was seen before
-     * says nothing about them; force every source to re-sync. */
-    kp_rgb_sync_transport = t;
+void kp_rgb_split_sync_wake(void) {
+  if (atomic_get(&kp_rgb_sync_initialized)) {
+    (void)kp_rgb_sync_queue(K_NO_WAIT, true);
+  }
+}
+
+static void kp_rgb_sync_reset_cursor(struct kp_rgb_sync_source *source) {
+  source->phase = KP_RGB_SYNC_BRIGHTNESS;
+  source->gate_word = 0;
+  source->selector_index = 0;
+  source->member_index = 0;
+  source->generation_captured = false;
+}
+
+static void kp_rgb_sync_poll(int64_t now) {
+  const struct zmk_split_transport_central *transport =
+      kp_rgb_sync_pick_transport();
+  if (transport != kp_rgb_sync_transport) {
+    kp_rgb_sync_transport = transport;
     for (size_t i = 0; i < ARRAY_SIZE(kp_rgb_sync_sources); i++) {
       kp_rgb_sync_sources[i].seen = false;
       kp_rgb_sync_sources[i].pending = false;
-      kp_rgb_sync_sources[i].retry_count = 0;
-      kp_rgb_sync_selectors_reset(&kp_rgb_sync_sources[i]);
+      kp_rgb_sync_sources[i].clock_due = 0;
+      kp_rgb_sync_reset_cursor(&kp_rgb_sync_sources[i]);
     }
   }
 
   bool present[KP_RGB_SYNC_SOURCES] = {false};
-  if (t != NULL) {
+  if (transport != NULL) {
     uint8_t ids[KP_RGB_SYNC_SOURCES];
-    int count = t->api->get_available_source_ids(ids);
+    int count = transport->api->get_available_source_ids(ids);
     if (count < 0) {
       LOG_WRN("Source query failed (err %d)", count);
       count = 0;
@@ -236,290 +142,293 @@ static void kp_rgb_sync_refresh(void) {
     }
   }
 
-  int64_t now = k_uptime_get();
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    struct kp_rgb_sync_source *st = &kp_rgb_sync_sources[s];
-    if (present[s] && !st->seen) {
-      st->seen = true;
-      st->pending = true;
-      st->retry_count = 0;
-      st->phase = KP_RGB_SYNC_BRIGHTNESS;
-      st->mask_word = 0;
-      st->global_captured = false;
-      /* A peripheral is marked connected before its GATT characteristics are
-       * discovered, and the split worker silently drops commands in that
-       * window. */
-      st->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
-      st->selectors_ready_at = st->ready_at;
-      LOG_INF("Queued for source %u", (uint32_t)s);
-      /* Align the shared clock once discovery has settled as well. */
-      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
-                                  K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS));
-    } else if (!present[s] && st->seen) {
-      st->seen = false;
-      st->pending = false; /* abort in flight; a reconnect re-syncs */
-      kp_rgb_sync_selectors_reset(st);
+  for (size_t i = 0; i < ARRAY_SIZE(kp_rgb_sync_sources); i++) {
+    struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[i];
+    if (present[i] && !source->seen) {
+      source->seen = true;
+      source->pending = true;
+      kp_rgb_sync_reset_cursor(source);
+      source->ready_at = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS;
+      source->clock_due = source->ready_at;
+      LOG_INF("Queued for source %u", (uint32_t)i);
+    } else if (!present[i] && source->seen) {
+      source->seen = false;
+      source->pending = false;
+      source->clock_due = 0;
+      kp_rgb_sync_reset_cursor(source);
     }
   }
-  kp_rgb_sync_selectors_refresh(now);
 }
 
 static int kp_rgb_sync_send_binding(uint8_t source,
                                     struct zmk_behavior_binding *binding) {
+  if (!device_is_ready(kp_rgb_sync_endpoint)) {
+    LOG_WRN("RGB split endpoint is not ready");
+    return -ENODEV;
+  }
   struct zmk_behavior_binding_event event = {
       .layer = 0, .position = 0, .timestamp = k_uptime_get(), .source = source};
   int err = zmk_split_central_invoke_behavior(source, binding, event, true);
-  if (err < 0)
+  if (err < 0) {
     LOG_WRN("Source %u command %u failed (err %d)", source, binding->param1, err);
+  }
   return err;
 }
 
-int kp_rgb_split_send_selector(uint8_t source,
-                               const struct kp_rgb_selector_snapshot *snapshot,
-                               uint8_t step) {
-  struct zmk_behavior_binding binding;
-  kp_rgb_selector_snapshot_binding(snapshot, step, &binding);
+static int kp_rgb_sync_send(uint8_t source, uint32_t command, uint32_t argument) {
+  struct zmk_behavior_binding binding = {
+      .behavior_dev = kp_rgb_sync_endpoint->name,
+      .param1 = command,
+      .param2 = argument,
+  };
   return kp_rgb_sync_send_binding(source, &binding);
 }
 
-static bool kp_rgb_sync_send(uint8_t source, uint32_t cmd, uint32_t arg) {
-  if (!device_is_ready(kp_rgb_sync_endpoint))
-    return false;
-  struct zmk_behavior_binding binding = {
-      .behavior_dev = kp_rgb_sync_endpoint->name, .param1 = cmd, .param2 = arg};
-  return kp_rgb_sync_send_binding(source, &binding) >= 0;
-}
-
-/* Pushes the central's shared animation clock to every connected source. Kept
- * out of the snapshot state machine so it keeps running while a snapshot is
- * stalled or retrying; a dropped send self-heals on the next period. */
-static void kp_rgb_sync_send_clock(void) {
-  const struct zmk_split_transport_central *t = kp_rgb_sync_pick_transport();
-  if (t == NULL) {
-    return;
-  }
-  uint8_t ids[KP_RGB_SYNC_SOURCES];
-  int count = t->api->get_available_source_ids(ids);
-  if (count < 0) {
-    return;
-  }
+static int kp_rgb_sync_send_clock(uint8_t source) {
   uint32_t now = (uint32_t)k_uptime_get();
-  for (int i = 0; i < count; i++) {
-    if (ids[i] < KP_RGB_SYNC_SOURCES) {
-      (void)kp_rgb_sync_send(ids[i], RGB_CLOCK_CMD, now);
-    }
-  }
+  return kp_rgb_sync_send(source, RGB_CLOCK_CMD, now);
 }
 
-static void kp_rgb_sync_clock_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_sync_send_clock();
-  k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
-                              K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
-}
-
-static enum kp_rgb_sync_emit
-kp_rgb_sync_emit_global(uint8_t source, struct kp_rgb_sync_source *st) {
-  if (!st->global_captured) {
-    kp_rgb_matrix_lock();
-    kp_rgb_global_snapshot_locked(&st->global);
-    kp_rgb_matrix_unlock();
-    st->global_captured = true;
-  }
-  uint32_t command, argument;
-  switch (st->phase) {
+static void kp_rgb_sync_advance(struct kp_rgb_sync_source *source) {
+  switch (source->phase) {
   case KP_RGB_SYNC_BRIGHTNESS:
-    command = RGB_BRT_SET_CMD;
-    argument = st->global.brightness;
+    source->phase = KP_RGB_SYNC_POWER;
     break;
   case KP_RGB_SYNC_POWER:
-    command = st->global.user_on ? RGB_ON_CMD : RGB_OFF_CMD;
-    argument = 0;
+    source->phase = KP_RGB_SYNC_GATES;
     break;
-  case KP_RGB_SYNC_OVERLAYS:
-    if (st->mask_word >= KP_RGB_OVERLAY_WORDS)
-      return KP_RGB_SYNC_EMIT_DONE;
-    command = RGB_OVL_STATE_CMD;
-    argument = RGB_OVL_STATE_VAL(st->mask_word,
-                                kp_rgb_overlay_get_word(st->mask_word));
+  case KP_RGB_SYNC_GATES:
+    if (++source->gate_word < KP_RGB_OVERLAY_WORDS)
+      break;
+    source->phase = KP_RGB_SYNC_COLOR;
+    if (kp_rgb_selector_registry_count() == 0) {
+      source->pending = false;
+      source->generation_captured = false;
+    }
     break;
-  default:
-    return KP_RGB_SYNC_EMIT_DONE;
+  case KP_RGB_SYNC_COLOR:
+    source->phase = KP_RGB_SYNC_PERIOD;
+    break;
+  case KP_RGB_SYNC_PERIOD: {
+    struct kp_rgb_selector *selector =
+        kp_rgb_selector_registry_at(source->selector_index);
+    source->member_index++;
+    source->phase = source->member_index == selector->effect_count
+                        ? KP_RGB_SYNC_SELECTION
+                        : KP_RGB_SYNC_COLOR;
+    break;
   }
-  if (!kp_rgb_sync_send(source, command, argument))
-    return KP_RGB_SYNC_EMIT_RETRY;
-  if (st->phase == KP_RGB_SYNC_OVERLAYS)
-    st->mask_word++;
-  else
-    st->phase++;
-  return KP_RGB_SYNC_EMIT_SENT;
-}
-
-static void kp_rgb_sync_step_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_sync_refresh(); /* aborts vanished sources, queues new ones */
-
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    struct kp_rgb_sync_source *st = &kp_rgb_sync_sources[s];
-    if (!st->pending) {
-      continue;
-    }
-    if (k_uptime_get() < st->ready_at)
-      continue;
-    enum kp_rgb_sync_emit r = kp_rgb_sync_emit_global((uint8_t)s, st);
-    if (r == KP_RGB_SYNC_EMIT_SENT) {
-      st->retry_count = 0;
-      st->ready_at = k_uptime_get() + KP_RGB_SYNC_STEP_DELAY_MS;
-      break; /* one command per work item, then yield */
-    }
-    if (r == KP_RGB_SYNC_EMIT_RETRY) {
-      uint8_t shift = MIN(st->retry_count, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
-      int64_t backoff = MIN((int64_t)(KP_RGB_SYNC_STEP_DELAY_MS << shift),
-                            (int64_t)KP_RGB_SYNC_MAX_BACKOFF_MS);
-      st->retry_count = MIN(st->retry_count + 1, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
-      st->ready_at = k_uptime_get() + backoff;
-      continue; /* other sources still make progress */
-    }
-    kp_rgb_matrix_lock();
-    st->pending = st->global.revision != kp_rgb_global_revision;
-    if (st->pending) {
-      st->global_captured = false;
-      st->phase = KP_RGB_SYNC_BRIGHTNESS;
-      st->mask_word = 0;
-    }
-    kp_rgb_matrix_unlock();
-  }
-
-  int64_t now = k_uptime_get();
-  int64_t next_ms = -1;
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    const struct kp_rgb_sync_source *st = &kp_rgb_sync_sources[s];
-    if (st->pending) {
-      int64_t wait = MAX(st->ready_at - now, 0);
-      if (next_ms < 0 || wait < next_ms)
-        next_ms = wait;
-    }
-  }
-  if (next_ms >= 0) {
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_step,
-                                K_MSEC((uint32_t)next_ms));
-  }
-}
-
-static void kp_rgb_sync_selector_step_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_sync_refresh();
-  size_t count = kp_rgb_sync_selector_count();
-  size_t lanes = ARRAY_SIZE(kp_rgb_sync_sources) * count;
-  int64_t now = k_uptime_get();
-
-  for (size_t n = 0; n < lanes; n++) {
-    size_t lane = (kp_rgb_sync_selector_cursor + n) % lanes;
-    size_t s = lane / count, i = lane % count;
-    struct kp_rgb_sync_selector_progress *st =
-        &kp_rgb_sync_sources[s].selectors[i];
-    if (!st->pending || now < st->ready_at)
-      continue;
-
-    int err = 0;
-    /* Finish the frozen member before sampling a newer command revision. */
-    if (!st->captured) {
-      kp_rgb_matrix_lock();
-      if (st->sweep && st->step != 2) {
-        err = kp_rgb_selector_next_snapshot_locked(kp_rgb_sync_selectors[i].owner,
-                                                   &st->member_cursor, &st->snapshot);
-        if (err == 0)
-          st->step = 2;
-        else if (err > 0)
-          err = 0;
-      }
-      if (!st->sweep || st->step == 2)
-        err = kp_rgb_selector_snapshot_locked(kp_rgb_sync_selectors[i].owner,
-                                              &st->snapshot);
-      if (err == 0) {
-        if (!st->sweep)
-          st->revision = kp_rgb_sync_selectors[i].revision;
-        st->captured = true;
-      }
-      kp_rgb_matrix_unlock();
-    }
-    if (err == 0)
-      err = kp_rgb_split_send_selector((uint8_t)s, &st->snapshot, st->step);
-
-    now = k_uptime_get();
-    if (err < 0) {
-      uint8_t shift = MIN(st->retry_count, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
-      st->ready_at = now + MIN((int64_t)(KP_RGB_SYNC_STEP_DELAY_MS << shift),
-                               (int64_t)KP_RGB_SYNC_MAX_BACKOFF_MS);
-      st->retry_count = MIN(st->retry_count + 1, KP_RGB_SYNC_BACKOFF_SHIFT_MAX);
+  case KP_RGB_SYNC_SELECTION:
+    source->selector_index++;
+    source->member_index = 0;
+    if (source->selector_index == kp_rgb_selector_registry_count()) {
+      source->pending = false;
+      source->generation_captured = false;
     } else {
-      st->retry_count = 0;
-      st->ready_at = now + KP_RGB_SYNC_STEP_DELAY_MS;
-      if (st->sweep && st->step == 1) {
-        st->captured = false;
-        st->step = 0;
-      } else if (++st->step == 3) {
-        kp_rgb_matrix_lock();
-        if (st->sweep && st->revision == kp_rgb_sync_selectors[i].revision)
-          st->completed_reset_generation = st->reset_generation;
-        kp_rgb_matrix_unlock();
-        st->pending = false;
-        st->synced = true;
-      }
+      source->phase = KP_RGB_SYNC_COLOR;
     }
-    kp_rgb_sync_selector_cursor = (lane + 1) % lanes;
     break;
   }
+}
 
-  kp_rgb_sync_selectors_refresh(now);
-  int64_t next_ms = -1;
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    for (size_t i = 0; i < count; i++) {
-      struct kp_rgb_sync_selector_progress *st =
-          &kp_rgb_sync_sources[s].selectors[i];
-      if (st->pending) {
-        int64_t wait = MAX(st->ready_at - now, KP_RGB_SYNC_STEP_DELAY_MS);
-        if (next_ms < 0 || wait < next_ms)
-          next_ms = wait;
+static void kp_rgb_sync_binding_locked(struct kp_rgb_sync_source *source,
+                                       struct zmk_behavior_binding *binding) {
+  __ASSERT_NO_MSG(kp_rgb_control_started_locked());
+  struct kp_rgb_replication_status status = kp_rgb_replication_status_locked();
+  if (!source->generation_captured) {
+    source->generation = status.generation;
+    source->generation_captured = true;
+  }
+
+  uint32_t command;
+  uint32_t argument;
+  switch (source->phase) {
+  case KP_RGB_SYNC_BRIGHTNESS:
+    command = RGB_BRT_SET_CMD;
+    argument = kp_rgb_global.brightness;
+    binding->behavior_dev = kp_rgb_sync_endpoint->name;
+    break;
+  case KP_RGB_SYNC_POWER:
+    command = kp_rgb_global.user_on ? RGB_ON_CMD : RGB_OFF_CMD;
+    argument = 0;
+    binding->behavior_dev = kp_rgb_sync_endpoint->name;
+    break;
+  case KP_RGB_SYNC_GATES:
+    command = KP_RGB_OVERLAY_WORD_COMMAND(source->gate_word);
+    argument = kp_rgb_overlay_get_word(source->gate_word);
+    binding->behavior_dev = kp_rgb_sync_endpoint->name;
+    break;
+  case KP_RGB_SYNC_COLOR:
+  case KP_RGB_SYNC_PERIOD:
+  case KP_RGB_SYNC_SELECTION: {
+    __ASSERT_NO_MSG(source->selector_index < kp_rgb_selector_registry_count());
+    struct kp_rgb_selector *selector =
+        kp_rgb_selector_registry_at(source->selector_index);
+    __ASSERT_NO_MSG(selector->effect_count > 0);
+    binding->behavior_dev = selector->owner->name;
+    if (source->phase == KP_RGB_SYNC_SELECTION) {
+      __ASSERT_NO_MSG(selector->effect_index < selector->effect_count);
+      command = RGB_EFS_CMD;
+      argument = selector->effect_index;
+    } else {
+      __ASSERT_NO_MSG(source->member_index < selector->effect_count);
+      const struct device *effect =
+          kp_rgb_selector_at(selector, source->member_index);
+      const struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(effect);
+      if (source->phase == KP_RGB_SYNC_COLOR) {
+        command = KP_RGB_SELECTOR_MEMBER_COMMAND(
+            RGB_SELECTOR_COLOR_CMD, source->member_index);
+        argument = RGB_COLOR_HSB_VAL(data->color.h, data->color.s,
+                                     data->color.b);
+      } else {
+        command = KP_RGB_SELECTOR_MEMBER_COMMAND(
+            RGB_SELECTOR_PERIOD_CMD, source->member_index);
+        argument = data->duration_ms;
+      }
+    }
+    break;
+  }
+  default:
+    __ASSERT_NO_MSG(false);
+    command = RGB_BRT_SET_CMD;
+    argument = 0;
+    binding->behavior_dev = kp_rgb_sync_endpoint->name;
+    break;
+  }
+  binding->param1 = command;
+  binding->param2 = argument;
+}
+
+static void kp_rgb_sync_attempt_state(size_t index) {
+  struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[index];
+  struct zmk_behavior_binding binding = {0};
+
+  kp_rgb_matrix_lock();
+  kp_rgb_sync_binding_locked(source, &binding);
+  kp_rgb_matrix_unlock();
+
+  int err = kp_rgb_sync_send_binding((uint8_t)index, &binding);
+  int64_t returned = k_uptime_get();
+  if (err < 0) {
+    source->ready_at = returned + KP_RGB_SYNC_RETRY_MS;
+    return;
+  }
+
+  kp_rgb_sync_advance(source);
+  source->ready_at = returned;
+  kp_rgb_sync_next_state_at = returned + KP_RGB_SYNC_PACE_MS;
+  if (!source->pending) {
+    kp_rgb_matrix_lock();
+    struct kp_rgb_replication_status status = kp_rgb_replication_status_locked();
+    bool complete = status.generation == source->generation &&
+                    status.outstanding == 0 &&
+                    kp_rgb_sync_consumed_repair_epoch == status.repair_epoch;
+    kp_rgb_matrix_unlock();
+    if (!complete) {
+      source->pending = true;
+      kp_rgb_sync_reset_cursor(source);
+      source->ready_at = returned;
+    }
+  }
+}
+
+static void kp_rgb_sync_attempt_clock(size_t index) {
+  struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[index];
+  int err = kp_rgb_sync_send_clock((uint8_t)index);
+  int64_t returned = k_uptime_get();
+  if (err < 0) {
+    LOG_WRN("Source %u clock correction failed (err %d)", (uint32_t)index, err);
+  }
+  source->clock_due = returned + CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS;
+}
+
+static bool kp_rgb_sync_slot_due(size_t slot, int64_t now) {
+  size_t index = slot / 2;
+  struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[index];
+  if (!source->seen || source->clock_due == 0)
+    return false;
+  if ((slot & 1u) != 0) {
+    return now >= source->clock_due;
+  }
+  return source->pending && now >= source->ready_at &&
+         now >= kp_rgb_sync_next_state_at;
+}
+
+static void kp_rgb_sync_consume_repair(void) {
+  kp_rgb_matrix_lock();
+  bool started = kp_rgb_control_started_locked();
+  struct kp_rgb_replication_status status = kp_rgb_replication_status_locked();
+  if (started && status.repair_epoch != kp_rgb_sync_consumed_repair_epoch) {
+    kp_rgb_sync_consumed_repair_epoch = status.repair_epoch;
+    int64_t now = k_uptime_get();
+    for (size_t i = 0; i < ARRAY_SIZE(kp_rgb_sync_sources); i++) {
+      struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[i];
+      if (source->seen && !source->pending) {
+        source->pending = true;
+        kp_rgb_sync_reset_cursor(source);
+        source->ready_at = MAX(source->ready_at, now);
       }
     }
   }
-  if (next_ms >= 0)
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
-                                K_MSEC((uint32_t)next_ms));
+  kp_rgb_matrix_unlock();
 }
 
-static void kp_rgb_sync_poll_handler(struct k_work *work) {
-  ARG_UNUSED(work);
-  kp_rgb_sync_refresh();
+static int64_t kp_rgb_sync_next_deadline(int64_t now, bool started) {
+  int64_t next = kp_rgb_sync_poll_due;
+  for (size_t i = 0; i < ARRAY_SIZE(kp_rgb_sync_sources); i++) {
+    const struct kp_rgb_sync_source *source = &kp_rgb_sync_sources[i];
+    if (!source->seen || !started)
+      continue;
+    if (source->clock_due > 0 && source->clock_due < next)
+      next = source->clock_due;
+    if (source->pending) {
+      int64_t state_due = MAX(source->ready_at, kp_rgb_sync_next_state_at);
+      if (state_due < next)
+        next = state_due;
+    }
+  }
+  return MAX(next - now, 0);
+}
 
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++) {
-    if (kp_rgb_sync_sources[s].pending) {
-      k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_step,
-                                  K_NO_WAIT);
+static void kp_rgb_sync_handler(struct k_work *work) {
+  ARG_UNUSED(work);
+  int64_t now = k_uptime_get();
+  if (now >= kp_rgb_sync_poll_due) {
+    kp_rgb_sync_poll(now);
+    kp_rgb_sync_poll_due = now + CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS;
+  }
+
+  kp_rgb_sync_consume_repair();
+
+  bool started;
+  kp_rgb_matrix_lock();
+  started = kp_rgb_control_started_locked();
+  kp_rgb_matrix_unlock();
+  if (started) {
+    for (size_t n = 0; n < KP_RGB_SYNC_SLOTS; n++) {
+      size_t slot = (kp_rgb_sync_cursor + n) % KP_RGB_SYNC_SLOTS;
+      if (!kp_rgb_sync_slot_due(slot, now))
+        continue;
+      kp_rgb_sync_cursor = (slot + 1) % KP_RGB_SYNC_SLOTS;
+      if ((slot & 1u) != 0) {
+        kp_rgb_sync_attempt_clock(slot / 2);
+      } else {
+        kp_rgb_sync_attempt_state(slot / 2);
+      }
       break;
     }
   }
 
-  bool selector_pending = false;
-  for (size_t s = 0; s < ARRAY_SIZE(kp_rgb_sync_sources); s++)
-    for (size_t i = 0; i < kp_rgb_sync_selector_count(); i++)
-      selector_pending |= kp_rgb_sync_sources[s].selectors[i].pending;
-  if (selector_pending)
-    k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_selector_step,
-                                K_NO_WAIT);
-  k_work_reschedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_poll,
-                              K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
+  int64_t delay = kp_rgb_sync_next_deadline(k_uptime_get(), started);
+  if (delay == 0)
+    delay = KP_RGB_SYNC_YIELD_MS;
+  (void)kp_rgb_sync_queue(K_MSEC(MIN(delay, INT32_MAX)), false);
 }
 
 static int kp_rgb_split_sync_init(void) {
-  /* The module work queue is started at POST_KERNEL, well before this. The
-   * first poll is delayed rather than immediate to stay clear of the
-   * settings_load() that runs at the top of main(). */
-  k_work_schedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_poll,
-                            K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS));
-  k_work_schedule_for_queue(kp_rgb_work_q(), &kp_rgb_sync_clock,
-                            K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS));
+  kp_rgb_sync_poll_due = k_uptime_get() + CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS;
+  atomic_set(&kp_rgb_sync_initialized, 1);
+  (void)kp_rgb_sync_queue(K_MSEC(CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS), false);
   return 0;
 }
 SYS_INIT(kp_rgb_split_sync_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

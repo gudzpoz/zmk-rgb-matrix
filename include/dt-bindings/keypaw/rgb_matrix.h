@@ -8,9 +8,9 @@
 
 #include <dt-bindings/zmk/rgb.h>
 
-/* Internal matrix transport command, not a keymap command. param2 contains
- * a 16-bit overlay gate word: word index in the high half, bits in the low half.
- * Receiving a gate word does not save settings. */
+/* Internal matrix transport command, not a keymap command. param1's upper
+ * 16 bits select a gate word; param2 contains its 32 bits. Words follow dense
+ * enabled-overlay order. Receiving a word does not save settings. */
 #define RGB_OVL_STATE_CMD 0x101
 
 /* Restore defaults for the addressed selector, or global state and all selectors

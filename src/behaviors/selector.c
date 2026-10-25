@@ -10,7 +10,6 @@
 #include <zmk/behavior.h>
 
 #include "../rgb_matrix_internal.h"
-#include "../rgb_selector_sync_internal.h"
 #include "../rgb_replication_internal.h"
 
 int kp_rgb_selector_binding_convert(const struct device *selector,
@@ -41,12 +40,6 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
   int err = state == NULL
                 ? -ENODEV
                 : kp_rgb_selector_dispatch_locked(state, command, argument);
-  if (err >= 0) {
-    if (command == RGB_RESET_CMD)
-      kp_rgb_split_selector_reset_locked(selector);
-    else
-      kp_rgb_split_selector_dirty_locked(selector);
-  }
   if (err >= 0 &&
       (command == RGB_EFF_CMD || command == RGB_EFR_CMD ||
        command == RGB_EFS_CMD || command == RGB_RESET_CMD))
@@ -77,14 +70,14 @@ static int kp_selector_pressed(struct zmk_behavior_binding *binding,
   uint32_t command = kp_rgb_invocation_command(binding->param1);
   int err = kp_rgb_selector_binding_apply(kp_control_selector(binding), command,
                                           binding->param2);
-  kp_rgb_invocation_finish(binding);
+  kp_rgb_invocation_finish(binding, err);
   return err;
 }
 
 static int kp_selector_released(struct zmk_behavior_binding *binding,
                                 struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  kp_rgb_invocation_finish(binding);
+  kp_rgb_invocation_finish(binding, ZMK_BEHAVIOR_OPAQUE);
   return ZMK_BEHAVIOR_OPAQUE;
 }
 

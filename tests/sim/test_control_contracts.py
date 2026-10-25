@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import tempfile
 
-from native_build import build, run, SIM, SELECTORS
+from native_build import build, run, SIM, SELECTORS, COMPACT_PREVIEW
 
 SCENARIOS = {
     "control-early": "controls",
@@ -22,6 +22,8 @@ SCENARIOS = {
     "control-canonical-validation": "controls",
     "control-normalize-commands": "controls",
     "control-global-commands": "controls",
+    "control-overlay-words": "overlay-words",
+    "control-overlay-words-peripheral": "overlay-words-peripheral",
     "control-reset": "controls",
     "control-reset-fallback-noop": "reset-fallback",
     "control-reset-fallback-notify": "reset-fallback",
@@ -90,6 +92,7 @@ def main():
         elif image == "owner":
             fragment += "&selector_a { opacity = <50>; }; &selector_b { opacity = <50>; };\n"
         elif image == "local-only":
+            fragment += COMPACT_PREVIEW
             fragment += '''/ { chosen { zephyr,bt-hci = &control_hci; };
 control_hci: control_hci { compatible = "zephyr,bt-hci-userchan"; }; };
 '''
@@ -126,6 +129,13 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
                 "matrix-high": "&rgb_matrix { initial-brightness = <150>; };",
                 "matrix-low": "&rgb_matrix { /delete-property/ initial-on; initial-brightness = <(-5)>; };",
             }[image]
+        if image.startswith("overlay-words"):
+            fragment += '&rgb_matrix {\n' + '\n'.join(
+                f'word_overlay_{i} {{ compatible = "keypaw,rgb-overlay-battery"; all-leds; }};'
+                for i in range(60)) + '\n};\n'
+            if image.endswith("peripheral"):
+                conf += 'CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n'
+                fragment += '&preview_selector { local; }; &selector_a { local; }; &selector_b { local; };\n'
         result = build(root, image, fragment, selectors=selectors, extra_conf=conf)
         assert result.returncode == 0, result.stdout[-16000:]
         for scenario in selected:

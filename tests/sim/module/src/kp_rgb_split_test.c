@@ -11,7 +11,7 @@
 #include <drivers/behavior.h>
 #include <zmk/split/transport/central.h>
 #include "rgb_matrix_internal.h"
-#include "rgb_selector_sync_internal.h"
+#include "rgb_selector_internal.h"
 #include "rgb_replication_internal.h"
 
 #include "cmdline.h"
@@ -55,56 +55,42 @@ static int split_provider_init(void) {
 }
 SYS_INIT(split_provider_init, APPLICATION, 98);
 
-struct lane {
-    unsigned phase, slot, selected, completed;
-    uint32_t color, period, selected_color, selected_period;
-    uint32_t member_color[MAX(DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a)), DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_b)))];
-    uint32_t member_period[MAX(DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a)), DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_b)))];
-};
 struct attempt {
     uint8_t source;
     char endpoint[16];
     uint32_t command, argument;
-    int64_t time;
-    int64_t completion;
-    bool accepted;
+    int64_t time, completion;
+    bool accepted, live;
 };
 static K_MUTEX_DEFINE(records_lock);
-static struct lane remote[2][2];
-static struct attempt attempts[512];
-static unsigned attempt_count, query_count;
-static unsigned power_count[2], brightness_count[2], overlay_count[2];
-static uint32_t power[2], brightness[2];
-static bool global_race;
-static void global_apply(uint32_t command, uint32_t argument) {
-    struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
-        .param1 = command, .param2 = argument};
-    CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
-}
-static unsigned connected;
-static k_tid_t binding_thread;
-static bool framework_invoking;
-static uint32_t framework_color;
-static struct kp_rgb_hsb framework_before;
-static unsigned framework_destinations;
-static int64_t reconnect_floor[2];
-static bool fail_a;
-static uint32_t fail_kind = RGB_SELECTOR_COLOR_CMD;
-static unsigned send_duration;
+static struct attempt attempts[1024];
+static unsigned attempt_count, query_count, connected;
+static unsigned order_floor;
 static bool alternate_transport, no_transport;
 static int query_error;
-static uint32_t mutate_kind;
-static unsigned mutate_action;
-static unsigned mutation_count;
-static unsigned mutate_nth, mutate_seen, injected_index;
-static uint32_t injected_period;
-static unsigned clock_count[2];
-static uint32_t clock_value[2];
+static uint32_t fail_kind;
+static unsigned send_duration;
+static int64_t reconnect_floor[2];
 static zmk_split_transport_central_status_changed_cb_t status_cb;
 static K_SEM_DEFINE(query_request, 0, 1);
 static K_SEM_DEFINE(query_done, 0, 1);
+static K_SEM_DEFINE(worker_accepted, 0, 1);
+static K_SEM_DEFINE(worker_resume, 0, 1);
+static bool worker_gate;
+static bool worker_gate_fail;
+static uint32_t worker_gate_command;
+static const struct device *worker_gate_endpoint;
+static unsigned worker_gate_source, worker_gate_skip;
+static unsigned worker_gated_index;
+static bool ordering_case(void);
+static int ordering_live_send(uint8_t source, struct zmk_split_transport_central_command cmd);
 
-/* A separate thread detects a held recursive matrix mutex, unlike a same-thread query. */
+static bool handler_returned = true;
+static void handler_sentinel(struct k_work *work) {
+    ARG_UNUSED(work);
+    handler_returned = true;
+}
+static K_WORK_DEFINE(handler_sentinel_item, handler_sentinel);
 static void query_thread(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
     while (true) {
@@ -120,176 +106,99 @@ static void query_thread(void *a, void *b, void *c) {
 }
 K_THREAD_DEFINE(split_query, 1024, query_thread, NULL, NULL, NULL, 5, 0, 0);
 
-#include "kp_rgb_replication_test.inc"
-
+static void bounded_wait(struct k_sem *sem) {
+    CHECK(k_sem_take(sem, K_SECONDS(5)) == 0);
+}
+static void arm_worker(uint8_t source, uint32_t command, unsigned skip) {
+    k_mutex_lock(&records_lock, K_FOREVER);
+    CHECK(!worker_gate);
+    worker_gate = true;
+    worker_gate_source = source;
+    worker_gate_command = command;
+    worker_gate_skip = skip;
+    uint32_t kind = command & KP_RGB_SELECTOR_COMMAND_MASK;
+    worker_gate_endpoint = !skip && (kind == RGB_SELECTOR_COLOR_CMD ||
+        kind == RGB_SELECTOR_PERIOD_CMD || kind == RGB_EFS_CMD) ? DEV(selector_a) : NULL;
+    k_mutex_unlock(&records_lock);
+}
+static unsigned record_packet(uint8_t source, struct zmk_split_transport_central_command cmd,
+                              bool accepted, bool live) {
+    k_mutex_lock(&records_lock, K_FOREVER);
+    CHECK(attempt_count < ARRAY_SIZE(attempts));
+    unsigned index = attempt_count++;
+    attempts[index] = (struct attempt){.source = source,
+        .command = cmd.data.invoke_behavior.param1, .argument = cmd.data.invoke_behavior.param2,
+        .time = k_uptime_get(), .accepted = accepted, .live = live};
+    strcpy(attempts[index].endpoint, cmd.data.invoke_behavior.behavior_dev);
+    k_mutex_unlock(&records_lock);
+    return index;
+}
 static int send_command(uint8_t source, struct zmk_split_transport_central_command cmd) {
     CHECK(source < 2);
     CHECK(cmd.type == ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR);
-    if (ordering_case()) return ordering_send(source, cmd);
-    if (k_current_get() == binding_thread) {
-        CHECK(framework_invoking);
-        CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(selector_a)->name));
-        CHECK(cmd.data.invoke_behavior.param1 & KP_RGB_INVOCATION_MARKER);
-        CHECK(kp_rgb_invocation_command(cmd.data.invoke_behavior.param1) ==
-              KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
-        CHECK(cmd.data.invoke_behavior.param2 == framework_color);
-        CHECK(cmd.data.invoke_behavior.state == 1);
-        CHECK(cmd.data.invoke_behavior.event_source == 0);
-        CHECK(cmd.data.invoke_behavior.position == 0);
-        kp_rgb_matrix_lock();
-        CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == framework_before.h &&
-              kp_rgb_effect_data(DEV(probe_a))->color.s == framework_before.s &&
-              kp_rgb_effect_data(DEV(probe_a))->color.b == framework_before.b);
-        kp_rgb_matrix_unlock();
-        framework_destinations |= BIT(source);
+    int live = ordering_live_send(source, cmd);
+    if (live != -ENOMSG) return live;
+    if (cmd.data.invoke_behavior.param1 & KP_RGB_INVOCATION_MARKER) {
+        unsigned index = record_packet(source, cmd, cmd.data.invoke_behavior.state != 0, true);
+        k_mutex_lock(&records_lock, K_FOREVER);
+        attempts[index].completion = k_uptime_get();
+        k_mutex_unlock(&records_lock);
         return 0;
     }
-    k_mutex_lock(&records_lock, K_FOREVER);
-    bool present = connected & BIT(source);
-    k_mutex_unlock(&records_lock);
-    if (!present) return -ENOTCONN;
-    CHECK(k_uptime_get() >= reconnect_floor[source]);
+    CHECK(handler_returned);
+    handler_returned = false;
+    CHECK(k_work_submit_to_queue(kp_rgb_work_q(), &handler_sentinel_item) >= 0);
+    CHECK(!(cmd.data.invoke_behavior.param1 & KP_RGB_INVOCATION_MARKER));
     CHECK(cmd.data.invoke_behavior.state == 1);
-    /* Initial condition publication also broadcasts overlay state with source 0. */
-    if (!strncmp(split_case, "late-", 5) && kp_rgb_invocation_command(cmd.data.invoke_behavior.param1) == RGB_OVL_STATE_CMD)
-        CHECK(cmd.data.invoke_behavior.event_source == 0 || cmd.data.invoke_behavior.event_source == source);
-    else
-        CHECK(cmd.data.invoke_behavior.event_source == source);
+    CHECK(cmd.data.invoke_behavior.event_source == source);
     CHECK(cmd.data.invoke_behavior.position == 0);
-    k_sem_give(&query_request);
-    CHECK(k_sem_take(&query_done, K_MSEC(100)) == 0);
-    bool on;
-    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0);
-
     k_mutex_lock(&records_lock, K_FOREVER);
     CHECK(connected & BIT(source));
-    uint32_t command = kp_rgb_invocation_command(cmd.data.invoke_behavior.param1);
-    uint32_t argument = cmd.data.invoke_behavior.param2;
-    const char *endpoint = cmd.data.invoke_behavior.behavior_dev;
-    int index = !strcmp(endpoint, DEV(selector_a)->name) ? 0 :
-                !strcmp(endpoint, DEV(selector_b)->name) ? 1 : -1;
-    bool accepted = !(source == 0 && index == 0 && fail_a &&
-                     (command & KP_RGB_SELECTOR_COMMAND_MASK) == fail_kind);
-    bool sweep_inject = source == 0 && index == 0 && mutate_nth && ++mutate_seen == mutate_nth;
-    bool phase_inject = source == 0 && index == 0 && mutate_kind &&
-        (command & KP_RGB_SELECTOR_COMMAND_MASK) == mutate_kind;
-    if ((sweep_inject || phase_inject) && strstr(split_case, "failed")) accepted = false;
-    CHECK(attempt_count < ARRAY_SIZE(attempts));
-    struct attempt *record = &attempts[attempt_count++];
-    *record = (struct attempt){.source = source, .command = command,
-        .argument = argument, .time = k_uptime_get(), .accepted = accepted};
-    strcpy(record->endpoint, endpoint);
-    if (accepted && index >= 0) {
-        struct lane *lane = &remote[source][index];
-        uint32_t kind = command & KP_RGB_SELECTOR_COMMAND_MASK;
-        if (kind == RGB_SELECTOR_COLOR_CMD) {
-            CHECK(lane->phase == 0 || lane->phase == 2);
-            lane->slot = command >> 16;
-            CHECK(lane->slot < ARRAY_SIZE(lane->member_color));
-            lane->color = argument;
-            lane->member_color[lane->slot] = argument;
-            lane->phase = 1;
-        } else if (kind == RGB_SELECTOR_PERIOD_CMD) {
-            CHECK(lane->phase == 1 && lane->slot == command >> 16);
-            lane->period = argument;
-            lane->member_period[lane->slot] = argument;
-            lane->phase = 2;
-        } else {
-            CHECK(command == RGB_EFS_CMD);
-            CHECK(lane->phase == 2 && argument < ARRAY_SIZE(lane->member_color));
-            lane->selected = argument;
-            lane->selected_color = lane->member_color[argument];
-            lane->selected_period = lane->member_period[argument];
-            lane->completed++;
-            lane->phase = 0;
-        }
-    } else if (accepted) {
-        CHECK(!strcmp(endpoint, DEV(rgb_matrix)->name));
-        if (command == RGB_OFF_CMD || command == RGB_ON_CMD) {
-            power[source] = command;
-            power_count[source]++;
-        } else if (command == RGB_BRT_SET_CMD) {
-            brightness_count[source]++;
-            brightness[source] = argument;
-        } else if (command == RGB_OVL_STATE_CMD) {
-            overlay_count[source]++;
-        } else {
-            CHECK(command == RGB_CLOCK_CMD);
-            clock_count[source]++;
-            clock_value[source] = argument;
-            CHECK((uint32_t)record->time - argument <= source * (send_duration + 1) + 1);
-        }
+    CHECK(k_uptime_get() >= reconnect_floor[source]);
+    uint32_t command = cmd.data.invoke_behavior.param1;
+    bool accepted = !(source == 0 && fail_kind &&
+        (command & KP_RGB_SELECTOR_COMMAND_MASK) == fail_kind);
+    bool pause = worker_gate && source == worker_gate_source && command == worker_gate_command &&
+        (!worker_gate_endpoint || !strcmp(worker_gate_endpoint->name, cmd.data.invoke_behavior.behavior_dev));
+    if (pause && worker_gate_skip) { worker_gate_skip--; pause = false; }
+    if (pause) {
+        worker_gate = false;
+        if (worker_gate_fail) { accepted = false; worker_gate_fail = false; }
     }
-    bool inject = global_race && index < 0 && command == RGB_BRT_SET_CMD;
-    if (inject) global_race = false;
-    unsigned action = 0;
-    if (sweep_inject || (source == 0 && index == 0 && mutate_kind &&
-        (command & KP_RGB_SELECTOR_COMMAND_MASK) == mutate_kind)) {
-        if (sweep_inject) mutate_nth = 0;
-        mutate_kind = 0;
-        action = mutate_action;
-        mutation_count++;
-    }
-    if (sweep_inject) injected_index = attempt_count - 1;
     k_mutex_unlock(&records_lock);
-    if (sweep_inject && (command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_SELECTOR_COLOR_CMD) {
-        kp_rgb_matrix_lock();
-        const struct kp_rgb_selector *owner = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
-        injected_period = kp_rgb_effect_period(kp_rgb_selector_at(owner, command >> 16));
-        kp_rgb_matrix_unlock();
-    }
-    if (inject) {
-        global_apply(RGB_OFF_CMD, 0);
-        global_apply(RGB_BRT_SET_CMD, 19);
-        k_mutex_lock(&records_lock, K_FOREVER);
-        power[source] = RGB_OFF_CMD;
-        brightness[source] = 19;
-        k_mutex_unlock(&records_lock);
-    }
-    if (action == 3) {
-        global_apply(RGB_RESET_CMD, 0);
-    } else if (action == 4) {
-        CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-            RGB_COLOR_HSB_VAL(10, 100, 0)) == 0);
-    } else if (action) {
-        CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            action == 2 ? RGB_RESET_CMD : RGB_EFS_CMD, action == 2 ? 0 : A_SLOT(probe_c)) == 0);
-        CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
-            RGB_COLOR_HSB_VAL(299, 100, 100)) == 0);
-        CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2999) == 0);
+    /* Another thread must acquire the matrix mutex before transport can return. */
+    k_sem_give(&query_request);
+    bounded_wait(&query_done);
+    unsigned index = record_packet(source, cmd, accepted, false);
+    if (pause) {
+        worker_gated_index = index;
+        k_sem_give(&worker_accepted);
+        bounded_wait(&worker_resume);
     }
     if (send_duration) k_sleep(K_MSEC(send_duration));
     k_mutex_lock(&records_lock, K_FOREVER);
-    record->completion = k_uptime_get();
+    attempts[index].completion = k_uptime_get();
     k_mutex_unlock(&records_lock);
     return accepted ? 0 : -EIO;
 }
-
 static int sources(uint8_t *ids) {
-    if (ordering_case()) return 0;
     k_mutex_lock(&records_lock, K_FOREVER);
     if (query_error) { int error = query_error; k_mutex_unlock(&records_lock); return error; }
     int count = 0;
-    for (unsigned i = 0; i < 2; i++)
-        if (connected & BIT(i)) ids[count++] = i;
+    for (unsigned i = 0; i < 2; i++) if (connected & BIT(i)) ids[count++] = i;
     k_mutex_unlock(&records_lock);
     return count;
 }
 static struct zmk_split_transport_status status(void) {
     k_mutex_lock(&records_lock, K_FOREVER);
-    bool present = connected != 0 && !no_transport;
+    bool present = connected && !no_transport;
+    struct zmk_split_transport_status value = {.available = !alternate_transport && !no_transport,
+        .enabled = true, .connections = present ? ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_SOME_CONNECTED :
+                                                 ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED};
     k_mutex_unlock(&records_lock);
-    return (struct zmk_split_transport_status){.available = !alternate_transport && !no_transport, .enabled = true,
-        .connections = present ? ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_SOME_CONNECTED :
-                                ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED};
+    return value;
 }
-static int set_callback(zmk_split_transport_central_status_changed_cb_t cb) {
-    status_cb = cb;
-    return 0;
-}
+static int set_callback(zmk_split_transport_central_status_changed_cb_t cb) { status_cb = cb; return 0; }
 static int set_enabled(bool enabled) { ARG_UNUSED(enabled); return 0; }
 static const struct zmk_split_transport_central_api transport_api = {
     .send_command = send_command, .get_available_source_ids = sources,
@@ -303,11 +212,9 @@ static struct zmk_split_transport_status alternate_status(void) {
 }
 static const struct zmk_split_transport_central_api alternate_api = {
     .send_command = send_command, .get_available_source_ids = sources,
-    .get_status = alternate_status, .set_status_callback = set_callback,
-    .set_enabled = set_enabled,
+    .get_status = alternate_status, .set_status_callback = set_callback, .set_enabled = set_enabled,
 };
 ZMK_SPLIT_TRANSPORT_CENTRAL_REGISTER(scoped_alternate, &alternate_api, 0);
-
 static void connect(unsigned mask) {
     k_mutex_lock(&records_lock, K_FOREVER);
     for (unsigned s = 0; s < 2; s++)
@@ -316,730 +223,428 @@ static void connect(unsigned mask) {
     connected = mask;
     k_mutex_unlock(&records_lock);
     CHECK(status_cb != NULL);
-    struct zmk_split_transport_status value = status();
-    if (alternate_transport) value.connections = ZMK_SPLIT_TRANSPORT_CONNECTIONS_STATUS_DISCONNECTED;
-    CHECK(status_cb(&scoped_mock, value) == (no_transport ? -ENODEV : 0));
+    CHECK(status_cb(&scoped_mock, status()) == (no_transport ? -ENODEV : 0));
+    CHECK(status_cb(&scoped_alternate, alternate_status()) == 0);
 }
-static void failing(bool fail) {
+static void global_apply(uint32_t command, uint32_t argument) {
+    struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
+        .param1 = command, .param2 = argument};
+    CHECK(behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0}) == 0);
+}
+static unsigned state_count(void) {
     k_mutex_lock(&records_lock, K_FOREVER);
-    fail_a = fail;
+    unsigned count = 0;
+    for (unsigned i = 0; i < attempt_count; i++)
+        count += !attempts[i].live && attempts[i].command != RGB_CLOCK_CMD;
     k_mutex_unlock(&records_lock);
+    return count;
 }
-static struct lane lane(unsigned source, unsigned index) {
+static unsigned sweeps(unsigned source) {
     k_mutex_lock(&records_lock, K_FOREVER);
-    struct lane value = remote[source][index];
+    unsigned count = 0;
+    for (unsigned i = 0; i < attempt_count; i++)
+        count += !attempts[i].live && attempts[i].accepted && attempts[i].source == source &&
+                 attempts[i].command == RGB_BRT_SET_CMD;
     k_mutex_unlock(&records_lock);
-    return value;
+    return count;
 }
-static void apply(const struct device *selector, uint32_t command, uint32_t value) {
-    CHECK(kp_rgb_selector_binding_apply(selector, command, value) == 0);
+static uint32_t remote_value(unsigned source, const struct device *endpoint, uint32_t command) {
+    k_mutex_lock(&records_lock, K_FOREVER);
+    for (unsigned i = attempt_count; i > 0; i--) {
+        const struct attempt *r = &attempts[i - 1];
+        uint32_t logical = kp_rgb_invocation_command(r->command);
+        bool power_command = command == RGB_ON_CMD || command == RGB_OFF_CMD;
+        bool matches = power_command ? (logical == RGB_ON_CMD || logical == RGB_OFF_CMD) : logical == command;
+        if (r->accepted && r->source == source && matches && !strcmp(r->endpoint, endpoint->name)) {
+            uint32_t value = power_command ? logical : r->argument;
+            k_mutex_unlock(&records_lock);
+            return value;
+        }
+    }
+    k_mutex_unlock(&records_lock);
+    CHECK(false);
+    return 0;
 }
-static void parameters_hsb(const struct device *selector, unsigned slot, uint32_t color, unsigned period) {
-    apply(selector, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, slot), color);
-    apply(selector, KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, slot), period);
+static void check_remote(unsigned source) {
+    kp_rgb_matrix_lock();
+    CHECK(remote_value(source, DEV(rgb_matrix), RGB_BRT_SET_CMD) == kp_rgb_global.brightness);
+    uint32_t intent = kp_rgb_global.user_on ? RGB_ON_CMD : RGB_OFF_CMD;
+    CHECK(remote_value(source, DEV(rgb_matrix), intent) == intent);
+    for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++)
+        CHECK(remote_value(source, DEV(rgb_matrix), KP_RGB_OVERLAY_WORD_COMMAND(word)) ==
+              kp_rgb_overlay_get_word(word));
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+        const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+        for (size_t slot = 0; slot < selector->effect_count; slot++) {
+            const struct device *effect = kp_rgb_selector_at(selector, slot);
+            if (!effect) continue;
+            struct kp_rgb_hsb color = kp_rgb_effect_data(effect)->color;
+            CHECK(remote_value(source, selector->owner,
+                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, slot)) ==
+                RGB_COLOR_HSB_VAL(color.h, color.s, color.b));
+            CHECK(remote_value(source, selector->owner,
+                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, slot)) == kp_rgb_effect_period(effect));
+        }
+        CHECK(remote_value(source, selector->owner, RGB_EFS_CMD) == selector->effect_index);
+    }
+    kp_rgb_matrix_unlock();
 }
-static void matches_hsb(unsigned source, unsigned index, unsigned slot, uint32_t color, unsigned period) {
-    struct lane value = lane(source, index);
-    CHECK(value.completed > 0 && value.phase == 0);
-    CHECK(value.selected == slot && value.selected_color == color);
-    CHECK(value.selected_period == period);
+static void settle(void) { k_sleep(K_MSEC(5000)); }
+static void quiet(void) {
+    unsigned before = state_count();
+    k_sleep(K_MSEC(1200));
+    CHECK(state_count() == before);
 }
-static void parameters(const struct device *selector, unsigned slot, unsigned hue, unsigned period) {
-    parameters_hsb(selector, slot, RGB_COLOR_HSB_VAL(hue, 100, 100), period);
+static void check_order(void) {
+    for (unsigned source = 0; source < 2; source++) {
+        unsigned phase = 0;
+        size_t selector_index = 0, slot = 0, word = 0;
+        k_mutex_lock(&records_lock, K_FOREVER);
+        for (unsigned n = order_floor; n < attempt_count; n++) {
+            const struct attempt *r = &attempts[n];
+            if (r->source != source || r->live || !r->accepted || r->command == RGB_CLOCK_CMD) continue;
+            if (r->command == RGB_BRT_SET_CMD) {
+                CHECK(phase == 0);
+                CHECK(!strcmp(r->endpoint, DEV(rgb_matrix)->name));
+                phase = 1; selector_index = 0; slot = 0; word = 0; continue;
+            }
+            if (phase == 1) {
+                CHECK(r->command == RGB_ON_CMD || r->command == RGB_OFF_CMD);
+                phase = 2; continue;
+            }
+            if (phase == 2) {
+                CHECK(!strcmp(r->endpoint, DEV(rgb_matrix)->name));
+                CHECK(r->command == KP_RGB_OVERLAY_WORD_COMMAND(word));
+                if (++word == KP_RGB_OVERLAY_WORDS) phase = 3;
+                continue;
+            }
+            CHECK(selector_index < kp_rgb_selector_registry_count());
+            const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(selector_index);
+            CHECK(!strcmp(r->endpoint, selector->owner->name));
+            while (slot < selector->effect_count && !kp_rgb_selector_at(selector, slot)) slot++;
+            if (slot == selector->effect_count) {
+                CHECK(r->command == RGB_EFS_CMD);
+                selector_index++; slot = 0;
+                phase = selector_index == kp_rgb_selector_registry_count() ? 0 : 3;
+            } else {
+                CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(
+                    phase == 3 ? RGB_SELECTOR_COLOR_CMD : RGB_SELECTOR_PERIOD_CMD, slot));
+                if (phase == 3) phase = 4;
+                else { phase = 3; slot++; }
+            }
+        }
+        CHECK(phase == 0);
+        k_mutex_unlock(&records_lock);
+    }
 }
-static void matches(unsigned source, unsigned index, unsigned slot, unsigned hue, unsigned period) {
-    matches_hsb(source, index, slot, RGB_COLOR_HSB_VAL(hue, 100, 100), period);
+#include "kp_rgb_replication_test.inc"
+
+#if IS_ENABLED(CONFIG_SETTINGS_CUSTOM)
+#include <zephyr/settings/settings.h>
+static atomic_t gate_saves;
+static int gate_settings_load(struct settings_store *store, const struct settings_load_arg *arg) {
+    ARG_UNUSED(store); ARG_UNUSED(arg); return 0;
+}
+static int gate_settings_save(struct settings_store *store, const char *name,
+                              const char *value, size_t len) {
+    ARG_UNUSED(store); ARG_UNUSED(value); ARG_UNUSED(len);
+    if (!strcmp(name, "keypaw/rgb_matrix/snapshot")) atomic_inc(&gate_saves);
+    return 0;
+}
+static const struct settings_store_itf gate_settings_itf = {
+    .csi_load = gate_settings_load, .csi_save = gate_settings_save};
+static struct settings_store gate_settings_store = {.cs_itf = &gate_settings_itf};
+int settings_backend_init(void) {
+    settings_src_register(&gate_settings_store);
+    settings_dst_register(&gate_settings_store);
+    return 0;
 }
 
-static void check_all_members(unsigned index) {
-    const struct device *owner = index ? DEV(selector_b) : DEV(selector_a);
-    for (unsigned source = 0; source < 2; source++) {
-        struct lane value = lane(source, index);
-        struct kp_rgb_selector_snapshot snapshot; size_t cursor = 0;
-        kp_rgb_matrix_lock();
-        int next; unsigned members = 0;
-        while ((next = kp_rgb_selector_next_snapshot_locked(owner, &cursor, &snapshot)) > 0) {
-            members++;
-            CHECK(value.member_color[snapshot.slot] ==
-                  RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b));
-            CHECK(value.member_period[snapshot.slot] == snapshot.period_ms);
+static void check_gate_dispatch(unsigned start, uint32_t first, uint32_t second) {
+    CHECK(attempt_count == start + 4);
+    for (unsigned i = 0; i < 4; i++) {
+        const struct attempt *r = &attempts[start + i];
+        CHECK(r->live && r->accepted && r->source == i % 2);
+        CHECK(!strcmp(r->endpoint, DEV(rgb_matrix)->name));
+        CHECK(r->command == (KP_RGB_OVERLAY_WORD_COMMAND(1 + i / 2) | KP_RGB_INVOCATION_MARKER));
+        CHECK(r->argument == (i < 2 ? first : second));
+    }
+}
+
+static uint32_t gate_refresh_original[2];
+static K_SEM_DEFINE(gate_refresh_done, 0, 1);
+static void gate_refresh_work(struct k_work *work) {
+    ARG_UNUSED(work);
+    kp_rgb_matrix_lock();
+    struct kp_rgb_replication_status before = kp_rgb_replication_status_locked();
+    CHECK(kp_rgb_overlay_refresh());
+    CHECK(kp_rgb_replication_status_locked().generation == before.generation + 1);
+    CHECK(kp_rgb_overlay_get_word(1) == gate_refresh_original[0] &&
+          kp_rgb_overlay_get_word(2) == gate_refresh_original[1]);
+    CHECK(!kp_rgb_overlay_refresh());
+    CHECK(kp_rgb_replication_status_locked().generation == before.generation + 1);
+    kp_rgb_matrix_unlock();
+    unsigned start = attempt_count;
+    kp_rgb_overlay_dispatch();
+    check_gate_dispatch(start, gate_refresh_original[0], gate_refresh_original[1]);
+    k_sem_give(&gate_refresh_done);
+}
+static K_WORK_DEFINE(gate_refresh_item, gate_refresh_work);
+
+static void multiword_control(void) {
+    CHECK(KP_RGB_OVERLAY_WORDS >= 3);
+    connect(3); settle(); quiet();
+    unsigned passes[2] = {sweeps(0), sweeps(1)};
+    atomic_val_t saves = atomic_get(&gate_saves);
+    uint64_t epoch = ordering_status().repair_epoch;
+    arm_worker(0, RGB_CLOCK_CMD, 0); bounded_wait(&worker_accepted);
+    uint32_t original[2] = {kp_rgb_overlay_get_word(1), kp_rgb_overlay_get_word(2)};
+    for (size_t word = 1; word <= 2; word++) {
+        uint32_t untouched = kp_rgb_overlay_get_word(0);
+        uint32_t other = kp_rgb_overlay_get_word(word == 1 ? 2 : 1);
+        for (unsigned pass = 0; pass < 2; pass++) {
+            struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
+                .param1 = KP_RGB_OVERLAY_WORD_COMMAND(word),
+                .param2 = original[word - 1] ^ UINT32_C(0x80000001)};
+            struct kp_rgb_replication_status before = ordering_status();
+            CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
+                &binding, (struct zmk_behavior_binding_event){0}) == 0);
+            CHECK(binding.param1 == (KP_RGB_OVERLAY_WORD_COMMAND(word) | KP_RGB_INVOCATION_MARKER));
+            CHECK(KP_RGB_OVERLAY_COMMAND_WORD(binding.param1) == word);
+            CHECK(ordering_status().outstanding == before.outstanding + 1);
+            CHECK(ordering_status().generation == before.generation);
+            CHECK(ordering_callback(&binding, true) == 0);
+            CHECK(binding.param1 == KP_RGB_OVERLAY_WORD_COMMAND(word));
+            CHECK(kp_rgb_overlay_get_word(word) == binding.param2);
+            CHECK(kp_rgb_overlay_get_word(0) == untouched);
+            CHECK(kp_rgb_overlay_get_word(word == 1 ? 2 : 1) == other);
+            CHECK(ordering_status().outstanding == before.outstanding);
+            CHECK(ordering_status().generation == before.generation + (pass ? 1 : 2));
         }
-        CHECK(next == 0);
-        CHECK(members == (index ? DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_b)) :
-                                  DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a))));
-        CHECK(kp_rgb_selector_snapshot_locked(owner, &snapshot) == 0);
-        kp_rgb_matrix_unlock();
-        CHECK(value.phase == 0 && value.selected == snapshot.slot);
+        CHECK(kp_rgb_overlay_set_word(word, original[word - 1]));
     }
-}
-static void clock_offsets(void) {
-    int32_t offsets[] = {0, 1500, -2000};
-    for (size_t i = 0; i < ARRAY_SIZE(offsets); i++) {
-        kp_rgb_set_clock_offset(offsets[i]);
-        CHECK(kp_rgb_clock_ms() == (uint32_t)k_uptime_get() + (uint32_t)offsets[i]);
+    const size_t invalid[] = {KP_RGB_OVERLAY_WORDS, UINT16_MAX};
+    for (size_t i = 0; i < ARRAY_SIZE(invalid); i++) {
+        struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
+            .param1 = KP_RGB_OVERLAY_WORD_COMMAND(invalid[i]), .param2 = UINT32_MAX};
+        struct kp_rgb_replication_status before = ordering_status();
+        CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
+            &binding, (struct zmk_behavior_binding_event){0}) == -EINVAL);
+        CHECK(binding.param1 == KP_RGB_OVERLAY_WORD_COMMAND(invalid[i]));
+        binding.param1 |= KP_RGB_INVOCATION_MARKER;
+        CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
+            &binding, (struct zmk_behavior_binding_event){0}) == -ENOTSUP);
+        CHECK(ordering_status().outstanding == before.outstanding);
+        CHECK(ordering_status().generation == before.generation);
+        CHECK(ordering_status().repair_epoch == before.repair_epoch);
     }
-    uint32_t central[] = {123456, 10, UINT32_MAX - 15};
-    for (size_t i = 0; i < ARRAY_SIZE(central); i++) {
-        global_apply(RGB_CLOCK_CMD, central[i]);
-        CHECK(kp_rgb_clock_ms() == central[i]);
-        uint32_t before = (uint32_t)k_uptime_get();
-        k_sleep(K_MSEC(17));
-        CHECK(kp_rgb_clock_ms() == central[i] + (uint32_t)k_uptime_get() - before);
+    CHECK(kp_rgb_overlay_set_word(1, original[0] ^ UINT32_C(0x80000001)));
+    CHECK(kp_rgb_overlay_set_word(2, original[1] ^ UINT32_C(0x80000001)));
+    unsigned start = attempt_count;
+    kp_rgb_overlay_dispatch();
+    check_gate_dispatch(start, original[0] ^ UINT32_C(0x80000001), original[1] ^ UINT32_C(0x80000001));
+    start = attempt_count;
+    kp_rgb_overlay_dispatch(); CHECK(attempt_count == start);
+    gate_refresh_original[0] = original[0];
+    gate_refresh_original[1] = original[1];
+    k_sem_give(&worker_resume);
+    CHECK(k_work_submit_to_queue(kp_rgb_work_q(), &gate_refresh_item) >= 0);
+    bounded_wait(&gate_refresh_done);
+    CHECK(ordering_status().repair_epoch == epoch);
+    quiet();
+    CHECK(sweeps(0) == passes[0] && sweeps(1) == passes[1]);
+    CHECK(atomic_get(&gate_saves) == saves);
+
+    for (size_t word = 1; word <= 2; word++) {
+        struct zmk_behavior_binding binding = {.behavior_dev = DEV(rgb_matrix)->name,
+            .param1 = KP_RGB_OVERLAY_WORD_COMMAND(word), .param2 = 0};
+        struct kp_rgb_replication_status before = ordering_status();
+        CHECK(behavior_keymap_binding_convert_central_state_dependent_params(
+            &binding, (struct zmk_behavior_binding_event){0}) == 0);
+        CHECK(ordering_status().outstanding == 1);
+        binding.param1 = KP_RGB_OVERLAY_WORD_COMMAND(KP_RGB_OVERLAY_WORDS) | KP_RGB_INVOCATION_MARKER;
+        CHECK(ordering_callback(&binding, true) == -EINVAL);
+        CHECK(!(binding.param1 & KP_RGB_INVOCATION_MARKER));
+        CHECK(ordering_status().outstanding == 0);
+        CHECK(ordering_status().generation == before.generation + 1);
+        CHECK(ordering_status().repair_epoch == before.repair_epoch + 1);
+        settle(); check_remote(0); check_remote(1); check_order(); quiet();
+        CHECK(sweeps(0) == passes[0] + word && sweeps(1) == passes[1] + word);
     }
-    kp_rgb_set_clock_offset(0);
+    CHECK(atomic_get(&gate_saves) == saves);
+    global_apply(RGB_BRT_SET_CMD, 37);
+    k_sleep(K_MSEC(150));
+    CHECK(atomic_get(&gate_saves) == saves + 1);
 }
-static int control_framework(uint32_t command, uint32_t argument) {
-    struct zmk_behavior_binding binding = {.behavior_dev = DEV(selector_a)->name,
-        .param1 = command, .param2 = argument};
-    return zmk_behavior_invoke_binding(&binding, (struct zmk_behavior_binding_event){0}, true);
-}
-static int control_apply(uint32_t command, uint32_t argument) {
-    struct zmk_behavior_binding binding = {.behavior_dev = DEV(selector_a)->name,
-        .param1 = command, .param2 = argument};
-    return behavior_keymap_binding_pressed(&binding, (struct zmk_behavior_binding_event){0});
-}
-static int central_irq_result;
-static void central_irq(const void *unused) {
-    ARG_UNUSED(unused);
-    CHECK(k_is_in_isr());
-    central_irq_result = control_apply(RGB_EFS_CMD, A_SLOT(probe_c));
-}
-static void brightness_split(void) {
-    bool reset = !strcmp(split_case, "brightness-reset");
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 50);
-    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 25);
-    CHECK(kp_rgb_effect_data(DEV(probe_b))->color.b == 50);
-    CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 25);
-    const uint32_t old = RGB_COLOR_HSB_VAL(10, 100, 37);
-    parameters_hsb(DEV(selector_a), A_SLOT(probe_a), old, 1100);
-    parameters_hsb(DEV(selector_b), 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
-    if (reset) {
-        parameters_hsb(DEV(selector_a), A_SLOT(probe_c), RGB_COLOR_HSB_VAL(220, 70, 7), 2300);
-        parameters_hsb(DEV(selector_b), 1, RGB_COLOR_HSB_VAL(180, 60, 0), 2400);
+#endif
+
+static void multiword_case(void) {
+    CHECK(KP_RGB_OVERLAY_COUNT >= 65 && KP_RGB_OVERLAY_WORDS >= 3);
+    bool final = !strcmp(split_case, "multiword-final");
+    size_t target = final ? KP_RGB_OVERLAY_WORDS - 1 : 1;
+    kp_rgb_matrix_lock();
+    for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++) {
+        kp_rgb_overlay_set_word(word, UINT32_C(0x80000001));
+        CHECK(kp_rgb_overlay_get_word(word) == UINT32_C(0x80000001));
     }
-    mutate_kind = RGB_SELECTOR_COLOR_CMD;
-    mutate_action = reset ? 3 : 4;
-    failing(!reset);
-    connect(3);
-    k_sleep(K_MSEC(900));
-    CHECK(mutation_count == 1);
-    if (!reset) {
-        CHECK(lane(0, 0).completed == 0);
-        CHECK(lane(1, 0).completed && lane(0, 1).completed && lane(1, 1).completed);
-        unsigned failures = 0;
-        for (unsigned i = 0; i < attempt_count; i++) {
-            const struct attempt *r = &attempts[i];
-            if (r->accepted) continue;
-            CHECK(r->source == 0 && !strcmp(r->endpoint, DEV(selector_a)->name));
-            CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
-            CHECK(r->argument == old);
-            failures++;
-        }
-        CHECK(failures >= 3);
-        failing(false);
-    }
-    k_sleep(K_MSEC(2500));
-    uint32_t a_period = kp_rgb_effect_period(DEV(probe_a));
-    uint32_t c_period = kp_rgb_effect_period(DEV(probe_c));
-    const uint32_t commands[] = {
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD,
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), RGB_EFS_CMD};
-    const uint32_t reset_values[] = {old, 1100, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(120, 100, 50),
-        a_period, RGB_COLOR_HSB_VAL(240, 100, 25), c_period, A_SLOT(probe_a)};
-    const uint32_t latest_values[] = {old, 1100, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100, A_SLOT(probe_a)};
-    unsigned step = 0, expected = reset ? 8 : 6;
-    for (unsigned i = 0; i < attempt_count && step < expected; i++) {
+    kp_rgb_matrix_unlock();
+    worker_gate_fail = !final;
+    arm_worker(0, KP_RGB_OVERLAY_WORD_COMMAND(target), 0);
+    connect(3); bounded_wait(&worker_accepted);
+    CHECK(remote_value(0, DEV(rgb_matrix), KP_RGB_OVERLAY_WORD_COMMAND(0)) == UINT32_C(0x80000001));
+    struct kp_rgb_replication_status before = ordering_status();
+    kp_rgb_matrix_lock();
+    CHECK(kp_rgb_overlay_set_word(0, UINT32_C(0x12345678)));
+    CHECK(kp_rgb_overlay_set_word(target, UINT32_C(0xfedcba98)));
+    CHECK(kp_rgb_overlay_get_word(target) == UINT32_C(0xfedcba98));
+    kp_rgb_matrix_unlock();
+    CHECK(ordering_status().generation > before.generation);
+    CHECK(!ordering_complete(before.generation));
+    k_sem_give(&worker_resume);
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+    CHECK(sweeps(0) == 2);
+    int64_t success_at = -1;
+    bool retried = final;
+    for (unsigned i = 0; i < attempt_count; i++) {
         const struct attempt *r = &attempts[i];
-        if (!r->accepted || r->source || strcmp(r->endpoint, DEV(selector_a)->name)) continue;
-        uint32_t command = !reset && step == 5 ? RGB_EFS_CMD : commands[step];
-        CHECK(r->command == command);
-        CHECK(r->argument == (reset ? reset_values[step] : latest_values[step]));
-        step++;
-    }
-    CHECK(step == expected);
-    if (reset) {
-        check_all_members(0); check_all_members(1);
-        for (unsigned s = 0; s < 2; s++) {
-            struct lane a = lane(s, 0), b = lane(s, 1);
-            CHECK(a.member_color[A_SLOT(probe_a)] == RGB_COLOR_HSB_VAL(120, 100, 50));
-            CHECK(a.member_color[A_SLOT(probe_c)] == RGB_COLOR_HSB_VAL(240, 100, 25));
-            CHECK(b.member_color[0] == RGB_COLOR_HSB_VAL(60, 100, 50));
-            CHECK(b.member_color[1] == RGB_COLOR_HSB_VAL(180, 100, 25));
-            for (unsigned index = 0; index < 2; index++) {
-                const char *endpoint = index ? DEV(selector_b)->name : DEV(selector_a)->name;
-                unsigned count = 0;
-                for (unsigned i = 0; i < attempt_count; i++)
-                    if (attempts[i].accepted && attempts[i].source == s &&
-                        !strcmp(attempts[i].endpoint, endpoint)) count++;
-                CHECK(count >= 5);
-                unsigned seen = 0;
-                for (unsigned i = 0; i < attempt_count; i++) {
-                    const struct attempt *r = &attempts[i];
-                    if (!r->accepted || r->source != s || strcmp(r->endpoint, endpoint)) continue;
-                    if (seen++ < count - 5) continue;
-                    unsigned n = seen - (count - 5) - 1;
-                    unsigned slot = n / 2;
-                    uint32_t command = n == 4 ? RGB_EFS_CMD : KP_RGB_SELECTOR_MEMBER_COMMAND(
-                        n & 1 ? RGB_SELECTOR_PERIOD_CMD : RGB_SELECTOR_COLOR_CMD, slot);
-                    CHECK(r->command == command);
-                    if (n == 4) CHECK(r->argument == (index ? 0 : A_SLOT(probe_a)));
-                    else if (!(n & 1)) {
-                        uint32_t color = index ? (n == 0 ? RGB_COLOR_HSB_VAL(60, 100, 50) :
-                            RGB_COLOR_HSB_VAL(180, 100, 25)) : (n == 0 ? RGB_COLOR_HSB_VAL(120, 100, 50) :
-                            RGB_COLOR_HSB_VAL(240, 100, 25));
-                        CHECK(r->argument == color);
-                    } else {
-                        const struct device *member = index ? (n == 1 ? DEV(probe_b) : DEV(probe_d)) :
-                            (n == 1 ? DEV(probe_a) : DEV(probe_c));
-                        CHECK(r->argument == kp_rgb_effect_period(member));
-                    }
-                }
-            }
+        if (r->live || r->command == RGB_CLOCK_CMD) continue;
+        if (success_at >= 0) CHECK(r->time >= success_at + 50);
+        if (r->accepted) success_at = r->completion;
+        if (!final && i > worker_gated_index && r->source == 0 && !retried) {
+            CHECK(r->command == KP_RGB_OVERLAY_WORD_COMMAND(target));
+            CHECK(r->argument == UINT32_C(0xfedcba98));
+            CHECK(r->time >= attempts[worker_gated_index].completion + 1000);
+            retried = true;
         }
-    } else {
-        for (unsigned s = 0; s < 2; s++) {
-            matches_hsb(s, 0, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
-            matches_hsb(s, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
-        }
-        connect(2); k_sleep(K_MSEC(150));
-        k_mutex_lock(&records_lock, K_FOREVER);
-        memset(remote[0], 0, sizeof(remote[0]));
-        k_mutex_unlock(&records_lock);
-        connect(3); k_sleep(K_MSEC(1200));
-        matches_hsb(0, 0, A_SLOT(probe_a), RGB_COLOR_HSB_VAL(10, 100, 0), 1100);
-        matches_hsb(0, 1, 0, RGB_COLOR_HSB_VAL(20, 70, 63), 1200);
     }
-    printk("PASS split %s\n", split_case); exit(0);
+    CHECK(retried);
 }
-static void extended_split(void) {
-    if (!strncmp(split_case, "sweep-", 6)) {
-        unsigned phase = split_case[strlen(split_case) - 1] - '0';
-        CHECK(phase < (DT_NODE_EXISTS(DT_NODELABEL(probe_e)) ? 7 : 5));
-        connect(3); k_sleep(K_MSEC(1000));
+
+static void retry_case(void) {
+    fail_kind = strstr(split_case, "period") ? RGB_SELECTOR_PERIOD_CMD :
+                strstr(split_case, "selection") ? RGB_EFS_CMD : RGB_SELECTOR_COLOR_CMD;
+    send_duration = strstr(split_case, "pacing") ? 37 : 0;
+    arm_worker(0, KP_RGB_SELECTOR_MEMBER_COMMAND(fail_kind,
+        fail_kind == RGB_EFS_CMD ? 0 : A_SLOT(probe_a)), 0);
+    connect(3);
+    bounded_wait(&worker_accepted);
+    uint32_t latest = RGB_COLOR_HSB_VAL(217, 43, 0);
+    CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &(struct kp_rgb_hsb){.h=217, .s=43, .b=0}) == 0);
+    CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2345) == 0);
+    CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    k_sem_give(&worker_resume);
+    k_sleep(K_MSEC(4600));
+    check_remote(1);
+    CHECK(sweeps(1) <= 2);
+    k_mutex_lock(&records_lock, K_FOREVER);
+    unsigned failures = 0, clocks[2] = {0};
+    int64_t failed_at = -1, success_at = -1;
+    for (unsigned i = 0; i < attempt_count; i++) {
+        const struct attempt *r = &attempts[i];
+        if (r->live) continue;
+        if (r->command == RGB_CLOCK_CMD) { clocks[r->source]++; continue; }
+        CHECK(r->source != 0 || strcmp(r->endpoint, DEV(selector_b)->name));
+        if (success_at >= 0) CHECK(r->time >= success_at + 50);
+        if (r->accepted) success_at = r->completion;
+        if (!r->accepted) {
+            CHECK(r->source == 0);
+            if (failed_at >= 0) {
+                CHECK(r->time >= failed_at + 1000 && r->time < failed_at + 1250);
+                CHECK(r->argument == (fail_kind == RGB_SELECTOR_COLOR_CMD ? latest :
+                    fail_kind == RGB_SELECTOR_PERIOD_CMD ? 2345 : A_SLOT(probe_c)));
+            }
+            failed_at = r->completion; failures++;
+        }
+    }
+    CHECK(failures >= 5 && failures <= 6);
+    CHECK(clocks[0] >= 2 && clocks[1] >= 2);
+    fail_kind = 0;
+    k_mutex_unlock(&records_lock);
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+}
+static void clock_failure(void) {
+    fail_kind = RGB_CLOCK_CMD;
+    connect(3); settle(); check_remote(0); check_remote(1); check_order();
+    k_mutex_lock(&records_lock, K_FOREVER);
+    unsigned clocks[2] = {0};
+    int64_t previous[2] = {-1, -1};
+    for (unsigned i = 0; i < attempt_count; i++) {
+        const struct attempt *r = &attempts[i];
+        if (r->command != RGB_CLOCK_CMD) continue;
+        CHECK(r->accepted == (r->source == 1));
+        if (previous[r->source] >= 0)
+            CHECK(r->time >= previous[r->source] + CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS &&
+                  r->time < previous[r->source] + CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS + 250);
+        previous[r->source] = r->completion;
+        clocks[r->source]++;
+    }
+    CHECK(clocks[0] >= 4 && clocks[1] >= 4);
+    fail_kind = 0;
+    k_mutex_unlock(&records_lock);
+    quiet();
+}
+static void transport_case(void) {
+    connect(3); settle(); check_remote(0); check_remote(1); check_order();
+    if (!strcmp(split_case, "local-silence")) {
+        ordering_publications(); quiet();
+    } else if (!strcmp(split_case, "transport-change")) {
+        connect(0); k_sleep(K_MSEC(100));
+        unsigned before = state_count();
+        CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 2345) == 0);
+        k_mutex_lock(&records_lock, K_FOREVER); alternate_transport = true; k_mutex_unlock(&records_lock);
+        connect(3); k_sleep(K_MSEC(20)); CHECK(state_count() == before);
+        settle(); check_remote(0); check_remote(1);
+    } else if (!strcmp(split_case, "negative-query") || !strcmp(split_case, "no-transport")) {
         k_mutex_lock(&records_lock, K_FOREVER);
-        mutate_nth = phase + 1; mutate_seen = 0;
-        mutate_action = strstr(split_case, "reset") ? 2 : 1;
-        k_mutex_unlock(&records_lock);
-        apply(DEV(selector_a), RGB_RESET_CMD, 0);
-        k_sleep(K_MSEC(2200));
-        CHECK(mutation_count == 1);
-        check_all_members(0);
-        const struct attempt *frozen = &attempts[injected_index];
-        unsigned step = frozen->accepted ? 1 : 0;
-        for (unsigned i = injected_index + 1; i < attempt_count && step < 2; i++) {
-            const struct attempt *r = &attempts[i];
-            if (r->source || strcmp(r->endpoint, DEV(selector_a)->name)) continue;
-            if (step == 0) {
-                CHECK(r->command == frozen->command && r->argument == frozen->argument);
-                if (r->accepted) step++;
-            } else {
-                if ((frozen->command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_SELECTOR_COLOR_CMD) {
-                    CHECK(r->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, frozen->command >> 16));
-                    CHECK(r->argument == injected_period);
-                }
-                step++;
-            }
-        }
-        CHECK(step == 2);
-        CHECK(lane(0, 1).completed == 1 && lane(1, 1).completed == 1);
-    } else if (!strncmp(split_case, "global-reset-", 13)) {
-        mutate_kind = strstr(split_case, "period") ? RGB_SELECTOR_PERIOD_CMD :
-                      strstr(split_case, "selection") ? RGB_EFS_CMD : RGB_SELECTOR_COLOR_CMD;
-        mutate_action = 3;
-        connect(3); k_sleep(K_MSEC(2200));
-        CHECK(mutation_count == 1);
-        check_all_members(0); check_all_members(1);
-        unsigned step = 0;
-        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
-        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
-        for (unsigned i = 0; i < attempt_count && step < 3; i++) {
-            const struct attempt *r = &attempts[i];
-            if (r->source || strcmp(r->endpoint, DEV(selector_a)->name)) continue;
-            CHECK(r->command == commands[step] && r->argument == values[step]);
-            if (r->accepted) step++;
-        }
-        CHECK(step == 3);
-    } else if (!strcmp(split_case, "dirty-timing")) {
-        connect(3); k_sleep(K_MSEC(1200));
-        for (unsigned n = 0; n < 4; n++) {
-            unsigned before = attempt_count;
-            int64_t changed = k_uptime_get();
-            apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
-            k_sleep(K_MSEC(500));
-            unsigned packets = 0;
-            for (unsigned i = before; i < attempt_count; i++) {
-                const struct attempt *r = &attempts[i];
-                if (strcmp(r->endpoint, DEV(selector_a)->name)) continue;
-                if (packets == 0) CHECK(r->time >= changed && r->time < changed + CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS);
-                packets++;
-            }
-            CHECK(packets == 6);
-        }
-        CHECK(lane(0, 1).completed == 1 && lane(1, 1).completed == 1);
-    } else if (!strcmp(split_case, "identical") || !strcmp(split_case, "dirty-hook")) {
-        connect(3); k_sleep(K_MSEC(1000));
-        unsigned before[2] = {lane(0, 0).completed, lane(1, 0).completed};
-        unsigned b_before[2] = {lane(0, 1).completed, lane(1, 1).completed};
-        if (!strcmp(split_case, "dirty-hook")) {
-            kp_rgb_matrix_lock();
-            kp_rgb_split_selector_dirty_locked(NULL);
-            kp_rgb_split_selector_dirty_locked(DEV(private_white));
-            kp_rgb_split_selector_reset_locked(DEV(private_white));
-            kp_rgb_matrix_unlock();
-        } else {
-            const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
-            const uint32_t arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
-            for (unsigned n = 0; n < ARRAY_SIZE(commands); n++) {
-                CHECK(control_apply(commands[n], arguments[n]) == 0);
-                k_sleep(K_MSEC(500));
-                for (unsigned s = 0; s < 2; s++) {
-                    CHECK(lane(s, 0).completed == before[s] + 1);
-                    before[s]++;
-                    matches(s, 0, A_SLOT(probe_a), 10, 1100);
-                }
-            }
-            CHECK(control_apply(RGB_EFS_CMD, UINT32_MAX) == -EINVAL);
-            CHECK(control_apply(0x10a, 0) == -ENOTSUP);
-            irq_offload(central_irq, NULL);
-            CHECK(central_irq_result == -EWOULDBLOCK);
-        }
-        k_sleep(K_MSEC(1100));
-        for (unsigned s = 0; s < 2; s++) {
-            CHECK(lane(s, 0).completed == before[s]);
-            CHECK(lane(s, 1).completed == b_before[s]);
-        }
-    } else if (!strcmp(split_case, "no-transport") || !strcmp(split_case, "negative-query")) {
-        connect(3); k_sleep(K_MSEC(1100));
-        k_mutex_lock(&records_lock, K_FOREVER);
-        if (!strcmp(split_case, "no-transport")) no_transport = true;
-        else query_error = -EIO;
+        if (!strcmp(split_case, "negative-query")) query_error = -EIO;
+        else no_transport = true;
         k_mutex_unlock(&records_lock);
         if (no_transport) connect(3);
         k_sleep(K_MSEC(100));
-        if (no_transport) {
-            STRUCT_SECTION_FOREACH(zmk_split_transport_central, t) {
-                CHECK(t->api->get_status != NULL && !t->api->get_status().available);
-            }
-        }
-        unsigned clocks = clock_count[0] + clock_count[1], before = attempt_count;
-        k_sleep(K_MSEC(1200));
-        CHECK(clock_count[0] + clock_count[1] == clocks && attempt_count == before);
-        k_mutex_lock(&records_lock, K_FOREVER);
-        no_transport = false; query_error = 0;
-        unsigned completed = remote[0][0].completed;
-        k_mutex_unlock(&records_lock);
-        connect(3); k_sleep(K_MSEC(1100));
-        CHECK(lane(0, 0).completed > completed);
-        CHECK(clock_count[0] + clock_count[1] > clocks);
+        unsigned before = attempt_count;
+        k_sleep(K_MSEC(1200)); CHECK(attempt_count == before);
+        k_mutex_lock(&records_lock, K_FOREVER); no_transport = false; query_error = 0; k_mutex_unlock(&records_lock);
+        connect(3); settle(); check_remote(0); check_remote(1);
+        CHECK(attempt_count > before);
     } else if (!strcmp(split_case, "clock")) {
-        clock_offsets();
-        connect(3); k_sleep(K_MSEC(1400));
-        CHECK(clock_count[0] >= 2 && clock_count[1] >= 2);
+        unsigned counts[2] = {0};
+        for (unsigned i = 0; i < attempt_count; i++) if (attempts[i].command == RGB_CLOCK_CMD) {
+            CHECK((uint32_t)attempts[i].time - attempts[i].argument <= 1);
+            counts[attempts[i].source]++;
+        }
+        CHECK(counts[0] >= 2 && counts[1] >= 2);
         connect(0); k_sleep(K_MSEC(100));
-        unsigned before = clock_count[0] + clock_count[1];
-        k_sleep(K_MSEC(1100)); CHECK(clock_count[0] + clock_count[1] == before);
-    } else if (!strcmp(split_case, "local-silence")) {
-        connect(3); k_sleep(K_MSEC(1000));
-        unsigned before_a = lane(0, 0).completed, before_b = lane(0, 1).completed;
-        unsigned before_global = brightness_count[0] + power_count[0];
-        struct kp_rgb_hsb color = {.h = 234, .s = 55, .b = 100};
-        CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &color) == 0);
-        CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 1234) == 0);
-        CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-        CHECK(zmk_rgb_matrix_off() == 0);
-        k_sleep(K_MSEC(1200));
-        CHECK(lane(0, 0).completed == before_a && lane(0, 1).completed == before_b);
-        CHECK(brightness_count[0] + power_count[0] == before_global);
-        CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 234);
-        CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1234);
-    } else if (!strcmp(split_case, "transport-change")) {
-        failing(true); connect(3); k_sleep(K_MSEC(300));
-        CHECK(lane(0, 0).completed == 0);
-        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
-        parameters(DEV(selector_a), A_SLOT(probe_c), 220, 2220);
-        connect(0); k_sleep(K_MSEC(100));
-        k_mutex_lock(&records_lock, K_FOREVER);
-        memset(remote, 0, sizeof(remote));
-        alternate_transport = true; unsigned before = attempt_count;
-        k_mutex_unlock(&records_lock);
-        failing(false); connect(3);
-        k_sleep(K_MSEC(20)); CHECK(attempt_count == before);
-        k_sleep(K_MSEC(1000)); matches(0, 0, A_SLOT(probe_c), 220, 2220); matches(1, 0, A_SLOT(probe_c), 220, 2220);
-        for (unsigned i = before; i < attempt_count; i++) if (!strcmp(attempts[i].endpoint, DEV(selector_a)->name)) {
-            CHECK((attempts[i].command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_EFS_CMD ||
-                  attempts[i].command >> 16 == A_SLOT(probe_c));
-        }
-        query_error = -EIO; k_sleep(K_MSEC(100));
-        query_error = 0; k_sleep(K_MSEC(1000));
-        CHECK(lane(0, 0).completed >= 2 && lane(1, 0).completed >= 2);
-    } else if (!strcmp(split_case, "fairness")) {
-        connect(3);
-        for (unsigned i = 0; i < 30; i++) {
-            parameters(DEV(selector_a), A_SLOT(probe_a), 100 + i, 2000 + i);
-            k_sleep(K_MSEC(20));
-        }
-        k_sleep(K_MSEC(1000));
-        matches(0, 0, A_SLOT(probe_a), 129, 2029); matches(1, 0, A_SLOT(probe_a), 129, 2029);
-        CHECK(lane(0, 1).completed == 1 && lane(1, 1).completed == 1);
-        unsigned counts[2][2] = {0};
-        for (unsigned i = 0; i < attempt_count; i++) {
-            struct attempt *a = &attempts[i];
-            if (!strcmp(a->endpoint, DEV(selector_a)->name)) counts[a->source][0]++;
-            if (!strcmp(a->endpoint, DEV(selector_b)->name)) counts[a->source][1]++;
-        }
-        CHECK(counts[0][1] == 3 && counts[1][1] == 3);
-        CHECK(counts[0][0] >= 6 && counts[1][0] >= 6);
-    } else {
-        fail_kind = strstr(split_case, "period") ? RGB_SELECTOR_PERIOD_CMD :
-                    strstr(split_case, "selection") ? RGB_EFS_CMD : RGB_SELECTOR_COLOR_CMD;
-        bool reset = strstr(split_case, "reset") != NULL;
-        bool pacing = strstr(split_case, "pacing") != NULL;
-        mutate_kind = fail_kind; mutate_action = reset ? 2 : 1;
-        if (pacing) send_duration = 37;
-        failing(true); connect(3);
-        k_sleep(K_MSEC(pacing ? 6500 : 900));
-        CHECK(mutation_count == 1);
-        CHECK(lane(0, 0).completed == 0);
-        CHECK(lane(0, 1).completed && lane(1, 0).completed && lane(1, 1).completed);
-        k_mutex_lock(&records_lock, K_FOREVER);
-        unsigned failures = 0; struct attempt *previous = NULL;
-        const unsigned delays[] = {50, 100, 200, 400, 800, 1000};
-        for (unsigned i = 0; i < attempt_count; i++) {
-            struct attempt *record = &attempts[i];
-            if (record->source || strcmp(record->endpoint, DEV(selector_a)->name)) continue;
-            if (previous) {
-                unsigned delay = previous->accepted ? 50 : delays[MIN(failures - 1, 5)];
-                CHECK(record->time >= previous->completion + delay);
-            }
-            if (!record->accepted) {
-                CHECK((record->command & KP_RGB_SELECTOR_COMMAND_MASK) == fail_kind);
-                CHECK(record->argument == (fail_kind == RGB_SELECTOR_COLOR_CMD ?
-                      RGB_COLOR_HSB_VAL(10, 100, 100) : fail_kind == RGB_SELECTOR_PERIOD_CMD ? 1100 : A_SLOT(probe_a)));
-                failures++;
-            }
-            previous = record;
-        }
-        CHECK(failures >= (pacing ? 8 : 3));
-        k_mutex_unlock(&records_lock);
-        failing(false); k_sleep(K_MSEC(3500));
-        if (reset) check_all_members(0);
-        else { matches(0, 0, A_SLOT(probe_c), 299, 2999); matches(1, 0, A_SLOT(probe_c), 299, 2999); }
-        k_mutex_lock(&records_lock, K_FOREVER);
-        unsigned step = 0;
-        const uint32_t commands[] = {KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-            KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
-        const uint32_t values[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
-        for (unsigned i = 0; i < attempt_count && step < 3; i++) {
-            struct attempt *record = &attempts[i];
-            if (record->accepted && !record->source && !strcmp(record->endpoint, DEV(selector_a)->name)) {
-                CHECK(record->command == commands[step] && record->argument == values[step]); step++;
-            }
-        }
-        CHECK(step == 3);
-        k_mutex_unlock(&records_lock);
+        unsigned before = attempt_count;
+        k_sleep(K_MSEC(1100)); CHECK(attempt_count == before);
     }
-    printk("PASS split %s\n", split_case); exit(0);
-}
-
-static void snapshot_validation(void) {
-    struct kp_rgb_selector_snapshot snapshot = {0};
-    size_t cursor = 0;
-    kp_rgb_matrix_lock();
-    CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), NULL) == -EINVAL);
-    CHECK(kp_rgb_selector_snapshot_locked(NULL, &snapshot) == -ENODEV);
-    CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), NULL, &snapshot) == -EINVAL);
-    CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, NULL) == -EINVAL);
-    CHECK(kp_rgb_selector_next_snapshot_locked(NULL, &cursor, &snapshot) == -ENODEV);
-    kp_rgb_matrix_unlock();
+    quiet();
 }
 static void readiness(void) {
-    const struct device *late = DEV(rgb_matrix);
-    CHECK(!device_is_ready(late));
-    connect(3); k_sleep(K_MSEC(1300));
-    for (unsigned s = 0; s < 2; s++) {
-        CHECK(lane(s, 1).completed == 1);
-        CHECK(lane(s, 0).completed == 1);
-        CHECK(!clock_count[s] && !power_count[s] && !brightness_count[s] && !overlay_count[s]);
-    }
-    unsigned b_before[2] = {lane(0, 1).completed, lane(1, 1).completed};
-    CHECK(device_init(late) == 0 && device_is_ready(late));
-    k_sleep(K_MSEC(2300));
-    for (unsigned s = 0; s < 2; s++) {
-        CHECK(lane(s, 1).completed == b_before[s]);
-        CHECK(lane(s, 0).completed == 1);
-    }
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    printk("PASS split %s\n", split_case); exit(0);
+    CHECK(!device_is_ready(DEV(rgb_matrix)));
+    connect(3); k_sleep(K_MSEC(1300)); CHECK(attempt_count == 0);
+    CHECK(device_init(DEV(rgb_matrix)) == 0);
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
 }
 static void test_thread(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
-    for (unsigned i = 0; i < 100 &&
-         zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL; i++) k_sleep(K_MSEC(5));
+    for (unsigned i = 0; i < 100 && zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL; i++)
+        k_sleep(K_MSEC(5));
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
     k_sleep(K_MSEC(100));
-    snapshot_validation();
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
     if (ordering_case()) ordering_run();
-    if (!strcmp(split_case, "binding-forwarding")) {
-        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
-        connect(3);
-        kp_rgb_matrix_lock();
-        framework_before = kp_rgb_effect_data(DEV(probe_a))->color;
-        uint16_t expected_hue = (framework_before.h + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360;
-        framework_color = RGB_COLOR_HSB_VAL(expected_hue, framework_before.s, framework_before.b);
-        kp_rgb_matrix_unlock();
-        binding_thread = k_current_get();
-        framework_invoking = true;
-        CHECK(control_framework(RGB_HUI_CMD, 0) == 0);
-        framework_invoking = false;
-        CHECK(framework_destinations == (BIT(0) | BIT(1)));
-        kp_rgb_matrix_lock();
-        struct kp_rgb_hsb slot1_after = kp_rgb_effect_data(DEV(probe_a))->color;
-        CHECK(slot1_after.h == expected_hue && slot1_after.s == framework_before.s &&
-              slot1_after.b == framework_before.b);
-        kp_rgb_matrix_unlock();
-        apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
-        kp_rgb_matrix_lock();
-        struct kp_rgb_hsb slot2_before = kp_rgb_effect_data(DEV(probe_c))->color;
-        kp_rgb_matrix_unlock();
-        unsigned destinations_before_direct = framework_destinations;
-        CHECK(control_apply(RGB_HUD_CMD, 0) == 0);
-        kp_rgb_matrix_lock();
-        struct kp_rgb_hsb slot2_after = kp_rgb_effect_data(DEV(probe_c))->color;
-        struct kp_rgb_hsb slot1_final = kp_rgb_effect_data(DEV(probe_a))->color;
-        CHECK(slot2_after.h == (slot2_before.h + 360 - CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360);
-        CHECK(slot2_after.s == slot2_before.s && slot2_after.b == slot2_before.b);
-        CHECK(memcmp(&slot1_after, &slot1_final, sizeof(slot1_after)) == 0);
-        kp_rgb_matrix_unlock();
-        CHECK(framework_destinations == destinations_before_direct);
-        printk("PASS split %s\n", split_case); exit(0);
-    }
-    if (!strcmp(split_case, "late-global")) readiness();
-    if (!strncmp(split_case, "brightness-", 11)) brightness_split();
-    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
-    parameters(DEV(selector_a), A_SLOT(probe_a), 10, 1100);
-    apply(DEV(selector_b), RGB_EFS_CMD, 0);
-    parameters(DEV(selector_b), 0, 20, 1200);
-    if (strcmp(split_case, "existing")) { extended_split(); }
-    failing(true);
-    connect(3);
-    k_sleep(K_MSEC(800));
-    CHECK(lane(0, 0).completed == 0);
-    matches(0, 1, 0, 20, 1200);
-    matches(1, 0, A_SLOT(probe_a), 10, 1100);
-    matches(1, 1, 0, 20, 1200);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    for (unsigned s = 0; s < 2; s++) {
-        CHECK(power_count[s] && power[s] == RGB_OFF_CMD);
-        CHECK(brightness_count[s] && overlay_count[s]);
-    }
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split off/inhibited reconnect endpoints/qualified ordering\n");
-
-    unsigned previous = lane(1, 0).completed;
-    parameters(DEV(selector_a), A_SLOT(probe_a), 30, 1300);
-    parameters(DEV(selector_b), 0, 40, 1400);
-    k_sleep(K_MSEC(600));
-    CHECK(lane(1, 0).completed > previous);
-    matches(1, 0, A_SLOT(probe_a), 30, 1300);
-    matches(0, 1, 0, 40, 1400);
-    matches(1, 1, 0, 40, 1400);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    unsigned failed = 0;
-    int64_t last = -1;
-    for (unsigned i = 0; i < attempt_count; i++) {
-        struct attempt *record = &attempts[i];
-        if (record->accepted) continue;
-        CHECK(record->source == 0 && !strcmp(record->endpoint, DEV(selector_a)->name));
-        CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
-        CHECK(record->argument == RGB_COLOR_HSB_VAL(10, 100, 100));
-        CHECK(last < 0 || record->time - last >= 50);
-        last = record->time;
-        failed++;
-    }
-    CHECK(failed >= 4);
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split same-member parameter repair/independent lanes/frozen retries\n");
-
-    for (unsigned i = 0; i < 6; i++) {
-        apply(DEV(selector_a), RGB_EFS_CMD, (i & 1) ? A_SLOT(probe_a) : A_SLOT(probe_c));
-        parameters(DEV(selector_a), (i & 1) ? A_SLOT(probe_a) : A_SLOT(probe_c), 50 + i, 1500 + i);
-        k_sleep(K_MSEC(10));
-    }
-    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
-    parameters(DEV(selector_a), A_SLOT(probe_c), 60, 1600);
-    failing(false);
-    k_sleep(K_MSEC(1700));
-    matches(0, 0, A_SLOT(probe_c), 60, 1600);
-    matches(1, 0, A_SLOT(probe_c), 60, 1600);
-    /* The first accepted retry must still be the original frozen command. */
-    k_mutex_lock(&records_lock, K_FOREVER);
-    unsigned frozen_steps = 0;
-    const uint32_t frozen_commands[] = {
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)), RGB_EFS_CMD};
-    const uint32_t frozen_arguments[] = {RGB_COLOR_HSB_VAL(10, 100, 100), 1100, A_SLOT(probe_a)};
-    for (unsigned i = 0; i < attempt_count && frozen_steps < 3; i++) {
-        struct attempt *record = &attempts[i];
-        if (record->accepted && record->source == 0 &&
-            !strcmp(record->endpoint, DEV(selector_a)->name)) {
-            CHECK(record->command == frozen_commands[frozen_steps]);
-            CHECK(record->argument == frozen_arguments[frozen_steps]);
-            frozen_steps++;
-        }
-    }
-    CHECK(frozen_steps == 3);
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split rapid changes/retry convergence\n");
-
-    connect(2);
-    k_sleep(K_MSEC(150));
-    failing(true);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    unsigned blocked_start = attempt_count;
-    k_mutex_unlock(&records_lock);
-    connect(3);
-    k_sleep(K_MSEC(200));
-    k_mutex_lock(&records_lock, K_FOREVER);
-    unsigned blocked_failures = 0;
-    for (unsigned i = blocked_start; i < attempt_count; i++) {
-        if (!attempts[i].accepted) {
-            CHECK(attempts[i].command ==
-                KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)));
-            blocked_failures++;
-        }
-    }
-    CHECK(blocked_failures >= 2);
-    k_mutex_unlock(&records_lock);
-    connect(2);
-    k_sleep(K_MSEC(150));
-    k_mutex_lock(&records_lock, K_FOREVER);
-    memset(remote[0], 0, sizeof(remote[0]));
-    unsigned reconnect_start = attempt_count;
-    k_mutex_unlock(&records_lock);
-    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
-    parameters(DEV(selector_a), A_SLOT(probe_a), 70, 1700);
-    apply(DEV(selector_b), RGB_EFS_CMD, 1);
-    parameters(DEV(selector_b), 1, 80, 1800);
-    CHECK(zmk_rgb_matrix_on() == 0);
-    CHECK(zmk_rgb_matrix_is_inhibited());
-    failing(false);
-    connect(3);
-    k_sleep(K_MSEC(1500));
-    matches(0, 0, A_SLOT(probe_a), 70, 1700);
-    matches(0, 1, 1, 80, 1800);
-    matches(1, 0, A_SLOT(probe_a), 70, 1700);
-    matches(1, 1, 1, 80, 1800);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    CHECK(power[0] == RGB_ON_CMD);
-    for (unsigned i = reconnect_start; i < attempt_count; i++) {
-        struct attempt *record = &attempts[i];
-        if (record->source == 0 && !strcmp(record->endpoint, DEV(selector_a)->name) &&
-            (record->command & KP_RGB_SELECTOR_COMMAND_MASK) == RGB_SELECTOR_COLOR_CMD) {
-            CHECK(record->command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
-            CHECK(record->argument == RGB_COLOR_HSB_VAL(70, 100, 100));
-        }
-    }
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split disconnect/reconnect discards in-flight snapshot\n");
-
-    unsigned before = lane(0, 0).completed;
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD,
-        DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(selector_a))) == -EINVAL);
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 99) < 0);
-    CHECK(kp_rgb_selector_binding_apply(NULL, RGB_EFS_CMD, 1) == -ENODEV);
-    CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, 1), 0) == -EINVAL);
-    struct kp_rgb_selector_snapshot snapshot;
-    k_sleep(K_MSEC(300));
-    CHECK(lane(0, 0).completed == before);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    CHECK(query_count == attempt_count && query_count > 40);
-    unsigned total_calls = attempt_count;
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split outside-mutex transport/local errors\n");
-
-    k_mutex_lock(&records_lock, K_FOREVER);
-    unsigned reset_start = attempt_count;
-    k_mutex_unlock(&records_lock);
-    failing(true);
-    apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c));
-    parameters(DEV(selector_a), A_SLOT(probe_c), 211, 3211);
-    k_sleep(K_MSEC(200));
-    k_mutex_lock(&records_lock, K_FOREVER);
-    bool frozen_retry = false;
-    for (unsigned i = reset_start; i < attempt_count; i++) {
-        frozen_retry |= !attempts[i].accepted && attempts[i].source == 0 &&
-            attempts[i].command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c));
-    }
-    CHECK(frozen_retry);
-    k_mutex_unlock(&records_lock);
-    apply(DEV(selector_a), RGB_RESET_CMD, 0);
-    /* A normal revision must not erase the all-member reset obligation. */
-    parameters(DEV(selector_a), A_SLOT(probe_a), 131, 2131);
-    failing(false);
-    k_sleep(K_MSEC(2000));
-    for (unsigned source = 0; source < 2; source++) {
-        struct lane value = lane(source, 0);
-        size_t cursor = 0;
-        kp_rgb_matrix_lock();
-        while (kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot) > 0) {
-            CHECK(value.member_color[snapshot.slot] ==
-                  RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b));
-            CHECK(value.member_period[snapshot.slot] == snapshot.period_ms);
-        }
-        CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
-        kp_rgb_matrix_unlock();
-        CHECK(value.selected == snapshot.slot && value.phase == 0);
-    }
-    printk("PASS scoped split reset repairs inactive members after frozen retry\n");
-
-    CHECK(zmk_rgb_matrix_on() == 0);
-    k_mutex_lock(&records_lock, K_FOREVER);
-    global_race = true;
-    k_mutex_unlock(&records_lock);
-    global_apply(RGB_BRT_SET_CMD, 83);
-    k_sleep(K_MSEC(1000));
-    k_mutex_lock(&records_lock, K_FOREVER);
-    CHECK(!global_race);
-    for (unsigned source = 0; source < 2; source++) {
-        CHECK(power[source] == RGB_OFF_CMD && brightness[source] == 19);
-    }
-    k_mutex_unlock(&records_lock);
-    printk("PASS scoped split global behavior repairs frozen power/brightness\n");
-
-    global_apply(RGB_RESET_CMD, 0);
-    k_sleep(K_MSEC(1500));
-    for (unsigned index = 0; index < 2; index++) {
-        const struct device *owner = index ? DEV(selector_b) : DEV(selector_a);
-        for (unsigned source = 0; source < 2; source++) {
-            struct lane value = lane(source, index);
-            size_t cursor = 0;
-            kp_rgb_matrix_lock();
-            while (kp_rgb_selector_next_snapshot_locked(owner, &cursor, &snapshot) > 0) {
-                CHECK(value.member_color[snapshot.slot] ==
-                      RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b));
-                CHECK(value.member_period[snapshot.slot] == snapshot.period_ms);
-            }
-            CHECK(kp_rgb_selector_snapshot_locked(owner, &snapshot) == 0);
-            kp_rgb_matrix_unlock();
-            CHECK(value.selected == snapshot.slot && value.phase == 0);
-        }
-    }
-    printk("PASS scoped split global reset repairs all selectors/members\n");
-    printk("PASS scoped split transport acceptance only (%u calls)\n", total_calls);
-    exit(0);
+#if IS_ENABLED(CONFIG_SETTINGS_CUSTOM)
+    else if (!strcmp(split_case, "multiword-control")) multiword_control();
+#endif
+    else if (!strncmp(split_case, "multiword-", 10)) multiword_case();
+    else if (!strcmp(split_case, "late-global")) readiness();
+    else if (!strcmp(split_case, "clock-failure")) clock_failure();
+    else if (!strncmp(split_case, "retry-", 6) || !strncmp(split_case, "pacing-", 7)) retry_case();
+    else transport_case();
+    printk("PASS split %s\n", split_case); exit(0);
 }
-K_THREAD_DEFINE(split_tests, 2048, test_thread, NULL, NULL, NULL, 8, 0, 0);
+K_THREAD_DEFINE(split_tests, 4096, test_thread, NULL, NULL, NULL, 8, 0, 0);
 #endif
 #else
 #include <zmk/split/transport/peripheral.h>
@@ -1186,6 +791,33 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(receive(DEV(selector_a), high_slot | KP_RGB_INVOCATION_MARKER, 0) == -EINVAL);
     CHECK(receive(DEV(selector_a), 0x10a | KP_RGB_INVOCATION_MARKER, 0) == -ENOTSUP);
     CHECK(receive(DEV(rgb_matrix), 0x10a | KP_RGB_INVOCATION_MARKER, 0) == -ENOTSUP);
+    for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++) {
+        uint32_t command = KP_RGB_OVERLAY_WORD_COMMAND(word);
+        CHECK((command & 0xffffu) == RGB_OVL_STATE_CMD);
+        CHECK(!(command & KP_RGB_INVOCATION_MARKER));
+        CHECK(KP_RGB_OVERLAY_COMMAND_WORD(command | KP_RGB_INVOCATION_MARKER) == word);
+        CHECK(kp_rgb_invocation_command(command | KP_RGB_INVOCATION_MARKER) == command);
+        const uint32_t payloads[] = {0, UINT32_C(0x80000001), UINT32_MAX};
+        for (size_t p = 0; p < ARRAY_SIZE(payloads); p++) {
+            CHECK(receive(DEV(rgb_matrix), command | (p == 1 ? KP_RGB_INVOCATION_MARKER : 0),
+                          payloads[p]) == 0);
+            kp_rgb_matrix_lock();
+            CHECK(kp_rgb_overlay_get_word(word) == payloads[p]);
+            for (size_t previous = 0; previous < word; previous++)
+                CHECK(kp_rgb_overlay_get_word(previous) == UINT32_MAX);
+            kp_rgb_matrix_unlock();
+        }
+    }
+    const size_t invalid_words[] = {KP_RGB_OVERLAY_WORDS, UINT16_MAX};
+    for (size_t i = 0; i < ARRAY_SIZE(invalid_words); i++) {
+        for (unsigned marked = 0; marked < 2; marked++)
+            CHECK(receive(DEV(rgb_matrix), KP_RGB_OVERLAY_WORD_COMMAND(invalid_words[i]) |
+                          (marked ? KP_RGB_INVOCATION_MARKER : 0), 0) == -EINVAL);
+    }
+    kp_rgb_matrix_lock();
+    for (size_t word = 0; word < KP_RGB_OVERLAY_WORDS; word++)
+        CHECK(kp_rgb_overlay_get_word(word) == UINT32_MAX);
+    kp_rgb_matrix_unlock();
     kp_rgb_matrix_lock();
     struct kp_rgb_replication_status replication_after = kp_rgb_replication_status_locked();
     kp_rgb_matrix_unlock();

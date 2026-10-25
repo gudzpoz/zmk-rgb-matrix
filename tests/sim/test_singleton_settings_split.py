@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Selector-free native settings and two-word global split regressions."""
+"""Selector-free native settings and whole-mask global split regressions."""
 import argparse
 from pathlib import Path
 import tempfile
@@ -12,8 +12,11 @@ from native_protocol import SOLID_SELECTORS, CONF
 SINGLETON = SOLID_SELECTORS + '''
 &rgb_matrix { /delete-node/ selector_a; /delete-node/ selector_b; };
 '''
-MASKS = (0x1234, 0xabcd)
-MASK_SCENE = '''
+MASKS = (0xabcd1234, 0x80000001, 1)
+
+
+def mask_scene(count):
+    return '''
 &rgb_conditions { singleton_closed: singleton_closed { compatible = "keypaw,rgb-condition-latch"; }; };
 &ordinary { condition = <&singleton_closed>; };
 &rgb_matrix {
@@ -21,10 +24,14 @@ MASK_SCENE = '''
     singleton_mask_{index}: singleton_mask_{index} {{
         compatible = "keypaw,rgb-overlay";
         all-leds;
-        {"" if MASKS[index // 16] & (1 << (index % 16)) else "condition = <&singleton_closed>;"}
+        {"" if MASKS[index // 32] & (1 << (index % 32)) else "condition = <&singleton_closed>;"}
         mask_fx_{index} {{ compatible = "keypaw,rgb-matrix-solid"; }};
     }};
-''' for index in range(1, 32)) + "};\n"
+''' for index in range(1, count)) + "};\n"
+
+
+MASK_SCENE = mask_scene(32)
+MULTIWORD_SCENE = mask_scene(65)
 SINGLETON_CONF = CONF + "CONFIG_KEYPAW_SIM_SINGLETON_SPLIT_TEST=y\n"
 
 CONFIGS = {
@@ -33,15 +40,14 @@ CONFIGS = {
     "split": SINGLETON_CONF,
     "split-zero": SINGLETON_CONF,
     "split-unready": SINGLETON_CONF,
+    "split-multiword": SINGLETON_CONF,
+    "split-multiword-zero": SINGLETON_CONF,
 }
-PHASES = ("brightness", "power", "mask-0", "mask-1")
 SPLIT_SCENARIOS = (
-    "brightness", "power", "overlay", "overlay-1",
-    "race-brightness", "race-power", "race-overlay", "race-overlay-1",
-    *(f"revision-{phase}" for phase in (*PHASES, "complete")),
-    *(f"revision-failed-{phase}" for phase in PHASES),
-    *(f"frozen-{phase}" for phase in PHASES),
-    "query-error",
+    "brightness", "power", "overlay",
+    "race-brightness", "race-power", "race-gate", "race-final",
+    *(f"current-retry-{phase}" for phase in ("brightness", "power", "gate")),
+    "persistent-failure", "global-isolation", "query-error",
 )
 SCENARIOS = {
     "settings": ("existing", "validation", "rejection-current-first", "rejection-legacy-first",
@@ -51,6 +57,8 @@ SCENARIOS = {
     "split": SPLIT_SCENARIOS,
     "split-zero": SPLIT_SCENARIOS,
     "split-unready": ("unready",),
+    "split-multiword": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later"),
+    "split-multiword-zero": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later"),
 }
 
 
@@ -82,8 +90,8 @@ def main():
         fragment = '''/ { chosen { zephyr,bt-hci = &test_hci; };
             test_hci: bt_hci { compatible = "zephyr,bt-hci-userchan"; }; };''' if split else ""
         if split:
-            fragment += MASK_SCENE
-        if name == "split-zero":
+            fragment += MULTIWORD_SCENE if "multiword" in name else MASK_SCENE
+        if name.endswith("-zero"):
             fragment += '&rgb_matrix { /delete-property/ strip; mapping = <>; }; &ordinary { /delete-property/ leds; };'
         elif name == "split-unready":
             fragment += '''&rgb_matrix {

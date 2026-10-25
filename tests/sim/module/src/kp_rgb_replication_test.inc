@@ -2,24 +2,16 @@
  * SPDX-License-Identifier: MIT
  */
 static bool ordering_case(void) { return !strncmp(split_case, "ordering-", 9); }
-
 struct ordering_call {
-    struct k_sem start, accepted, resume, done;
+    struct k_sem accepted, resume, done;
     struct zmk_behavior_binding binding;
     k_tid_t tid;
-    bool pressed;
+    bool pressed, enqueue_error;
     int result;
     unsigned destinations;
+    uint32_t expected_color;
 };
 static struct ordering_call ordering_calls[2];
-static k_tid_t ordering_cursor_thread;
-static bool ordering_enqueue_error;
-static uint32_t ordering_remote[2];
-static uint32_t ordering_inactive_color[2], ordering_inactive_period[2];
-struct ordering_packet { uint32_t command, value; uint8_t source; };
-static struct ordering_packet ordering_fifo[64];
-static unsigned ordering_fifo_count;
-
 static struct kp_rgb_replication_status ordering_status(void) {
     kp_rgb_matrix_lock();
     struct kp_rgb_replication_status value = kp_rgb_replication_status_locked();
@@ -32,74 +24,58 @@ static bool ordering_complete(uint64_t generation) {
     kp_rgb_matrix_unlock();
     return result;
 }
-static void ordering_wait(struct k_sem *sem) {
-    CHECK(k_sem_take(sem, K_SECONDS(2)) == 0);
-}
-
-static int ordering_send(uint8_t source, struct zmk_split_transport_central_command cmd) {
+static void ordering_wait(struct k_sem *sem) { bounded_wait(sem); }
+static int ordering_live_send(uint8_t source, struct zmk_split_transport_central_command cmd) {
     struct ordering_call *call = NULL;
     for (unsigned i = 0; i < ARRAY_SIZE(ordering_calls); i++)
         if (ordering_calls[i].tid == k_current_get()) call = &ordering_calls[i];
-    /* Old repair lanes see no sources; unsolicited coordinator traffic is not the cursor. */
-    if (!call && k_current_get() != ordering_cursor_thread) return -ENOTCONN;
-    uint32_t wire = cmd.data.invoke_behavior.param1;
-    uint32_t command = kp_rgb_invocation_command(wire);
+    if (!call) return -ENOMSG;
+    CHECK(cmd.data.invoke_behavior.param1 & KP_RGB_INVOCATION_MARKER);
+    CHECK(kp_rgb_invocation_command(cmd.data.invoke_behavior.param1) ==
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
+    CHECK(cmd.data.invoke_behavior.param2 == call->expected_color);
+    CHECK(cmd.data.invoke_behavior.state == call->pressed);
+    CHECK(cmd.data.invoke_behavior.position == 0 && cmd.data.invoke_behavior.event_source == 0);
     CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(selector_a)->name));
-    if (call) {
-        CHECK(wire & KP_RGB_INVOCATION_MARKER);
-        CHECK(cmd.data.invoke_behavior.state == call->pressed);
-        call->destinations |= BIT(source);
-    } else {
-        CHECK(!(wire & KP_RGB_INVOCATION_MARKER));
+    call->destinations |= BIT(source);
+    unsigned index = record_packet(source, cmd, !call->enqueue_error && call->pressed, true);
+    if (source == 1) {
+        k_sem_give(&query_request); ordering_wait(&query_done);
+        k_sem_give(&call->accepted); ordering_wait(&call->resume);
     }
     k_mutex_lock(&records_lock, K_FOREVER);
-    CHECK(ordering_fifo_count < ARRAY_SIZE(ordering_fifo));
-    ordering_fifo[ordering_fifo_count++] = (struct ordering_packet){
-        .command = wire, .value = cmd.data.invoke_behavior.param2, .source = source};
-    if (!(call && ordering_enqueue_error) && cmd.data.invoke_behavior.state &&
-        command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)))
-        ordering_remote[source] = cmd.data.invoke_behavior.param2;
-    if (!(call && ordering_enqueue_error) && cmd.data.invoke_behavior.state) {
-        if (command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)))
-            ordering_inactive_color[source] = cmd.data.invoke_behavior.param2;
-        if (command == KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)))
-            ordering_inactive_period[source] = cmd.data.invoke_behavior.param2;
-    }
+    attempts[index].completion = k_uptime_get();
     k_mutex_unlock(&records_lock);
-    /* Pause after both destination enqueues, before pinned ZMK's local callback. */
-    if (call && source == 1) {
-        k_sem_give(&query_request);
-        ordering_wait(&query_done);
-        k_sem_give(&call->accepted);
-        ordering_wait(&call->resume);
-    }
-    return call && ordering_enqueue_error ? -EIO : 0;
+    return call->enqueue_error ? -EIO : 0;
 }
-
 static void ordering_invoker(void *arg, void *b, void *c) {
     ARG_UNUSED(b); ARG_UNUSED(c);
     struct ordering_call *call = arg;
-    ordering_wait(&call->start);
     call->tid = k_current_get();
     call->result = zmk_behavior_invoke_binding(&call->binding,
         (struct zmk_behavior_binding_event){0}, call->pressed);
+    call->tid = NULL;
     k_sem_give(&call->done);
 }
 K_THREAD_STACK_ARRAY_DEFINE(ordering_stacks, 2, 2048);
 static struct k_thread ordering_threads[2];
-
 static void ordering_start(unsigned index, uint32_t color, bool pressed) {
     struct ordering_call *call = &ordering_calls[index];
-    k_sem_init(&call->start, 0, 1); k_sem_init(&call->accepted, 0, 1);
-    k_sem_init(&call->resume, 0, 1); k_sem_init(&call->done, 0, 1);
+    k_sem_init(&call->accepted, 0, 1); k_sem_init(&call->resume, 0, 1);
+    k_sem_init(&call->done, 0, 1);
+    call->destinations = 0;
     call->binding = (struct zmk_behavior_binding){.behavior_dev = DEV(selector_a)->name,
         .param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
         .param2 = color};
+    call->expected_color = color;
+    if (!strcmp(split_case, "ordering-relative")) {
+        call->binding.param1 = RGB_HUI_CMD;
+        call->binding.param2 = 0;
+    }
     call->pressed = pressed;
     k_thread_create(&ordering_threads[index], ordering_stacks[index],
         K_THREAD_STACK_SIZEOF(ordering_stacks[index]), ordering_invoker, call, NULL, NULL,
         7, 0, K_NO_WAIT);
-    k_sem_give(&call->start);
     ordering_wait(&call->accepted);
     CHECK(call->destinations == (BIT(0) | BIT(1)));
 }
@@ -107,118 +83,86 @@ static void ordering_finish(unsigned index) {
     k_sem_give(&ordering_calls[index].resume);
     ordering_wait(&ordering_calls[index].done);
     CHECK(ordering_calls[index].result == 0);
+    CHECK(k_thread_join(&ordering_threads[index], K_SECONDS(1)) == 0);
 }
-static struct kp_rgb_selector_snapshot ordering_snapshot(void) {
-    struct kp_rgb_selector_snapshot snapshot;
+static uint32_t ordering_color(void) {
     kp_rgb_matrix_lock();
-    CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == 0);
+    struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(probe_a))->color;
     kp_rgb_matrix_unlock();
-    return snapshot;
-}
-static uint32_t ordering_color(struct kp_rgb_selector_snapshot snapshot) {
-    return RGB_COLOR_HSB_VAL(snapshot.color.h, snapshot.color.s, snapshot.color.b);
-}
-static void ordering_replay(struct kp_rgb_selector_snapshot snapshot) {
-    for (uint8_t source = 0; source < 2; source++)
-        for (uint8_t step = 0; step < 3; step++)
-            CHECK(kp_rgb_split_send_selector(source, &snapshot, step) == 0);
-}
-
-static struct kp_rgb_selector_snapshot ordering_inactive_snapshot(void) {
-    size_t cursor = 0;
-    struct kp_rgb_selector_snapshot snapshot;
-    kp_rgb_matrix_lock();
-    int next;
-    while ((next = kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot)) > 0)
-        if (snapshot.slot == A_SLOT(probe_c)) break;
-    CHECK(next > 0);
-    kp_rgb_matrix_unlock();
-    return snapshot;
+    return RGB_COLOR_HSB_VAL(color.h, color.s, color.b);
 }
 static void ordering_fifo_case(void) {
-    uint32_t live = RGB_COLOR_HSB_VAL(211, 73, 91);
+    uint32_t command = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a));
+    uint32_t old = ordering_color(), live = RGB_COLOR_HSB_VAL(211, 73, 91);
+    bool during = !strcmp(split_case, "ordering-during");
     bool release = !strcmp(split_case, "ordering-release");
     bool noop = !strcmp(split_case, "ordering-noop");
-    bool reset = !strcmp(split_case, "ordering-reset");
-    ordering_enqueue_error = !strcmp(split_case, "ordering-enqueue-error");
-    if (reset) {
-        CHECK(zmk_rgb_matrix_set_color(DEV(probe_c),
-            &(struct kp_rgb_hsb){.h = 17, .s = 23, .b = 41}) == 0);
-        CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 2345) == 0);
+    bool idle = release || noop || !strcmp(split_case, "ordering-enqueue-error") ||
+                !strcmp(split_case, "ordering-isolated") || !strcmp(split_case, "ordering-relative");
+    ordering_calls[0].enqueue_error = !strcmp(split_case, "ordering-enqueue-error");
+    if (noop) live = old;
+    if (!strcmp(split_case, "ordering-relative")) {
+        kp_rgb_matrix_lock();
+        struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(probe_a))->color;
+        kp_rgb_matrix_unlock();
+        live = RGB_COLOR_HSB_VAL((color.h + CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP) % 360, color.s, color.b);
     }
-    struct kp_rgb_selector_snapshot old = ordering_snapshot();
-    struct kp_rgb_selector_snapshot old_inactive = ordering_inactive_snapshot();
-    uint64_t generation = ordering_status().generation;
-    if (noop) live = ordering_color(old);
+    if (idle) { connect(3); settle(); quiet(); }
+    else if (!during) {
+        arm_worker(0, RGB_BRT_SET_CMD, 0); connect(3); ordering_wait(&worker_accepted);
+    }
+    struct kp_rgb_replication_status before = ordering_status();
+    unsigned count = state_count();
     ordering_start(0, live, !release);
-    struct kp_rgb_replication_status paused = ordering_status();
-    CHECK(paused.outstanding == 1 && paused.generation == generation);
-    if (!strcmp(split_case, "ordering-during")) generation = paused.generation;
-    CHECK(ordering_color(ordering_snapshot()) == ordering_color(old));
-    if (!release && !ordering_enqueue_error)
-        CHECK(ordering_remote[0] == live && ordering_remote[1] == live);
-    ordering_replay(old);
-    CHECK(ordering_fifo_count == 8);
-    CHECK(ordering_fifo[0].command & KP_RGB_INVOCATION_MARKER);
-    CHECK(ordering_fifo[1].command & KP_RGB_INVOCATION_MARKER);
-    CHECK(!(ordering_fifo[2].command & KP_RGB_INVOCATION_MARKER));
-    CHECK(ordering_fifo[2].value == ordering_color(old));
-    CHECK(ordering_remote[0] == ordering_color(old) && ordering_remote[1] == ordering_color(old));
-    CHECK(!ordering_complete(generation));
-    CHECK(!ordering_complete(paused.generation));
-    if (reset) {
-        global_apply(RGB_RESET_CMD, 0);
-        CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
-        CHECK(kp_rgb_effect_period(DEV(probe_c)) != 2345);
-        CHECK(ordering_status().generation > paused.generation);
-        CHECK(ordering_status().outstanding == 1);
-        ordering_replay(old_inactive);
-        CHECK(ordering_inactive_color[0] == ordering_color(old_inactive));
-        CHECK(ordering_inactive_period[1] == old_inactive.period_ms);
-        CHECK(!ordering_complete(paused.generation));
+    CHECK(ordering_status().outstanding == 1);
+    CHECK(ordering_status().generation == before.generation);
+    CHECK(ordering_color() == old);
+    CHECK(!ordering_complete(before.generation));
+    if (!idle) {
+        if (during) { arm_worker(0, command, 0); connect(3); }
+        else { arm_worker(0, command, 0); k_sem_give(&worker_resume); }
+        ordering_wait(&worker_accepted);
+        CHECK(attempts[worker_gated_index].argument == old);
+        CHECK(remote_value(0, DEV(selector_a), command) == old);
+        bool saw_live = false;
+        for (unsigned i = 0; i < worker_gated_index; i++)
+            saw_live |= attempts[i].live && attempts[i].source == 0 && attempts[i].argument == live;
+        CHECK(saw_live);
     }
     ordering_finish(0);
-    struct kp_rgb_replication_status finished = ordering_status();
-    CHECK(finished.outstanding == 0 && finished.generation > paused.generation);
-    if (noop) CHECK(finished.generation == paused.generation + 1);
-    CHECK(!ordering_complete(generation) && !ordering_complete(paused.generation));
-    struct kp_rgb_selector_snapshot fresh = ordering_snapshot();
-    CHECK(ordering_color(fresh) == ((release || noop) ? ordering_color(old) : live));
-    if (reset) {
-        struct kp_rgb_selector_snapshot inactive = ordering_inactive_snapshot();
-        ordering_replay(inactive);
-        for (unsigned source = 0; source < 2; source++) {
-            CHECK(ordering_inactive_color[source] == ordering_color(inactive));
-            CHECK(ordering_inactive_period[source] == inactive.period_ms);
-        }
-    }
-    ordering_replay(fresh);
-    CHECK(ordering_remote[0] == ordering_color(fresh) && ordering_remote[1] == ordering_color(fresh));
-    CHECK(ordering_complete(finished.generation));
+    struct kp_rgb_replication_status done = ordering_status();
+    CHECK(done.outstanding == 0 && done.generation > before.generation);
+    if (noop || release) CHECK(done.generation == before.generation + 1);
+    CHECK(done.repair_epoch == before.repair_epoch);
+    CHECK(!ordering_complete(before.generation));
+    CHECK(ordering_color() == (release ? old : live));
+    if (!idle) { k_sem_give(&worker_resume); settle(); check_remote(0); check_remote(1); check_order(); }
+    else { quiet(); CHECK(state_count() == count); }
+    quiet();
 }
-
 static void ordering_overlap(void) {
-    uint64_t before = ordering_status().generation;
+    bool active = strstr(split_case, "active") != NULL;
+    unsigned first = strstr(split_case, "reverse") ? 1 : 0;
+    if (active) { arm_worker(0, RGB_BRT_SET_CMD, 0); connect(3); ordering_wait(&worker_accepted); }
+    else { connect(3); settle(); quiet(); }
+    unsigned before_sweeps[2] = {sweeps(0), sweeps(1)};
+    struct kp_rgb_replication_status before = ordering_status();
     ordering_start(0, RGB_COLOR_HSB_VAL(111, 70, 90), true);
     ordering_start(1, RGB_COLOR_HSB_VAL(222, 80, 90), true);
-    struct kp_rgb_replication_status both = ordering_status();
-    CHECK(both.outstanding == 2 && both.generation == before);
-    CHECK(!ordering_complete(both.generation));
-    unsigned first = !strcmp(split_case, "ordering-overlap-reverse") ? 1 : 0;
+    CHECK(ordering_status().outstanding == 2);
+    CHECK(ordering_status().generation == before.generation);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch);
     ordering_finish(first);
-    struct kp_rgb_replication_status one = ordering_status();
-    CHECK(one.outstanding == 1 && one.generation > both.generation);
-    CHECK(!ordering_complete(one.generation));
-    ordering_replay(ordering_snapshot());
-    CHECK(!ordering_complete(one.generation));
+    CHECK(ordering_status().outstanding == 1);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch);
+    CHECK(!ordering_complete(ordering_status().generation));
     ordering_finish(1 - first);
-    struct kp_rgb_replication_status done = ordering_status();
-    CHECK(done.outstanding == 0 && done.generation > one.generation);
-    CHECK(!ordering_complete(both.generation) && !ordering_complete(one.generation));
-    struct kp_rgb_selector_snapshot fresh = ordering_snapshot();
-    ordering_replay(fresh);
-    CHECK(ordering_remote[0] == ordering_color(fresh) && ordering_remote[1] == ordering_color(fresh));
-    CHECK(ordering_complete(done.generation));
+    CHECK(ordering_status().outstanding == 0);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch + 1);
+    if (active) k_sem_give(&worker_resume);
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+    for (unsigned s = 0; s < 2; s++)
+        CHECK(sweeps(s) == before_sweeps[s] + 1);
 }
 
 static void ordering_defaults(void) {
@@ -278,8 +222,9 @@ static void ordering_cleanup(void) {
             CHECK(ordering_callback(&direct, true) == 0);
             CHECK(ordering_callback(&direct, false) == 0);
             CHECK(ordering_status().outstanding == before.outstanding + 1);
-            struct kp_rgb_selector_snapshot snapshot = ordering_snapshot();
-            kp_rgb_selector_snapshot_binding(&snapshot, 0, &direct);
+            direct = (struct zmk_behavior_binding){.behavior_dev = DEV(selector_a)->name,
+                .param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+                .param2 = ordering_color()};
             CHECK(!(direct.param1 & KP_RGB_INVOCATION_MARKER));
             CHECK(ordering_callback(&direct, true) == 0);
             CHECK(ordering_status().outstanding == before.outstanding + 1);
@@ -297,6 +242,7 @@ static void ordering_cleanup(void) {
             CHECK(!(binding.param1 & KP_RGB_INVOCATION_MARKER));
             CHECK(ordering_status().outstanding == before.outstanding);
             CHECK(ordering_status().generation > pending);
+            CHECK(ordering_status().repair_epoch == before.repair_epoch + (mode >= 2 ? 1 : 0));
         }
         struct zmk_behavior_binding invalid = {.behavior_dev = endpoint->name,
             .param1 = 0x10a, .param2 = 0};
@@ -316,10 +262,9 @@ static void ordering_cleanup(void) {
             CHECK(ordering_status().generation == before.generation);
         }
     }
-    struct kp_rgb_selector_snapshot high = {.control = DEV(selector_a), .slot = UINT16_MAX,
-        .color = {.h = 1, .s = 2, .b = 3}, .period_ms = 1234};
-    struct zmk_behavior_binding encoded;
-    kp_rgb_selector_snapshot_binding(&high, 0, &encoded);
+    struct zmk_behavior_binding encoded = {.behavior_dev = DEV(selector_a)->name,
+        .param1 = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, UINT16_MAX),
+        .param2 = RGB_COLOR_HSB_VAL(1, 2, 3)};
     uint32_t wire = encoded.param1 | KP_RGB_INVOCATION_MARKER;
     CHECK((kp_rgb_invocation_command(wire) >> 16) == UINT16_MAX);
     CHECK(kp_rgb_invocation_command(wire) == encoded.param1);
@@ -347,6 +292,7 @@ static void ordering_cleanup(void) {
     operation; \
     struct kp_rgb_replication_status after = kp_rgb_replication_status_locked(); \
     CHECK(after.outstanding == prior.outstanding); \
+    CHECK(after.repair_epoch == prior.repair_epoch); \
     CHECK((changed) ? after.generation > prior.generation : after.generation == prior.generation); \
     kp_rgb_matrix_unlock(); \
 } while (0)
@@ -375,10 +321,12 @@ static void ordering_publications(void) {
     ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_color(DEV(private_white), &private_color) == 0), false);
     ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_period(DEV(private_white), 2345) == 0), false);
     kp_rgb_matrix_lock();
-    uint16_t word = kp_rgb_overlay_get_word(0);
-    ORDERING_PUBLICATION(CHECK(kp_rgb_overlay_set_word(0, word ^ 1)), true);
-    ORDERING_PUBLICATION(CHECK(!kp_rgb_overlay_set_word(0, word ^ 1)), false);
-    ORDERING_PUBLICATION(CHECK(kp_rgb_overlay_set_word(0, word)), true);
+    for (size_t index = 0; index < KP_RGB_OVERLAY_WORDS; index++) {
+        uint32_t word = kp_rgb_overlay_get_word(index);
+        ORDERING_PUBLICATION(CHECK(kp_rgb_overlay_set_word(index, word ^ 1)), true);
+        ORDERING_PUBLICATION(CHECK(!kp_rgb_overlay_set_word(index, word ^ 1)), false);
+        ORDERING_PUBLICATION(CHECK(kp_rgb_overlay_set_word(index, word)), true);
+    }
     kp_rgb_matrix_unlock();
 }
 #undef ORDERING_PUBLICATION
@@ -392,6 +340,166 @@ static K_WORK_DEFINE(ordering_barrier_item, ordering_barrier_work);
 static void ordering_barrier(void) {
     CHECK(k_work_submit_to_queue(kp_rgb_work_q(), &ordering_barrier_item) >= 0);
     ordering_wait(&ordering_barrier_done);
+}
+
+static void ordering_exception(void) {
+    struct kp_rgb_replication_status before = ordering_status();
+    struct zmk_behavior_binding a = {.behavior_dev = DEV(selector_a)->name,
+        .param1 = RGB_EFS_CMD, .param2 = A_SLOT(probe_a)};
+    struct zmk_behavior_binding b = {.behavior_dev = DEV(rgb_matrix)->name,
+        .param1 = RGB_BRT_SET_CMD, .param2 = 37};
+    CHECK(behavior_keymap_binding_convert_central_state_dependent_params(&a,
+        (struct zmk_behavior_binding_event){0}) == 0);
+    CHECK(behavior_keymap_binding_convert_central_state_dependent_params(&b,
+        (struct zmk_behavior_binding_event){0}) == 0);
+    CHECK(ordering_status().outstanding == 2);
+    a.param2 = UINT32_MAX; b.param2 = UINT32_MAX;
+    CHECK(ordering_callback(&a, true) < 0);
+    CHECK(ordering_status().outstanding == 1);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch);
+    CHECK(ordering_callback(&b, true) < 0);
+    CHECK(ordering_status().outstanding == 0);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch + 1);
+    kp_rgb_invocation_finish(&a, -EINVAL);
+    CHECK(ordering_status().outstanding == 0);
+    CHECK(ordering_status().repair_epoch == before.repair_epoch + 1);
+}
+static void ordering_requests(void) {
+    bool settling = strstr(split_case, "settling") != NULL;
+    bool disconnected = strstr(split_case, "disconnect") != NULL;
+    bool completion = strstr(split_case, "completion") != NULL;
+    bool exit_case = strstr(split_case, "exit") != NULL;
+    if (settling) {
+        connect(3); ordering_exception();
+    } else if (disconnected) {
+        connect(3); settle(); check_order();
+        arm_worker(0, RGB_BRT_SET_CMD, 0); ordering_exception();
+        ordering_wait(&worker_accepted);
+        connect(0); k_sem_give(&worker_resume); ordering_barrier();
+        k_sleep(K_MSEC(100));
+        order_floor = attempt_count;
+        ordering_exception(); quiet(); connect(3);
+    } else {
+        connect(3); settle(); quiet();
+        arm_worker(completion ? 1 : 0, completion ? RGB_EFS_CMD : RGB_BRT_SET_CMD,
+                   completion ? kp_rgb_selector_registry_count() - 1 : 0);
+        ordering_exception();
+        ordering_wait(&worker_accepted);
+        uint64_t epoch = ordering_status().repair_epoch;
+        if (exit_case) { k_sem_give(&worker_resume); ordering_barrier(); }
+        CHECK(zmk_rgb_matrix_set_color(DEV(probe_c), &(struct kp_rgb_hsb){.h=97, .s=63, .b=37}) == 0);
+        CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 3456) == 0);
+        ordering_exception();
+        CHECK(ordering_status().repair_epoch == epoch + 1);
+        /* A new successful reservation must survive completion of the older pass. */
+        ordering_start(0, RGB_COLOR_HSB_VAL(79, 83, 51), true);
+        CHECK(ordering_status().outstanding == 1);
+        if (!exit_case) k_sem_give(&worker_resume);
+        ordering_barrier();
+        CHECK(ordering_status().outstanding == 1);
+        ordering_finish(0);
+    }
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+}
+static void ordering_silence(void) {
+    connect(3); settle(); quiet();
+    unsigned before = state_count();
+    uint64_t epoch = ordering_status().repair_epoch;
+    ordering_publications();
+    for (unsigned global = 0; global < 2; global++) {
+        struct zmk_behavior_binding binding = {.behavior_dev = global ? DEV(rgb_matrix)->name : DEV(selector_a)->name,
+            .param1 = 0x10a};
+        CHECK(behavior_keymap_binding_convert_central_state_dependent_params(&binding,
+            (struct zmk_behavior_binding_event){0}) < 0);
+        CHECK(ordering_callback(&binding, true) < 0);
+        CHECK(ordering_status().outstanding == 0);
+        binding.param1 = global ? RGB_BRT_SET_CMD : RGB_EFS_CMD;
+        binding.param2 = UINT32_MAX;
+        CHECK(ordering_callback(&binding, true) < 0);
+        irq_offload(ordering_irq, &binding);
+        CHECK(ordering_irq_result == -EWOULDBLOCK);
+    }
+    CHECK(ordering_status().repair_epoch == epoch);
+    quiet(); CHECK(state_count() == before);
+}
+static void ordering_failure(void) {
+    connect(3); settle(); quiet();
+    unsigned before[2] = {sweeps(0), sweeps(1)};
+    uint64_t epoch = ordering_status().repair_epoch;
+    struct zmk_behavior_binding binding = {.behavior_dev = DEV(selector_a)->name,
+        .param1 = RGB_EFS_CMD, .param2 = A_SLOT(probe_a)};
+    CHECK(behavior_keymap_binding_convert_central_state_dependent_params(&binding,
+        (struct zmk_behavior_binding_event){0}) == 0);
+    binding.param2 = UINT32_MAX;
+    if (!strcmp(split_case, "ordering-isr-failure")) {
+        irq_offload(ordering_irq, &binding);
+        CHECK(ordering_irq_result == -EWOULDBLOCK);
+    } else CHECK(ordering_callback(&binding, true) == -EINVAL);
+    CHECK(ordering_status().outstanding == 0 && ordering_status().repair_epoch == epoch + 1);
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+    CHECK(sweeps(0) == before[0] + 1 && sweeps(1) == before[1] + 1);
+}
+static void ordering_parameters(unsigned base) {
+    kp_rgb_matrix_lock();
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+        const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+        for (size_t slot = 0; slot < selector->effect_count; slot++) {
+            const struct device *effect = kp_rgb_selector_at(selector, slot);
+            if (!effect) continue;
+            struct kp_rgb_hsb color = {.h = (base + i * 31 + slot * 7) % 360,
+                .s = 43, .b = effect == DEV(probe_c) && base == 217 ? 0 : 37};
+            CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+            CHECK(zmk_rgb_matrix_set_period(effect, 1100 + base * 10 + i * 100 + slot) == 0);
+        }
+    }
+    kp_rgb_matrix_unlock();
+}
+static void ordering_sweep(void) {
+    unsigned phase = split_case[strlen(split_case) - 1] - '0';
+    const uint32_t commands[] = {RGB_BRT_SET_CMD, RGB_OFF_CMD, KP_RGB_OVERLAY_WORD_COMMAND(0),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_a)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), RGB_EFS_CMD,
+#if DT_NODE_EXISTS(DT_NODELABEL(probe_e))
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_e)),
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_e)),
+#endif
+    };
+    CHECK(phase < ARRAY_SIZE(commands));
+    ordering_parameters(17);
+    worker_gate_fail = strstr(split_case, "failed") != NULL;
+    arm_worker(0, commands[phase], 0); connect(3); ordering_wait(&worker_accepted);
+    uint64_t generation = ordering_status().generation;
+    if (strstr(split_case, "reset")) global_apply(RGB_RESET_CMD, 0);
+    else {
+        ordering_parameters(217);
+        CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+        global_apply(RGB_BRT_SET_CMD, 37);
+    }
+    CHECK(ordering_status().generation > generation);
+    k_sem_give(&worker_resume);
+    settle(); check_remote(0); check_remote(1); check_order();
+    const struct attempt *gated = &attempts[worker_gated_index];
+    if (!gated->accepted) {
+        const struct device *endpoint = device_get_binding(gated->endpoint);
+        CHECK(endpoint != NULL);
+        bool retried = false;
+        for (unsigned i = worker_gated_index + 1; i < attempt_count; i++) {
+            const struct attempt *retry = &attempts[i];
+            if (retry->source || retry->live || retry->command == RGB_CLOCK_CMD) continue;
+            uint32_t expected_command = phase == 1 ?
+                (kp_rgb_global.user_on ? RGB_ON_CMD : RGB_OFF_CMD) : gated->command;
+            CHECK(retry->command == expected_command);
+            CHECK(!strcmp(retry->endpoint, gated->endpoint));
+            CHECK(retry->time >= gated->completion + 1000);
+            CHECK(retry->argument == (phase == 1 ? 0 : remote_value(0, endpoint, expected_command)));
+            retried = true;
+            break;
+        }
+        CHECK(retried);
+    }
+    quiet();
 }
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ordering_local))
@@ -417,7 +525,7 @@ static void ordering_gates(void) {
         kp_rgb_matrix_lock();
         const struct kp_rgb_overlay_common_data *local = DEV(ordinary)->data;
         CHECK(local->local);
-        uint16_t word = kp_rgb_overlay_get_word(0);
+        uint32_t word = kp_rgb_overlay_get_word(0);
         uint64_t before = kp_rgb_replication_status_locked().generation;
         CHECK(zmk_rgb_selector_select(DEV(selector_b), enabled ? DEV(probe_d) : DEV(probe_b)) == 0);
         struct kp_rgb_replication_status selected = kp_rgb_replication_status_locked();
@@ -432,7 +540,7 @@ static void ordering_gates(void) {
     for (unsigned pass = 0; pass < 2; pass++) {
         bool enabled = pass != 0;
         kp_rgb_matrix_lock();
-        uint16_t word = kp_rgb_overlay_get_word(0);
+        uint32_t word = kp_rgb_overlay_get_word(0);
         CHECK(zmk_rgb_selector_select(DEV(preview_selector), enabled ? DEV(fx_solid) : DEV(fx_breathe)) == 0);
         struct kp_rgb_replication_status selected = kp_rgb_replication_status_locked();
         kp_rgb_matrix_unlock();
@@ -447,7 +555,21 @@ static void ordering_gates(void) {
     struct kp_rgb_replication_status settled = ordering_status();
     ordering_barrier();
     CHECK(ordering_status().generation == settled.generation);
-    CHECK(ordering_status().outstanding == 0 && ordering_fifo_count == 0);
+    CHECK(ordering_status().outstanding == 0 && state_count() == 0);
+}
+static void ordering_gates_repair(void) {
+    ordering_gates();
+    connect(3); settle(); check_remote(0); check_remote(1); quiet();
+    unsigned before[2] = {sweeps(0), sweeps(1)};
+    uint64_t epoch = ordering_status().repair_epoch;
+    CHECK(zmk_rgb_selector_select(DEV(preview_selector), DEV(fx_breathe)) == 0);
+    ordering_wait_gate(DEV(selector_a), false);
+    CHECK(ordering_status().repair_epoch == epoch);
+    quiet();
+    CHECK(sweeps(0) == before[0] && sweeps(1) == before[1]);
+    ordering_exception();
+    settle(); check_remote(0); check_remote(1); check_order(); quiet();
+    CHECK(sweeps(0) == before[0] + 1 && sweeps(1) == before[1] + 1);
 }
 #endif
 
@@ -456,13 +578,17 @@ static void ordering_gates(void) {
 #include "rgb_persist_internal.h"
 
 static void ordering_settings(void) {
+    bool active = !strcmp(split_case, "ordering-settings-active");
+    if (active) { arm_worker(0, RGB_BRT_SET_CMD, 0); connect(3); ordering_wait(&worker_accepted); }
+    else { connect(3); settle(); quiet(); }
+    unsigned packets_before = state_count();
     const struct device *effects[] = {DEV(probe_a), DEV(probe_c)};
     struct kp_rgb_hsb color = {.h = 217, .s = 43, .b = 61};
     for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
         CHECK(zmk_rgb_matrix_set_color(effects[i], &color) == 0);
         CHECK(zmk_rgb_matrix_set_period(effects[i], 2345) == 0);
     }
-    ordering_barrier();
+    if (!active) ordering_barrier();
     kp_rgb_matrix_lock();
     size_t count = kp_rgb_selector_registry_count();
     CHECK(count <= KP_RGB_OVERLAY_COUNT && count <= UINT16_MAX);
@@ -490,6 +616,7 @@ static void ordering_settings(void) {
         size_t previous_selection = kp_rgb_selector_registry_at(target)->effect_index;
         CHECK(settings_runtime_set(KP_RGB_PERSIST_KEY, bytes, len) == 0);
         CHECK(kp_rgb_replication_status_locked().generation == before.generation);
+        CHECK(kp_rgb_replication_status_locked().repair_epoch == before.repair_epoch);
         CHECK(kp_rgb_replication_status_locked().outstanding == 0);
         CHECK(kp_rgb_global.user_on == previous_on);
         CHECK(kp_rgb_global.brightness == previous_brightness);
@@ -500,6 +627,7 @@ static void ordering_settings(void) {
         CHECK(pass ? committed.generation > before.generation :
                      committed.generation == before.generation);
         CHECK(committed.outstanding == 0);
+        CHECK(committed.repair_epoch == before.repair_epoch);
         CHECK(kp_rgb_global.user_on == state.user_on && kp_rgb_global.brightness == state.brightness);
         for (size_t i = 0; i < count; i++)
             CHECK(kp_rgb_selector_registry_at(i)->effect_index == slots[i]);
@@ -516,24 +644,32 @@ static void ordering_settings(void) {
         CHECK(kp_rgb_replication_status_locked().outstanding == 0);
     }
     kp_rgb_matrix_unlock();
-    ordering_barrier();
+    if (active) {
+        k_sem_give(&worker_resume); settle(); check_remote(0); check_remote(1); check_order();
+    } else {
+        ordering_barrier();
+        quiet(); CHECK(state_count() == packets_before);
+    }
     CHECK(ordering_status().outstanding == 0);
-    CHECK(ordering_fifo_count == 0);
 }
 #endif
 static void ordering_run(void) {
-    ordering_cursor_thread = k_current_get();
     CHECK(ordering_status().outstanding == 0);
     if (!strcmp(split_case, "ordering-publications")) ordering_publications();
     else if (!strcmp(split_case, "ordering-defaults")) ordering_defaults();
 #if DT_NODE_EXISTS(DT_NODELABEL(ordering_local))
     else if (!strcmp(split_case, "ordering-gates")) ordering_gates();
+    else if (!strcmp(split_case, "ordering-gates-repair")) ordering_gates_repair();
 #endif
 #if IS_ENABLED(CONFIG_SETTINGS_RUNTIME)
-    else if (!strcmp(split_case, "ordering-settings")) ordering_settings();
+    else if (!strncmp(split_case, "ordering-settings", 17)) ordering_settings();
 #endif
     else if (!strcmp(split_case, "ordering-cleanup")) ordering_cleanup();
     else if (!strncmp(split_case, "ordering-overlap-", 17)) ordering_overlap();
+    else if (!strncmp(split_case, "ordering-request-", 17)) ordering_requests();
+    else if (!strncmp(split_case, "ordering-sweep-", 15)) ordering_sweep();
+    else if (!strcmp(split_case, "ordering-failure") || !strcmp(split_case, "ordering-isr-failure")) ordering_failure();
+    else if (!strcmp(split_case, "ordering-silence")) ordering_silence();
     else ordering_fifo_case();
     CHECK(ordering_status().outstanding == 0);
     printk("PASS split %s\n", split_case);
