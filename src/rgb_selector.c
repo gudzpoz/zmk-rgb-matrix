@@ -16,8 +16,7 @@ const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot) {
   if (slot >= selector->effect_count)
     return NULL;
-  const struct device *effect = selector->members[slot].effect;
-  return effect != NULL && device_is_ready(effect) ? effect : NULL;
+  return selector->members[slot].effect;
 }
 
 const struct device *
@@ -29,20 +28,8 @@ uint16_t kp_rgb_selector_calc_index(const struct kp_rgb_selector *selector,
                                     uint16_t current, int16_t delta) {
   size_t count = selector->effect_count;
   int64_t norm_delta = delta % (int64_t)count;
-  size_t start =
-      ((int64_t)current + norm_delta + (int64_t)count) % (int64_t)count;
-  if (kp_rgb_selector_at(selector, start) != NULL) {
-    return (uint16_t)start;
-  }
-  int direction = delta < 0 ? -1 : 1;
-  for (size_t i = 1; i < count; i++) {
-    size_t slot = ((int64_t)start + (int64_t)i * direction + (int64_t)count) %
-                  (int64_t)count;
-    if (kp_rgb_selector_at(selector, slot) != NULL) {
-      return (uint16_t)slot;
-    }
-  }
-  return current;
+  return (uint16_t)(((int64_t)current + norm_delta + (int64_t)count) %
+                    (int64_t)count);
 }
 
 int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector,
@@ -51,18 +38,14 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector,
   if (requested_slot >= selector->effect_count) {
     requested_slot = 0;
   }
-  size_t slot = kp_rgb_selector_calc_index(selector, requested_slot, 0);
-  selector->effect_index = slot;
+  selector->effect_index = requested_slot;
   kp_rgb_selector_publish_locked(selector, previous);
-  return kp_rgb_selector_selected(selector) == NULL ? -ENOENT : 0;
+  return 0;
 }
 
 void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
   for (size_t i = 0; i < selector->effect_count; i++) {
     const struct device *fx = kp_rgb_selector_at(selector, i);
-    if (fx == NULL) {
-      continue;
-    }
     *kp_rgb_effect_data(fx) = kp_rgb_effect_cfg(fx)->defaults;
   }
 }
@@ -147,7 +130,7 @@ int kp_rgb_selector_convert_locked(struct kp_rgb_selector *selector,
   const struct device *effect =
       addressed ? kp_rgb_selector_at(selector, slot)
                 : kp_rgb_selector_selected(selector);
-  if (effect == NULL || !device_is_ready(effect))
+  if (effect == NULL)
     return addressed ? -ENOENT : -ENODEV;
   struct kp_rgb_hsb color = kp_rgb_effect_data(effect)->color;
   if (command == RGB_EFF_CMD || command == RGB_EFR_CMD) {

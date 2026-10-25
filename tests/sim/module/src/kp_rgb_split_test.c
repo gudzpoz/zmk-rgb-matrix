@@ -50,14 +50,6 @@ static uint16_t member_slot(const struct device *owner, const struct device *mem
 static int split_provider_init(void) {
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
-    if (!strcmp(split_case, "ready-control")) {
-        CHECK(!device_is_ready(DEV(selector_a)));
-        CHECK(device_init(DEV(selector_a)) == 0);
-    } else if (!strcmp(split_case, "ready-member")) {
-        CHECK(!device_is_ready(DEV(probe_a)) && !device_is_ready(DEV(probe_c)));
-        CHECK(device_init(DEV(probe_a)) == 0);
-        CHECK(device_init(DEV(probe_c)) == 0);
-    }
     return 0;
 }
 SYS_INIT(split_provider_init, APPLICATION, 98);
@@ -763,56 +755,22 @@ static void snapshot_validation(void) {
     kp_rgb_matrix_unlock();
 }
 static void readiness(void) {
-    if (!strncmp(split_case, "ready-", 6)) {
-        CHECK(device_is_ready(DEV(selector_a)) && device_is_ready(DEV(probe_a)));
-        CHECK(device_is_ready(DEV(probe_c)));
-        CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-        connect(3); k_sleep(K_MSEC(2300));
-        for (unsigned s = 0; s < 2; s++) {
-            CHECK(lane(s, 0).completed == 1 && lane(s, 1).completed == 1);
-            CHECK(clock_count[s] && power_count[s] && brightness_count[s]);
-        }
-        apply(DEV(selector_a), RGB_RESET_CMD, 0);
-        k_sleep(K_MSEC(1000)); check_all_members(0);
-        printk("PASS split %s\n", split_case); exit(0);
-    }
-    bool control = !strcmp(split_case, "late-control");
-    bool member = !strcmp(split_case, "late-member");
-    const struct device *late = control ? DEV(selector_a) : member ? DEV(probe_a) : DEV(rgb_matrix);
+    const struct device *late = DEV(rgb_matrix);
     CHECK(!device_is_ready(late));
-    if (control || member) {
-        CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-        struct kp_rgb_selector_snapshot snapshot; size_t cursor = 0;
-        kp_rgb_matrix_lock();
-        CHECK(kp_rgb_selector_snapshot_locked(DEV(selector_a), &snapshot) == -ENODEV);
-        CHECK(kp_rgb_selector_next_snapshot_locked(DEV(selector_a), &cursor, &snapshot) == -ENODEV);
-        kp_rgb_matrix_unlock();
-        struct zmk_behavior_binding binding = {.param1 = RGB_EFS_CMD, .param2 = 1};
-        CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &binding) == -ENODEV);
-    }
     connect(3); k_sleep(K_MSEC(1300));
     for (unsigned s = 0; s < 2; s++) {
         CHECK(lane(s, 1).completed == 1);
-        if (control || member) {
-            CHECK(lane(s, 0).completed == 0 && clock_count[s] >= 2);
-            CHECK(power_count[s] && brightness_count[s]);
-        } else {
-            CHECK(lane(s, 0).completed == 1);
-            CHECK(!clock_count[s] && !power_count[s] && !brightness_count[s] && !overlay_count[s]);
-        }
+        CHECK(lane(s, 0).completed == 1);
+        CHECK(!clock_count[s] && !power_count[s] && !brightness_count[s] && !overlay_count[s]);
     }
     unsigned b_before[2] = {lane(0, 1).completed, lane(1, 1).completed};
     CHECK(device_init(late) == 0 && device_is_ready(late));
-    if (member) CHECK(device_init(DEV(probe_c)) == 0 && device_is_ready(DEV(probe_c)));
     k_sleep(K_MSEC(2300));
     for (unsigned s = 0; s < 2; s++) {
         CHECK(lane(s, 1).completed == b_before[s]);
-        if (control || member) CHECK(lane(s, 0).completed == 0);
-        else CHECK(lane(s, 0).completed == 1);
+        CHECK(lane(s, 0).completed == 1);
     }
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) ==
-          (control || member ? NULL : DEV(probe_a)));
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     printk("PASS split %s\n", split_case); exit(0);
 }
 static void test_thread(void *a, void *b, void *c) {
@@ -858,7 +816,7 @@ static void test_thread(void *a, void *b, void *c) {
         CHECK(framework_destinations == destinations_before_direct);
         printk("PASS split %s\n", split_case); exit(0);
     }
-    if (!strncmp(split_case, "late-", 5) || !strncmp(split_case, "ready-", 6)) readiness();
+    if (!strcmp(split_case, "late-global")) readiness();
     if (!strncmp(split_case, "brightness-", 11)) brightness_split();
     apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
     parameters(DEV(selector_a), A_SLOT(probe_a), 10, 1100);

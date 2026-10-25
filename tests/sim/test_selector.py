@@ -254,19 +254,6 @@ def main(root=None):
     check_capture(capture, run.stdout)
 
 
-    result = build(root, "late-control", '''&selector_a {
-        zephyr,deferred-init;
-        };''', runtime=True)
-    assert result.returncode == 0, result.stdout[-12000:]
-    command = [str(root / "late-control/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
-    print("COMMAND", " ".join(command), flush=True)
-    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                     stderr=subprocess.STDOUT, log_path=root / "late-control.log")
-    assert run.returncode == 0, run.stdout[-12000:]
-    assert "PASS canonical readiness automatic start" in run.stdout, run.stdout
-    assert "PASS selector runtime" in run.stdout, run.stdout
-    assert "<err>" not in run.stdout, run.stdout
-    print("PASS canonical readiness automatic start", flush=True)
 
     stage42(root)
 

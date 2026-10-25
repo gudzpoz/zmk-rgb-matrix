@@ -89,9 +89,6 @@ static void check_static_metadata(void) {
   CHECK(selector->owner == DEV(default_late_selector));
   CHECK(selector->members[0].effect == DEV(default_late));
   CHECK(strcmp(selector->members[0].id, "late") == 0);
-  kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_at(selector, 0) == NULL);
-  kp_rgb_matrix_unlock();
 }
 
 static void check_dense_selection(void) {
@@ -201,11 +198,6 @@ static int before_startup(void) {
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   CHECK(!device_is_ready(DEV(default_late)));
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
-  CHECK(zmk_rgb_matrix_set_color(DEV(missing_selected), &early_color) == -ENODEV);
-  CHECK(zmk_rgb_matrix_set_period(DEV(missing_selected), 4321) == -ENODEV);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 4321) == -ENODEV);
-  check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
-  check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   check_static_metadata();
   CHECK(device_is_ready(DEV(default_ready)));
   check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
@@ -221,8 +213,6 @@ static int before_startup(void) {
   check_parameters(DEV(default_disabled_child), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 4321) == 0);
-  CHECK(!device_is_ready(DEV(default_late)));
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == -ENODEV);
   return 0;
 }
 SYS_INIT(before_startup, APPLICATION, 80);
@@ -285,6 +275,8 @@ static void defaults_test(void *a, void *b, void *c) {
   check_dense_selection();
 #if IS_ENABLED(CONFIG_SETTINGS)
   stage_obsolete_parameters();
+  CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
+  CHECK(settings_commit() == 0);
   CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
 #endif
   check_parameters(DEV(default_ready), early_color, 4321);
@@ -351,7 +343,7 @@ static void defaults_test(void *a, void *b, void *c) {
   check_defaults_match_data(DEV(missing_selected));
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_disabled), (struct kp_rgb_hsb){180, 100, 50}, 3210);
-  printk("PASS selector defaults shared metadata/dense slots/live readiness/setters/reset/automatic startup\n");
+  printk("PASS selector defaults shared metadata/dense slots/pre-boundary providers/setters/reset/automatic startup\n");
   exit(0);
 }
 K_THREAD_DEFINE(defaults_thread, 4096, defaults_test, NULL, NULL, NULL, 5, 0, 1);

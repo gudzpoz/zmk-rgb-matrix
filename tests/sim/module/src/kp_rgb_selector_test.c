@@ -234,8 +234,7 @@ static void scoped_snapshot_roundtrip(void) {
   const struct device *original_member = kp_rgb_selector_selected(a);
   uint16_t alternate_slot = UINT16_MAX;
   for (size_t i = 0; i < a->effect_count; i++) {
-    if (i != original_slot && kp_rgb_selector_at(a, i) != NULL &&
-        device_is_ready(kp_rgb_selector_at(a, i))) {
+    if (i != original_slot && kp_rgb_selector_at(a, i) != NULL) {
       alternate_slot = (uint16_t)i;
       break;
     }
@@ -530,33 +529,42 @@ static void selected_conditions(void) {
 }
 #endif
 
-#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
-static int prepare_deferred_control(void) {
-  CHECK(!device_is_ready(DEV(selector_a)));
+static int check_preboundary(void) {
+  kp_rgb_matrix_lock();
+  CHECK(!kp_rgb_control_started_locked());
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+    const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+    CHECK(zmk_rgb_selector_get_selected(state->owner) == NULL);
+    size_t initial = state->initial_effect;
+    CHECK(state->effect_index == initial);
+    CHECK(kp_rgb_selector_selected(state) ==
+          (initial < state->effect_count ? state->members[initial].effect : NULL));
+  }
   CHECK(callback_count() == 0);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-  CHECK(device_init(DEV(selector_a)) == 0);
-  CHECK(device_is_ready(DEV(selector_a)));
+  kp_rgb_matrix_unlock();
   return 0;
 }
-SYS_INIT(prepare_deferred_control, APPLICATION, 98);
-#endif
+SYS_INIT(check_preboundary, APPLICATION, 98);
 
 static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
   int64_t deadline = k_uptime_get() + 1000;
-  while (zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL ||
-         zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL) {
+  for (;;) {
+    kp_rgb_matrix_lock();
+    bool started = kp_rgb_control_started_locked();
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+      const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+      CHECK(zmk_rgb_selector_get_selected(state->owner) ==
+            (started ? kp_rgb_selector_selected(state) : NULL));
+    }
+    kp_rgb_matrix_unlock();
+    if (started) break;
     CHECK(k_uptime_get() < deadline);
     k_sleep(K_MSEC(1));
   }
 #if DT_NODE_EXISTS(DT_NODELABEL(selected_a))
   selected_conditions();
   return;
-#endif
-#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
-  printk("PASS canonical readiness automatic start\n");
 #endif
   k_sleep(K_MSEC(100));
   kp_rgb_matrix_lock();

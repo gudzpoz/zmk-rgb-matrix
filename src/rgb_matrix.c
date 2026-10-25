@@ -654,13 +654,10 @@ void kp_rgb_apply_defaults(void) {
   kp_rgb_matrix_unlock();
 }
 
-static bool kp_rgb_parameter_target_ready(const struct device *fx) {
-  return fx != NULL && device_is_ready(fx);
-}
 
 int kp_rgb_set_color_locked(const struct device *fx,
                            const struct kp_rgb_hsb *color) {
-  if (!kp_rgb_parameter_target_ready(fx)) {
+  if (fx == NULL) {
     return -ENODEV;
   }
   if (color == NULL || color->h > KP_RGB_HUE_MAX || color->s > KP_RGB_SAT_MAX ||
@@ -679,7 +676,7 @@ int kp_rgb_set_color_locked(const struct device *fx,
 }
 
 int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
-  if (!kp_rgb_parameter_target_ready(fx)) {
+  if (fx == NULL) {
     return -ENODEV;
   }
   if (period_ms < CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS ||

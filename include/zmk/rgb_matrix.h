@@ -274,7 +274,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * The color property overrides the color fallback; duration overrides its fallback,
  * with zero using the common 1000 ms fallback. Duration is clamped to configured
  * bounds before narrowing. Selector reset copies only these common defaults into
- * ready effect data. Lifecycle reset preserves user parameters. */
+ * effect data. Lifecycle reset preserves user parameters. */
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
   KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                      \
   BUILD_ASSERT(sizeof(cfg_inst##_cfg.common) ==                                \
@@ -529,12 +529,12 @@ int zmk_rgb_matrix_get_state(bool *on_off);
  * NULL returns -EINVAL, ISR calls return -EWOULDBLOCK. */
 int zmk_rgb_matrix_get_user_state(bool *user_on);
 
-/* Set parameters of a ready RGB effect device. Thread context only.
- * Supply an RGB effect device; composition membership is not required.
+/* Set effect parameters. Thread context only.
+ * Supply an initialized RGB effect device; composition membership is not required.
  * Hue accepts 0..360 (360 becomes 0); saturation/brightness accept 0..100.
  * Period accepts configured DURATION_MIN_MS..DURATION_MAX_MS without clamping.
- * NULL color/invalid values return -EINVAL; NULL/not-ready effect devices
- * return -ENODEV; ISR calls return -EWOULDBLOCK. Changed values request repaint
+ * NULL color/invalid values return -EINVAL; NULL effect devices return -ENODEV;
+ * ISR calls return -EWOULDBLOCK. Changed values request repaint
  * without resetting clocks. Success means state acceptance, not strip delivery.
  * Neither call saves settings, sends split commands or changes user intent. */
 int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hsb *color);

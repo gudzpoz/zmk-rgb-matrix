@@ -3,36 +3,30 @@
  */
 
 #include "rgb_matrix_internal.h"
-#include <limits.h>
 #include <zephyr/init.h>
-#include <zephyr/logging/log.h>
-#include <zephyr/settings/settings.h>
 
-LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+static bool kp_rgb_started;
 
-static int control_start(void) {
-  int err = kp_rgb_settings_commit();
-  if (err == 0)
-    err = kp_rgb_selector_overlays_start();
-  if (err < 0) {
-    LOG_ERR("RGB control startup failed (err %d)", err);
-    return err;
+bool kp_rgb_control_started_locked(void) { return kp_rgb_started; }
+
+int kp_rgb_control_commit(void) {
+  kp_rgb_matrix_lock();
+  kp_rgb_settings_restore_locked();
+  if (!kp_rgb_started) {
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+      struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+      kp_rgb_selector_resolve_locked(selector, selector->effect_index);
+    }
+    kp_rgb_started = true;
+    kp_rgb_conditions_start();
   }
-  kp_rgb_conditions_start();
+  kp_rgb_matrix_unlock();
   return 0;
 }
 
-#if IS_ENABLED(CONFIG_SETTINGS)
-
-SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(kp_rgb_control, "keypaw/rgb_control",
-                                          NULL, NULL, control_start, NULL,
-                                          INT_MAX);
-
-#else
-
+#if !IS_ENABLED(CONFIG_SETTINGS)
 BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY < 99,
              "RGB automatic control startup must follow matrix initialization");
 
-SYS_INIT(control_start, APPLICATION, 99);
-
+SYS_INIT(kp_rgb_control_commit, APPLICATION, 99);
 #endif

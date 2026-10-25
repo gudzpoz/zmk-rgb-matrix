@@ -17,7 +17,7 @@ struct kp_rgb_selector_snapshot {
 /* Caller holds the matrix mutex. No callbacks, persistence or transport I/O. */
 int kp_rgb_selector_snapshot_locked(const struct device *selector,
                                     struct kp_rgb_selector_snapshot *snapshot);
-/* Advance cursor past the next ready enabled member; return 1, 0 at end,
+/* Advance cursor past the next enabled member; return 1, 0 at end,
  * or a negative error. Caller holds the matrix mutex. */
 int kp_rgb_selector_next_snapshot_locked(const struct device *selector,
                                          size_t *cursor,

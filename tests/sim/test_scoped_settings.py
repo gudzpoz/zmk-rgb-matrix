@@ -65,17 +65,13 @@ CONFIG_SETTINGS_CUSTOM=y
 CONFIG_KEYPAW_SIM_SETTINGS_TEST=y
 CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20
 '''
-SCENARIOS = ("existing", "validation", "old-custom-ids", "runtime-parameters", "normalized-names", "debounce", "global-failure", "staged-reset",
+SCENARIOS = ("repeated-commits", "existing", "validation", "old-custom-ids", "runtime-parameters", "normalized-names", "debounce", "global-failure", "staged-reset",
              "selector-dirty", "selector-reset", "selector-failed-dirty",
              "selector-failed-reset", "global-dirty", "global-reset",
-             "global-failed-dirty", "global-failed-reset", "reset-revision-second-failure", "reordering", "boundary-failure")
+             "global-failed-dirty", "global-failed-reset", "reset-revision-second-failure", "reordering")
 CONFIGS = {
     "auto": ("", ""),
     "provider": ("", ""),
-    "late-control": ('''&selector_a { zephyr,deferred-init; };''',
-                     ""),
-    "late-member": ('&probe_b { compatible = "test,rgb-settings-late-effect", "keypaw,rgb-matrix-solid"; zephyr,deferred-init; };',
-                    ""),
     "reordered": ("", ""),
     "normalized-names": ("", ""),
 }
@@ -114,9 +110,7 @@ def main():
             assert result.returncode == 0, result.stdout[-20000:]
         scenarios = (("normalized-names",) if name == "normalized-names" else
                      ("reordering", "validation", "old-custom-ids", "staged-reset") if name == "reordered" else
-                     tuple(scenario for scenario in SCENARIOS if scenario not in ("normalized-names", "boundary-failure")))
-        if name in ("late-control", "late-member"):
-            scenarios += ("boundary-failure",)
+                     tuple(scenario for scenario in SCENARIOS if scenario != "normalized-names"))
         selected = args.scenario or scenarios
         assert all(scenario in scenarios for scenario in selected), (name, selected, scenarios)
         for scenario in (scenario for _ in range(args.repeat) for scenario in selected):
@@ -129,7 +123,7 @@ def main():
                                 stderr=subprocess.STDOUT, timeout=30,
                                 log_path=unique_log(root, f"{name}-{scenario}"))
             assert result.returncode == 0, result.stdout[-20000:]
-            markers = ("restored at selector readiness", "legacy records ignored",
+            markers = ("restored at global boundary", "legacy records ignored",
                        "independent save despite persistent failure",
                        "addressed save/reset/reload isolation", "global reset/reload")
             if scenario == "existing":
@@ -139,9 +133,7 @@ def main():
                 assert f"PASS settings {scenario}" in result.stdout, result.stdout
             assert "PASS scoped settings provider before restoration" in result.stdout
             errors = [line for line in result.stdout.splitlines() if "<err>" in line]
-            assert all("set-value failure. key: keypaw/rgb_matrix/" in line or
-                       (scenario == "boundary-failure" and ("RGB control startup failed" in line or
-                        (name == "late-control" and "RGB selector rgbs_a is not ready" in line)))
+            assert all("set-value failure. key: keypaw/rgb_matrix/" in line
                        for line in errors), result.stdout
             print(f"PASS scoped settings native {name}/{scenario}", flush=True)
 

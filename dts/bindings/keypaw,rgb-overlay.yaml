@@ -5,8 +5,8 @@ description: |
   Composites a nested effect onto its targets over earlier output. A private
   composition owns exactly one enabled effect and is an ordinary device.
   A controllable composition owns one or more enabled effects and is itself a
-  GLOBAL behavior. It retains selection while hidden, OFF or inhibited; at
-  least one child must be ready before RGB control starts.
+  GLOBAL behavior. It retains selection while hidden, OFF or inhibited. The
+  composition and every enabled child must be initialized before RGB control starts.
 
 compatible: "keypaw,rgb-overlay"
 include: ["base.yaml", "keypaw,rgb-overlay-common.yaml", "behavior-metadata.yaml"]
@@ -40,7 +40,7 @@ properties:
     default: 0
     description: |
       Initial controlled child slot in declaration order among enabled children,
-      0..65535. An unavailable slot falls back to the first ready enabled child.
+      0..65535. An out-of-range slot falls back to slot 0.
       Ignored by private compositions.
 
 binding-cells:

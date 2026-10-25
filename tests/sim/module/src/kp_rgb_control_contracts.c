@@ -182,15 +182,36 @@ static unsigned callback_count(void) {
 }
 static void wait_ready(void) {
     int64_t until = k_uptime_get() + 1000;
-    while (!zmk_rgb_selector_get_selected(DEV(selector_a)) && k_uptime_get() < until) k_msleep(1);
+    for (;;) {
+        kp_rgb_matrix_lock();
+        bool started = kp_rgb_control_started_locked();
+        for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+            const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+            KP_CHECK(zmk_rgb_selector_get_selected(state->owner) ==
+                     (started ? kp_rgb_selector_selected(state) : NULL));
+        }
+        kp_rgb_matrix_unlock();
+        if (started) break;
+        KP_CHECK(k_uptime_get() < until);
+        k_msleep(1);
+    }
     k_sleep(K_MSEC(50));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
 }
 static void canonical_metadata_before_start(void) {
+    kp_rgb_matrix_lock();
+    KP_CHECK(!kp_rgb_control_started_locked());
     bool found_a = false, found_b = false;
     for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
         const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
+        KP_CHECK(zmk_rgb_selector_get_selected(state->owner) == NULL);
+        size_t initial = state->initial_effect;
+        KP_CHECK(state->effect_index == initial);
+        KP_CHECK(kp_rgb_selector_selected(state) ==
+                 (initial < state->effect_count ? state->members[initial].effect : NULL));
+        for (size_t slot = 0; slot < state->effect_count; slot++)
+            KP_CHECK(kp_rgb_selector_at(state, slot) == state->members[slot].effect);
         if (state->owner == DEV(selector_a)) {
             KP_CHECK(state->owner->api == &kp_rgb_selector_behavior_api);
             found_a = true;
@@ -200,6 +221,7 @@ static void canonical_metadata_before_start(void) {
         }
     }
     KP_CHECK(found_a && found_b);
+    kp_rgb_matrix_unlock();
     struct zmk_behavior_binding b = binding(DEV(selector_a), RGB_EFF_CMD, 0);
     KP_CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &b) == -ENODEV);
     KP_CHECK(kp_rgb_selector_binding_convert(DEV(ordinary), &b) == -ENODEV);
@@ -234,10 +256,7 @@ static void early(void) {
     KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 45);
     KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 67);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 4321);
-    KP_CHECK(!device_is_ready(DEV(control_late)));
-    KP_CHECK(zmk_rgb_matrix_set_color(DEV(control_late), &color) == -ENODEV);
-    KP_CHECK(zmk_rgb_matrix_set_period(DEV(control_late), 1234) == -ENODEV);
-    KP_CHECK(device_init(DEV(control_late)) == 0);
+    KP_CHECK(zmk_rgb_matrix_set_color(DEV(control_late), &color) == 0);
     KP_CHECK(zmk_rgb_matrix_set_period(DEV(control_late), 2345) == 0);
     KP_CHECK(kp_rgb_effect_period(DEV(control_late)) == 2345);
 }
@@ -720,6 +739,8 @@ static void prestart_reset_prepare(void) {
     }
     KP_CHECK(a != NULL && a->effect_count == 2 && a->initial_effect == 99);
     kp_rgb_matrix_lock();
+    KP_CHECK(!kp_rgb_control_started_locked());
+    KP_CHECK(a->effect_index == 99 && kp_rgb_selector_selected(a) == NULL);
     unsigned callbacks = callback_count();
     KP_CHECK(kp_rgb_selector_select_locked(a, 1) == 1);
     struct kp_rgb_hsb changed = {31, 41, 51};
@@ -728,9 +749,11 @@ static void prestart_reset_prepare(void) {
     kp_rgb_effect_data(DEV(probe_a))->duration_ms = 4321;
     kp_rgb_effect_data(DEV(probe_c))->duration_ms = 4321;
     kp_rgb_selector_overlays_defaults_locked();
-    KP_CHECK(a->effect_index == a->initial_effect && kp_rgb_selector_selected(a) == NULL);
+    KP_CHECK(a->effect_index == 99 && kp_rgb_selector_selected(a) == NULL);
     check_reset_parameters();
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+        KP_CHECK(zmk_rgb_selector_get_selected(kp_rgb_selector_registry_at(i)->owner) == NULL);
     KP_CHECK(callback_count() == callbacks);
     kp_rgb_matrix_unlock();
 }
@@ -893,52 +916,13 @@ static void isr(const void *arg) {
     b = binding(DEV(rgb_matrix), RGB_BRI_CMD, 0); KP_CHECK(convert(&b) == -EWOULDBLOCK);
     KP_CHECK(invoke(DEV(rgb_matrix), RGB_BRI_CMD, 0) == -EWOULDBLOCK);
 }
-static void deferred_prepare(void) {
-    KP_CHECK(!device_is_ready(DEV(selector_a)));
-    canonical_metadata_before_start();
-    struct kp_rgb_hsb c = {12,34,29};
-    KP_CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &c) == 0);
-    KP_CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 4321) == 0);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-    if (kp_test_case("control-deferred")) KP_CHECK(device_init(DEV(selector_a)) == 0);
-}
 static int control_prepare(void) {
+    if (!kp_test_case("control-early")) canonical_metadata_before_start();
     if (kp_test_case("control-early")) early_prepare();
     if (kp_test_case("control-reset-prestart")) prestart_reset_prepare();
-    if (kp_test_case("control-deferred") || kp_test_case("control-unready")) deferred_prepare();
     return 0;
 }
 SYS_INIT(control_prepare, APPLICATION, 98);
-static void member_unready(void) {
-    wait_ready();
-    KP_CHECK(!device_is_ready(DEV(probe_c)));
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == -EINVAL);
-    KP_CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 1) == -ENOENT);
-    KP_CHECK(kp_rgb_selector_binding_apply(DEV(selector_a),
-        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, 1),
-        RGB_COLOR_HSB_VAL(30, 40, 50)) == -ENOENT);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    KP_CHECK(device_init(DEV(probe_c)) == 0);
-    KP_CHECK(device_is_ready(DEV(probe_c)));
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-}
-static void deferred(void) {
-    if (kp_test_case("control-unready")) {
-        KP_CHECK(!device_is_ready(DEV(selector_a)));
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        KP_CHECK(device_init(DEV(selector_a)) == 0);
-        k_msleep(100);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
-    } else wait_ready();
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 4321);
-    KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 12);
-    KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.s == 34);
-    KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 29);
-}
 #endif
 
 void kp_test_controls_run(void) {
@@ -961,8 +945,6 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-reset-fallback-noop") || kp_test_case("control-reset-fallback-notify")) reset_fallback();
     else if (kp_test_case("control-reset-prestart")) reset_prestart_result();
     else if (kp_test_case("control-publication")) publication();
-    else if (kp_test_case("control-member-unready")) member_unready();
-    else if (kp_test_case("control-deferred") || kp_test_case("control-unready")) deferred();
     else if (kp_test_case("control-owner")) owner_callbacks();
     else if (kp_test_case("control-local-only")) local_only();
     else if (kp_test_case("control-isr")) { wait_ready(); irq_offload(isr, NULL); }

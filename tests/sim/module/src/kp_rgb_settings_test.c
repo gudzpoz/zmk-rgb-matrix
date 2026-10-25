@@ -140,6 +140,10 @@ static int load(struct settings_store *store,
   ARG_UNUSED(store);
   for (size_t i = 0; i < ARRAY_SIZE(records); i++) {
     struct record *record = &records[i];
+    /* These owners are supplied by the INT_MAX-1 provider, not backend loading. */
+    if (!initial_load_done && (!strcmp(record->name, SELECTOR_A_PATH "state") ||
+                               !strcmp(record->name, SELECTOR_B_PATH "state")))
+      continue;
     if (record->len)
       CHECK(settings_call_set_handler(record->name, record->len, read_record,
                                       record, arg) == 0);
@@ -254,6 +258,7 @@ int settings_backend_init(void) {
   return 0;
 }
 
+static bool provider_state;
 static int settings_provider_commit(void) {
   static bool done;
   if (done) return 0;
@@ -262,22 +267,26 @@ static int settings_provider_commit(void) {
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
   CHECK(kp_rgb_global.brightness == 100);
-  if (strcmp(settings_case, "boundary-failure")) {
-#if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(probe_b)));
-    CHECK(device_init(DEV(probe_b)) == 0);
-#endif
-#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(selector_a)));
-    CHECK(device_init(DEV(selector_a)) == 0);
-#endif
-  }
+  struct kp_rgb_persist_selector_record selection;
+  CHECK(kp_rgb_persist_encode_selector(A_ALT_NAME, &selection) == 0);
+  struct record staged = {.len = sizeof(selection)};
+  strcpy(staged.name, SELECTOR_A_PATH "state");
+  memcpy(staged.bytes, &selection, sizeof(selection));
+  CHECK(settings_call_set_handler(staged.name, staged.len, read_record, &staged, NULL) == 0);
+  CHECK(kp_rgb_persist_encode_selector(external_storage_loaded ? B_STATIC_NAME : B_ALT_NAME,
+                                       &selection) == 0);
+  strcpy(staged.name, SELECTOR_B_PATH "state");
+  memcpy(staged.bytes, &selection, sizeof(selection));
+  CHECK(settings_call_set_handler(staged.name, staged.len, read_record, &staged, NULL) == 0);
+  provider_state = true;
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+    CHECK(zmk_rgb_selector_get_selected(kp_rgb_selector_registry_at(i)->owner) == NULL);
   printk("PASS scoped settings provider before restoration\n");
   return 0;
 }
 SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(scoped_settings_provider, "test/rgb_provider",
                                         NULL, NULL, settings_provider_commit, NULL,
-                                        INT_MAX - 2);
+                                        INT_MAX - 1);
 
 static void check_defaults(void) {
   const struct device *effects[] = {DEV(probe_a), DEV(probe_b), DEV(probe_c), DEV(probe_d)};
@@ -294,6 +303,9 @@ static void check_defaults(void) {
 
 static void check_restored(void) {
   CHECK(initial_load_done);
+  CHECK(provider_state);
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+    CHECK(zmk_rgb_selector_get_selected(kp_rgb_selector_registry_at(i)->owner) != NULL);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) ==
         (external_storage_loaded ? DEV(probe_b) : DEV(probe_d)));
@@ -657,8 +669,32 @@ static void normalized_names_case(void) {
         !memcmp(find(old_b.name)->bytes, old_b.bytes, old_b.len));
 }
 
+static void repeated_commits(void) {
+  const struct device *owners[] = {DEV(selector_a), DEV(selector_b)};
+  const struct device *members[] = {DEV(probe_a), DEV(probe_b)};
+  const struct kp_rgb_hsb colors[] = {{211, 37, 41}, {73, 62, 29}};
+  unsigned before_saves = saves;
+  for (size_t i = 0; i < ARRAY_SIZE(owners); i++) {
+    CHECK(zmk_rgb_selector_select(owners[i], members[i]) == 0);
+    CHECK(zmk_rgb_matrix_set_color(members[i], &colors[i]) == 0);
+    CHECK(zmk_rgb_matrix_set_period(members[i], 1234 + i) == 0);
+  }
+  for (unsigned pass = 0; pass < 4; pass++) {
+    CHECK((pass % 2 ? settings_commit_subtree("keypaw/rgb_matrix") : settings_commit()) == 0);
+    for (size_t i = 0; i < ARRAY_SIZE(owners); i++) {
+      CHECK(zmk_rgb_selector_get_selected(owners[i]) == members[i]);
+      const struct kp_rgb_hsb *color = &kp_rgb_effect_data(members[i])->color;
+      CHECK(color->h == colors[i].h && color->s == colors[i].s && color->b == colors[i].b);
+      CHECK(kp_rgb_effect_period(members[i]) == 1234 + i);
+    }
+  }
+  k_sleep(K_MSEC(100));
+  CHECK(saves == before_saves);
+}
 static void extended_case(void) {
-  if (!strcmp(settings_case, "normalized-names")) {
+  if (!strcmp(settings_case, "repeated-commits")) {
+    repeated_commits();
+  } else if (!strcmp(settings_case, "normalized-names")) {
     normalized_names_case();
   } else if (!strcmp(settings_case, "old-custom-ids")) {
     old_custom_ids();
@@ -865,48 +901,11 @@ static void scenario(void *a, void *b, void *c) {
   ARG_UNUSED(a);
   ARG_UNUSED(b);
   ARG_UNUSED(c);
-  if (!strcmp(settings_case, "boundary-failure")) {
-    k_sleep(K_MSEC(100));
-    CHECK(initial_load_done);
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-#if DT_PROP(DT_NODELABEL(probe_b), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(probe_b)));
-    CHECK(kp_rgb_global.brightness == 100);
-    CHECK(settings_load_subtree("keypaw/rgb_matrix") == -ENODEV);
-    CHECK(kp_rgb_global.brightness == 100);
-    CHECK(device_init(DEV(probe_b)) == 0);
-#endif
-#if DT_PROP(DT_NODELABEL(selector_a), zephyr_deferred_init)
-    CHECK(!device_is_ready(DEV(selector_a)));
-    CHECK(kp_rgb_global.brightness == 100);
-    CHECK(settings_load_subtree("keypaw/rgb_matrix") == -ENODEV);
-    CHECK(kp_rgb_global.brightness == 100);
-    CHECK(device_init(DEV(selector_a)) == 0);
-#endif
-    k_sleep(K_MSEC(200));
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
-    CHECK(kp_rgb_global.brightness == 61);
-    bool on;
-    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
-    kp_rgb_matrix_lock();
-    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-      const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-      if (selector->owner == DEV(selector_a)) CHECK(kp_rgb_selector_selected(selector) == DEV(probe_c));
-      if (selector->owner == DEV(selector_b)) CHECK(kp_rgb_selector_selected(selector) == DEV(probe_d));
-    }
-    kp_rgb_matrix_unlock();
-    check_defaults();
-    k_sleep(K_MSEC(200));
-    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    printk("PASS settings boundary-failure\n");
-    exit(0);
-  }
   for (unsigned i = 0; i < 100 && !zmk_rgb_selector_get_selected(DEV(selector_a)); i++)
     k_sleep(K_MSEC(5));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) != NULL);
   check_restored();
-  printk("PASS scoped settings restored at selector readiness\n");
+  printk("PASS scoped settings restored at global boundary\n");
   if (strcmp(settings_case, "existing")) extended_case();
   obsolete_parameters();
   uint8_t legacy_state[36] = {2};

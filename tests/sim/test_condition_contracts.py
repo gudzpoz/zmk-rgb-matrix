@@ -10,16 +10,16 @@ from native_build import SELECTORS, build, run
 SCENARIOS = (
     'startup', 'dag', 'same-value', 'isr', 'external-timer', 'no-poll',
     'scope', 'unused-scope',
-    'unready', 'chain', 'combinators', 'invalid-scope', 'short-circuit',
+    'chain', 'combinators', 'invalid-scope', 'short-circuit',
     'refresh', 'refresh-interrupted', 'early-refresh', 'finite-self-cascade', 'finite-multi-cascade',
     'trigger-startup', 'trigger-capture', 'trigger-errors',
     'initial-shared', 'cross-selector', 'third-party', 'selection-burst',
     'trigger-mutation', 'resume-selection', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
-    'startup-unready-selector', 'startup-normalized-names', 'startup-auto',
+    'startup-normalized-names', 'startup-auto',
     'startup-unrestored-settings', 'startup-settings-staged',
     'overlay-zero', 'trigger-no-table', 'trigger-actions', 'trigger-unregistered-root',
-    'stale-source-refresh', 'pending-source',
+    'stale-source-refresh', 'pending-source', 'runtime-reload-freshness',
 )
 FIXTURE = '''
 #include <dt-bindings/keypaw/rgb_matrix.h>
@@ -30,7 +30,6 @@ FIXTURE = '''
     cc_leaf: cc_leaf { compatible = "test,rgb-condition-contract"; };
     cc_unused: cc_unused { compatible = "test,rgb-condition-contract"; central-only; };
     cc_central: cc_central { compatible = "test,rgb-condition-contract"; central-only; };
-    cc_unready: cc_unready { compatible = "test,rgb-condition-contract"; unready; };
     cc_bad: cc_bad { compatible = "test,rgb-condition-contract"; invalid-scope; };
     cc_selected_a: cc_selected_a { compatible = "keypaw,rgb-condition-effect-selected";
         selector = <&selector_a>; effect = <&probe_a>; };
@@ -94,7 +93,6 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 
 
 VARIANTS = {
-    'startup-unready-selector': ('deferred', '&selector_a { zephyr,deferred-init; };', ''),
     'startup-normalized-names': ('normalized', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'startup-auto': ('auto', '', ''),
     'startup-unrestored-settings': ('settings-auto', '',
@@ -131,6 +129,12 @@ VARIANTS = {
 }
 VARIANTS['pending-source'] = VARIANTS['stale-source-refresh']
 VARIANTS['resume-selection'] = VARIANTS['stale-source-refresh']
+VARIANTS['runtime-reload-freshness'] = (
+    'settings-refresh-strip', VARIANTS['stale-source-refresh'][1] + '''
+&rgb_matrix { cc_observer: cc_observer {
+    compatible = "keypaw,native-engine-overlay"; slot = <0>; local; leds = <47>;
+}; };
+''', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n')
 VARIANTS.update({
     'dag': ('diamond', '''
 &cc_root { conditions = <&cc_left &cc_right>; };
@@ -158,16 +162,13 @@ VARIANTS.update({
 &cc_right { conditions = <&cc_leaf>; };
 ''', ''),
     'scope': ('scope', '&cc_root { conditions = <&cc_left>; }; &cc_left { conditions = <&cc_central>; };', ''),
-    'unready': ('unready', '&cc_root { conditions = <&cc_unready>; };', ''),
     'invalid-scope': ('invalid-scope', '&cc_root { conditions = <&cc_bad>; };', ''),
     'external-timer': ('timer', '&cc_root { conditions = <&cc_leaf>; };', ''),
 })
 VARIANTS['short-circuit'] = VARIANTS['dag']
 
 DIAGNOSTICS = {
-    'unready': 'RGB condition cc_unready: invalid or unready provider',
-    'invalid-scope': 'RGB condition cc_bad: invalid or unready provider',
-    'startup-unready-selector': 'RGB selector rgbs_a is not ready',
+    'invalid-scope': 'RGB condition cc_bad: invalid provider',
 }
 
 REJECTIONS = {

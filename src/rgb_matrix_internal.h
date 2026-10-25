@@ -122,7 +122,10 @@ static inline void kp_rgb_triggers_evaluate(int64_t now_ms) {
 
 int kp_rgb_save_state(void);
 int kp_rgb_save_selector_state(const struct device *selector, bool reset);
-int kp_rgb_settings_commit(void);
+int kp_rgb_control_commit(void);
+/* Caller holds the matrix lock. */
+bool kp_rgb_control_started_locked(void);
+void kp_rgb_settings_restore_locked(void);
 
 /* Restore global defaults and reconcile local output permission. */
 void kp_rgb_apply_defaults(void);

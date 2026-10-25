@@ -10,6 +10,7 @@
 #include <zmk/behavior.h>
 #include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
+#include <zmk/events/position_state_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
@@ -19,6 +20,7 @@
 struct source {
     atomic_t value, calls, pause;
     bool short_circuit;
+    bool first_value;
 };
 struct source_config {
     const struct device *selector, *effect;
@@ -43,6 +45,13 @@ static bool sample(const struct device *dev) {
     bool value = atomic_get(&s->value);
     if (cfg->selector)
         value = zmk_rgb_selector_get_selected(cfg->selector) == cfg->effect;
+    if (atomic_get(&s->calls) == 1) {
+        s->first_value = value;
+        if (kp_test_case("startup-unrestored-settings") || kp_test_case("startup-settings-staged")) {
+            KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+            KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+        }
+    }
     if (atomic_cas(&s->pause, 1, 0)) {
         k_sem_give(&sample_entered);
         KP_CHECK(k_sem_take(&sample_release, K_SECONDS(2)) == 0);
@@ -72,11 +81,7 @@ static bool sample(const struct device *dev) {
             (DT_INST_PROP(inst, central_only) ? KP_RGB_CONDITION_CENTRAL_ONLY : KP_RGB_CONDITION_ANY_SIDE), \
         .sample = sample, \
     }; \
-    static int init_##inst(const struct device *dev) { \
-        ARG_UNUSED(dev); \
-        return DT_INST_PROP(inst, unready) ? -ENODEV : 0; \
-    } \
-    DEVICE_DT_INST_DEFINE(inst, init_##inst, NULL, &source_##inst, &config_##inst, \
+    DEVICE_DT_INST_DEFINE(inst, NULL, NULL, &source_##inst, &config_##inst, \
         POST_KERNEL, KP_RGB_DEVICE_INIT_PRIORITY, &api_##inst);
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 
@@ -240,7 +245,7 @@ static void graph_cases(void) {
     KP_CHECK(kp_rgb_condition_valid(root) == good);
     if (!good) {
         KP_CHECK(!gate(DEV(ordinary)));
-        if (kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope"))
+        if (kp_test_case("invalid-scope") || kp_test_case("scope"))
             KP_CHECK(calls(root) == 0);
         if (kp_test_case("scope")) KP_CHECK(calls(DEV(cc_central)) == 0);
         for (unsigned n = 0; n < action_count; n++)
@@ -509,7 +514,7 @@ static void overlay_cases(void) {
 }
 
 static int auto_prepare(void) {
-    const char *graphs[] = {"dag", "chain", "combinators", "unready", "invalid-scope",
+    const char *graphs[] = {"dag", "chain", "combinators", "invalid-scope",
         "scope", "short-circuit"};
     const char *timings[] = {"startup", "same-value", "isr", "refresh", "refresh-interrupted",
         "early-refresh", "external-timer"};
@@ -538,6 +543,7 @@ static int auto_prepare(void) {
 #endif
     KP_CHECK(calls(DEV(cc_root)) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
     return 0;
 }
 SYS_INIT(auto_prepare, APPLICATION, 98);
@@ -549,6 +555,9 @@ static int settings_provider_commit(void) {
     if (provider_commits) return 0;
     KP_CHECK(calls(DEV(cc_root)) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == NULL);
+    KP_CHECK(calls(DEV(cc_event)) == 0 && calls(DEV(cc_event_b)) == 0);
+    atomic_set(&src(DEV(cc_root))->value, true);
     provider_commits++;
     if (kp_test_case("startup-settings-staged")) return 0;
     struct kp_rgb_persist_selector_record record;
@@ -557,19 +566,11 @@ static int settings_provider_commit(void) {
     return 0;
 }
 SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_source",
-    NULL, NULL, settings_provider_commit, NULL, INT_MAX - 2);
+    NULL, NULL, settings_provider_commit, NULL, INT_MAX - 1);
 #endif
 
 static void special_cases(void) {
-    if (kp_test_case("startup-unready-selector")) {
-        KP_CHECK(!device_is_ready(DEV(selector_a)));
-        drain(); KP_CHECK(calls(DEV(cc_root)) == 0);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-        KP_CHECK(device_init(DEV(selector_a)) == 0);
-        k_msleep(100); drain();
-        KP_CHECK(calls(DEV(cc_root)) == 0);
-        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    } else if (kp_test_case("startup-normalized-names")) {
+    if (kp_test_case("startup-normalized-names")) {
         wait_ready();
         KP_CHECK(device_is_ready(DEV(selector_a)) && device_is_ready(DEV(probe_a)));
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
@@ -585,11 +586,40 @@ static void special_cases(void) {
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
         expect_selection(false);
         KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1);
+        KP_CHECK(calls(DEV(cc_event_b)) == 1);
+        KP_CHECK(src(DEV(cc_root))->first_value && !src(DEV(cc_event))->first_value &&
+                 src(DEV(cc_event_b))->first_value);
+        KP_CHECK(gate(DEV(ordinary)));
+        KP_CHECK(action_count == (peripheral() ? 0 : 3));
+        if (!peripheral())
+            KP_CHECK(actions[0].code == 10 && actions[1].code == 30 && actions[2].code == 40);
         KP_CHECK(settings_commit() == 0);
         KP_CHECK(settings_commit() == 0);
         drain();
         KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+        KP_CHECK(calls(DEV(cc_event_b)) == 1 && provider_commits == 1);
+        KP_CHECK(action_count == (peripheral() ? 0 : 3));
+        KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
+        KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
+        drain();
+        KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1 &&
+                 calls(DEV(cc_event_b)) == 1);
+        struct kp_rgb_persist_selector_record record;
+        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)), &record) == 0);
+        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+        KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
+        expect_selection(true);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
+        KP_CHECK(calls(DEV(cc_root)) == 2 && calls(DEV(cc_event)) == 2 &&
+                 calls(DEV(cc_event_b)) == 2);
+        KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
+        drain();
+        KP_CHECK(calls(DEV(cc_root)) == 2 && calls(DEV(cc_event)) == 2 &&
+                 calls(DEV(cc_event_b)) == 2);
+        KP_CHECK(provider_commits == 1 && action_count == (peripheral() ? 0 : 3));
+        KP_CHECK(release_count == 0);
 #else
         KP_CHECK(false);
 #endif
@@ -650,6 +680,46 @@ static void special_cases(void) {
     }
 }
 
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_observer))
+static atomic_t observer_paints, observer_events;
+static unsigned observer_epoch;
+static void observer_fresh(void) {
+    if (!observer_epoch) return;
+    KP_CHECK(calls(DEV(cc_root)) == observer_epoch);
+    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+}
+static bool observer_render(const struct device *dev, const struct kp_rgb_frame *frame) {
+    ARG_UNUSED(dev);
+    observer_fresh();
+    atomic_inc(&observer_paints);
+    for (size_t i = 0; i < frame->target_count; i++)
+        frame->pixels[frame->targets[i]] = (struct led_rgb){.r = 1};
+    return false;
+}
+static bool observer_event(const struct device *dev, const struct kp_rgb_key_event *event) {
+    ARG_UNUSED(dev);
+    observer_fresh();
+    KP_CHECK(event->pressed && event->timestamp_ms == 123);
+    atomic_inc(&observer_events);
+    return true;
+}
+static const struct kp_rgb_effect_callbacks observer_callbacks = {
+    .render = observer_render, .on_event = observer_event,
+};
+#undef DT_DRV_COMPAT
+#define DT_DRV_COMPAT keypaw_native_engine_overlay
+#define OBSERVER(inst) \
+    KP_RGB_OVERLAY_TARGET_ARRAYS(inst, observer_##inst); \
+    static const struct { struct kp_rgb_overlay_common_config common; } observer_##inst##_cfg = { \
+        .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), &observer_callbacks, true), \
+    }; \
+    static struct { struct kp_rgb_overlay_common_data common; } observer_##inst##_data = { \
+        KP_RGB_OVERLAY_COMMON_DATA(inst, observer_##inst), \
+    }; \
+    KP_RGB_OVERLAY_DEFINE(inst, observer_##inst);
+DT_INST_FOREACH_STATUS_OKAY(OBSERVER)
+#undef DT_DRV_COMPAT
+#endif
 #if DT_HAS_COMPAT_STATUS_OKAY(test_rgb_condition_contract_strip)
 static atomic_t strip_colors, strip_blacks, strip_pixel_one;
 static int strip_update(const struct device *dev, struct led_rgb *pixels, size_t count) {
@@ -667,6 +737,7 @@ DEVICE_DT_DEFINE(DT_NODELABEL(cc_strip), NULL, NULL, NULL, NULL, POST_KERNEL,
                  CONFIG_LED_STRIP_INIT_PRIORITY, &strip_api);
 
 static void stale_source_refresh(bool source_only, bool newer_resume) {
+    bool reload = kp_test_case("runtime-reload-freshness");
     wait_ready();
     KP_CHECK(atomic_get(&strip_colors) > 0);
     if (!source_only) {
@@ -681,8 +752,32 @@ static void stale_source_refresh(bool source_only, bool newer_resume) {
     else KP_CHECK(zmk_rgb_matrix_set_inhibited(false) == 0);
     KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
     KP_CHECK(atomic_get(&strip_colors) == before);
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_observer)) && IS_ENABLED(CONFIG_SETTINGS)
+    unsigned paints = atomic_get(&observer_paints);
+    unsigned blacks = atomic_get(&strip_blacks);
+    if (reload) {
+        KP_CHECK(paints > 0 && atomic_get(&observer_events) == 0);
+        observer_epoch = samples + 2;
+    }
+#endif
     atomic_set(&src(DEV(cc_root))->value, !source_only);
-    irq_offload(interrupt, NULL);
+    if (reload) {
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_observer)) && IS_ENABLED(CONFIG_SETTINGS)
+        struct kp_rgb_persist_selector_record record;
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
+        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
+        KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+        raise_zmk_position_state_changed((struct zmk_position_state_changed){
+            .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL, .position = 0,
+            .state = true, .timestamp = 123,
+        });
+#else
+        KP_CHECK(false);
+#endif
+    } else irq_offload(interrupt, NULL);
     if (newer_resume) {
         select_a(false);
         KP_CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
@@ -693,6 +788,13 @@ static void stale_source_refresh(bool source_only, bool newer_resume) {
     KP_CHECK(k_sem_take(&sample_entered, K_SECONDS(1)) == 0);
     KP_CHECK(calls(DEV(cc_root)) == samples + 2);
     KP_CHECK(atomic_get(&strip_colors) == before);
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_observer)) && IS_ENABLED(CONFIG_SETTINGS)
+    if (reload) {
+        KP_CHECK(atomic_get(&observer_paints) == paints && atomic_get(&observer_events) == 0);
+        KP_CHECK(atomic_get(&strip_blacks) == blacks);
+        KP_CHECK(atomic_get(&strip_pixel_one) == 0);
+    }
+#endif
     if (!source_only) KP_CHECK(!gate(DEV(ordinary)));
     if (newer_resume) {
         select_a(true); select_a(false);
@@ -715,26 +817,33 @@ static void stale_source_refresh(bool source_only, bool newer_resume) {
     if (source_only) KP_CHECK(gate(DEV(selector_a)) == !peripheral());
     uint32_t pixel = source_only ? (peripheral() ? 0 : 0x00ff00) : 0xffffff;
     KP_CHECK(atomic_get(&strip_pixel_one) == pixel);
-    if (newer_resume) expect_selection(false);
-    KP_CHECK(irq_calls == 1);
+    if (newer_resume || reload) expect_selection(false);
+#if DT_NODE_EXISTS(DT_NODELABEL(cc_observer)) && IS_ENABLED(CONFIG_SETTINGS)
+    if (reload) {
+        KP_CHECK(atomic_get(&observer_paints) == paints + 1 && atomic_get(&observer_events) == 1);
+        KP_CHECK(atomic_get(&strip_blacks) == blacks);
+        KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+    }
+#endif
+    KP_CHECK(irq_calls == (reload ? 0 : 1));
 }
 #endif
 
 void kp_test_conditions_run(void) {
     if (kp_test_case("stale-source-refresh") || kp_test_case("pending-source") ||
-        kp_test_case("resume-selection")) {
+        kp_test_case("resume-selection") || kp_test_case("runtime-reload-freshness")) {
 #if DT_HAS_COMPAT_STATUS_OKAY(test_rgb_condition_contract_strip)
         stale_source_refresh(kp_test_case("pending-source"), kp_test_case("resume-selection"));
 #else
         KP_CHECK(false);
 #endif
-    } else if (kp_test_case("startup-unready-selector") || kp_test_case("startup-normalized-names") ||
+    } else if (kp_test_case("startup-normalized-names") ||
         kp_test_case("startup-auto") || kp_test_case("startup-unrestored-settings") ||
         kp_test_case("startup-settings-staged") ||
         kp_test_case("overlay-zero") || kp_test_case("trigger-no-table") ||
         kp_test_case("trigger-actions") || kp_test_case("trigger-unregistered-root")) special_cases();
     else if (kp_test_case("dag") || kp_test_case("chain") || kp_test_case("combinators") ||
-        kp_test_case("unready") || kp_test_case("invalid-scope") || kp_test_case("scope") ||
+        kp_test_case("invalid-scope") || kp_test_case("scope") ||
         kp_test_case("short-circuit")) graph_cases();
     else if (kp_test_case("startup") || kp_test_case("same-value") || kp_test_case("isr") ||
         kp_test_case("external-timer") || kp_test_case("refresh") || kp_test_case("refresh-interrupted") ||

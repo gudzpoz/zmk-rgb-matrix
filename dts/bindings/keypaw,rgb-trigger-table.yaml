@@ -4,7 +4,7 @@
 description: |
   Ordered RGB condition-edge rules. Children execute in declaration order on
   the split central or standalone device, never on a split peripheral.
-  Startup actions run after provider readiness, RGB defaults, and settings
+  Startup actions run after provider initialization, RGB defaults, and settings
   restoration. Conditions are sampled predicates, not lossless event queues.
 
 compatible: "keypaw,rgb-trigger-table"

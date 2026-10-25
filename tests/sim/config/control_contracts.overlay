@@ -7,7 +7,6 @@
         compatible = "keypaw,rgb-overlay"; leds = <4>;
         control_late: control_late {
             compatible = "test,rgb-control-probe";
-            zephyr,deferred-init;
         };
     };
     control_disabled: control_disabled {

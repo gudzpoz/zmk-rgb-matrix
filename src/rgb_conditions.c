@@ -66,9 +66,8 @@ bool kp_rgb_condition_value(const struct device *dev) {
 static void initialize_conditions(void) {
   STRUCT_SECTION_FOREACH(kp_rgb_condition_registration, e) {
     const struct kp_rgb_condition_api *api = e->dev->api;
-    if (!device_is_ready(e->dev) || !api || !api->sample ||
-        api->scope > KP_RGB_CONDITION_CENTRAL_ONLY) {
-      fault(e, "invalid or unready provider");
+    if (!api || !api->sample || api->scope > KP_RGB_CONDITION_CENTRAL_ONLY) {
+      fault(e, "invalid provider");
     }
   }
 

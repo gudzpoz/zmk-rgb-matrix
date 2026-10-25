@@ -28,12 +28,11 @@ struct kp_rgb_selector {
   uint16_t initial_effect;
 };
 
-/* Identity metadata is available before device/provider readiness. Mutations
- * require the matrix lock. Registry access does not start selectors. */
+/* Available before control startup. Mutations require the matrix lock. */
 size_t kp_rgb_selector_registry_count(void);
 struct kp_rgb_selector *kp_rgb_selector_registry_at(size_t index);
 
-/* Returns NULL for out-of-range or currently unready slots. */
+/* Returns NULL for out-of-range slots. */
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot);
 const struct device *
@@ -51,19 +50,14 @@ void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector);
 int kp_rgb_selector_select_locked(struct kp_rgb_selector *selector,
                                   uint16_t slot);
 
-/* Called before starting condition control, after restoration and provider
- * readiness. Thread-only; returns a negative error if any selector has no ready
- * member. Successful selector startup is idempotent. */
-int kp_rgb_selector_overlays_start(void);
-
 /* Thread context with the matrix lock held; supply a selector overlay device.
  * Changes request composition, not callbacks or I/O. Returns 1 when changed,
  * 0 when unchanged, or a negative error. */
 int kp_rgb_selector_overlay_select_locked(const struct device *selector,
                                           uint16_t slot);
 
-/* Caller holds the matrix lock; NULL means this is not a ready selector
- * overlay. */
+/* Caller holds the matrix lock; NULL before control startup or for devices
+ * outside the selector registry. */
 struct kp_rgb_selector *
 kp_rgb_selector_overlay_state_locked(const struct device *selector);
 int kp_rgb_selector_overlay_reset_locked(const struct device *selector);
@@ -87,8 +81,7 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
 int kp_rgb_selector_binding_apply(const struct device *selector,
                                   uint32_t command, uint32_t argument);
 
-/* Ready-effect parameter APIs deliberately do not require selector membership.
- */
+/* Parameter APIs do not require selector membership. */
 int kp_rgb_set_color_locked(const struct device *effect,
                             const struct kp_rgb_hsb *color);
 int kp_rgb_set_period_locked(const struct device *effect, uint32_t period_ms);

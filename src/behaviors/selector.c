@@ -18,7 +18,7 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
-  if (state == NULL || !device_is_ready(state->owner)) {
+  if (state == NULL) {
     kp_rgb_matrix_unlock();
     return -ENODEV;
   }

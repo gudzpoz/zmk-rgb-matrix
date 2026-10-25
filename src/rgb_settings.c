@@ -98,23 +98,7 @@ static void kp_dirty_global_locked(void) {
   kp_global_revision++;
 }
 
-int kp_rgb_settings_commit(void) {
-  kp_rgb_matrix_lock();
-  /* Validate readiness before consuming any staged records. */
-  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-    const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-    if (!device_is_ready(selector->owner)) {
-      kp_rgb_matrix_unlock();
-      return -ENODEV;
-    }
-    for (size_t j = 0; j < selector->effect_count; j++) {
-      const struct device *effect = selector->members[j].effect;
-      if (effect != NULL && !device_is_ready(effect)) {
-        kp_rgb_matrix_unlock();
-        return -ENODEV;
-      }
-    }
-  }
+void kp_rgb_settings_restore_locked(void) {
   if (kp_global_pending) {
     kp_rgb_global.user_on = kp_global_load.user_on;
     kp_rgb_global.brightness = kp_global_load.brightness;
@@ -125,8 +109,8 @@ int kp_rgb_settings_commit(void) {
     struct kp_selector_load *load = &kp_selectors[i];
     if (load->selection_pending) {
       size_t slot = selector->initial_effect;
-      if (kp_rgb_selector_at(selector, slot) == NULL)
-        slot = kp_rgb_selector_calc_index(selector, 0, 0);
+      if (slot >= selector->effect_count)
+        slot = 0;
       for (size_t j = 0; j < selector->effect_count; j++) {
         const char *id = selector->members[j].id;
         if (id != NULL && strcmp(load->selection.selected_id, id) == 0) {
@@ -140,14 +124,12 @@ int kp_rgb_settings_commit(void) {
   }
   kp_global_pending = false;
   zmk_rgb_matrix_flush();
-  kp_rgb_matrix_unlock();
-  return 0;
 }
 
 SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(kp_rgb_matrix, KP_RGB_PERSIST_SUBTREE,
                                           NULL, kp_rgb_load_cb,
-                                          kp_rgb_settings_commit, NULL,
-                                          INT_MAX - 1);
+                                          kp_rgb_control_commit, NULL,
+                                          INT_MAX);
 
 static int kp_save_selector(size_t index, uint32_t *revision) {
   const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(index);
@@ -217,7 +199,7 @@ static void kp_rgb_save_work_handler(struct k_work *work) {
 
 #else
 
-int kp_rgb_settings_commit(void) { return 0; }
+void kp_rgb_settings_restore_locked(void) {}
 
 #endif
 

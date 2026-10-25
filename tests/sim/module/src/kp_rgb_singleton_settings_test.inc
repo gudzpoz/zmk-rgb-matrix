@@ -188,7 +188,7 @@ static void singleton_settings(void *a, void *b, void *c) {
     CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on == durable.user_on);
     CHECK(kp_rgb_global.brightness == durable.brightness);
 #else
-    CHECK(kp_rgb_settings_commit() == 0 && kp_rgb_save_state() == 0);
+    CHECK(kp_rgb_control_commit() == 0 && kp_rgb_save_state() == 0);
     CHECK(kp_rgb_save_selector_state(NULL, true) == 0);
     CHECK(zmk_rgb_matrix_off() == 0); kp_rgb_reset_state();
     bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);

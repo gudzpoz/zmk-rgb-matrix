@@ -29,9 +29,6 @@ SCENARIOS = {
     "control-publication": "controls",
     "control-isr": "controls",
     "control-large-step": "large-step",
-    "control-deferred": "deferred",
-    "control-unready": "deferred",
-    "control-member-unready": "member-unready",
     "control-local-only": "local-only",
     "control-owner": "owner",
     "control-duration-defaults": "duration-defaults",
@@ -85,10 +82,6 @@ def main():
                     single_effect: single_effect { compatible = "keypaw,rgb-matrix-solid"; };
                 };
             }; &ordinary { #binding-cells = <2>; };'''
-        elif image == "deferred":
-            fragment += "&selector_a { zephyr,deferred-init; };\n"
-        elif image == "member-unready":
-            fragment += "&probe_c { zephyr,deferred-init; };\n"
         elif image == "duration-defaults":
             fragment += "&probe_a { duration = <0>; }; &probe_c { duration = <66236>; }; &probe_b { duration = <0xffffffff>; };\n"
         elif image == "peripheral":
