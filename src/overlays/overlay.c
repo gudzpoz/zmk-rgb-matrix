@@ -11,7 +11,6 @@
 #include <stddef.h>
 
 #include <zephyr/sys/util.h>
-#include <zmk/rgb_persist.h>
 #include <drivers/behavior.h>
 
 #include "../rgb_matrix_internal.h"
@@ -177,27 +176,14 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
   return err;
 }
 
-#define KP_SELECTOR_ID(node_id) STRINGIFY(DT_NODE_FULL_NAME_TOKEN(node_id))
-
-#define KP_SELECTOR_MEMBER_ID_LENGTH(node_id)                                  \
-  BUILD_ASSERT(sizeof(KP_SELECTOR_ID(node_id)) <=                              \
-                   KP_RGB_PERSIST_MAX_ID_LENGTH,                               \
-               "RGB node name exceeds KP_RGB_PERSIST_MAX_ID_LENGTH");
-
 #define KP_SELECTOR_MEMBER(node_id)                                            \
-  {.effect = DEVICE_DT_GET(node_id), .id = KP_SELECTOR_ID(node_id)},
+  {.effect = DEVICE_DT_GET(node_id)},
 #define KP_SELECTOR_INSTANCE(node_id)                                          \
   KP_RGB_EFFECT_INSTANCE_INIT(DEVICE_DT_GET(node_id)),
 
 #define KP_SELECTOR_DEFINE(inst)                                               \
   BUILD_ASSERT(sizeof(DEVICE_DT_NAME(DT_DRV_INST(inst))) <= 9,                 \
                "controlled overlay endpoint must be at most 8 bytes");         \
-  BUILD_ASSERT(sizeof(KP_SELECTOR_ID(DT_DRV_INST(inst))) <=                    \
-                   KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH,                      \
-               "RGB selector token exceeds "                                   \
-               "KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH");                       \
-  DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst),                              \
-                               KP_SELECTOR_MEMBER_ID_LENGTH)                   \
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(DT_DRV_INST(inst)) > 0,                \
                "selector requires at least one enabled nested effect");        \
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(DT_DRV_INST(inst)) <= UINT16_MAX,      \
@@ -221,7 +207,6 @@ int kp_rgb_selector_overlay_reset_locked(const struct device *dev) {
       .selector =                                                              \
           {                                                                    \
               .owner = DEVICE_DT_GET(DT_DRV_INST(inst)),                       \
-              .id = KP_SELECTOR_ID(DT_DRV_INST(inst)),                         \
               .members = kp_selector_##inst##_members,                         \
               .effect_count = ARRAY_SIZE(kp_selector_##inst##_members),        \
               .effect_index = DT_PROP(DT_DRV_INST(inst), initial_effect),      \

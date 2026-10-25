@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Real settings handler, storage failures and unlocked-save revision races."""
+"""Real whole-snapshot settings handler, bounded failure and in-flight request tests."""
 import argparse
 from pathlib import Path
 import subprocess
@@ -12,18 +12,6 @@ from native_build import SELECTORS, build
 
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
              .replace(' animate;', ''))
-NORMALIZED_SELECTORS = (SELECTORS
-    .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
-    .replace('compatible = "keypaw,rgb-overlay";',
-             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay";')
-    .replace('compatible = "keypaw,rgb-matrix-solid";',
-             'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
-    .replace('selector_a: selector_a {',
-             'selector_a: selector-a@1 { reg = <1>; #address-cells = <1>; #size-cells = <0>;')
-    .replace('selector_b: selector_b {',
-             'selector_b: selector-b@2 { reg = <2>; #address-cells = <1>; #size-cells = <0>;')
-    .replace('probe_c: a_motion {', 'probe_c: a-motion@3 { reg = <3>;')
-    .replace('probe_d: b_alt {', 'probe_d: b-alt@4 { reg = <4>;'))
 REORDERED = '''
 &rgb_matrix {
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
@@ -40,13 +28,10 @@ REORDERED = '''
         compatible = "keypaw,rgb-overlay"; initial-effect = <2>;
         controllable; #binding-cells = <2>; label = "rgbs_a";
         leds = <0 1>; condition = <&preview_visible>;
-        optout: optout { compatible = "keypaw,rgb-matrix-solid";
-            color = <0xff0000>; };
-        probe_c: a_motion { compatible = "keypaw,rgb-matrix-solid";
-            color = <0x0000ff>; };
+        optout: optout { compatible = "keypaw,rgb-matrix-solid"; color = <0xff0000>; };
+        probe_c: a_motion { compatible = "keypaw,rgb-matrix-solid"; color = <0x0000ff>; };
         disabled { compatible = "keypaw,rgb-matrix-solid"; status = "disabled"; };
-        probe_a: a_static { compatible = "keypaw,rgb-matrix-solid";
-            color = <0x00ff00>; };
+        probe_a: a_static { compatible = "keypaw,rgb-matrix-solid"; color = <0x00ff00>; };
     };
     ordinary: ordinary { compatible = "keypaw,rgb-overlay"; leds = <1>;
         condition = <&preview_visible>;
@@ -59,22 +44,38 @@ REORDERED = '''
 };
 &kscan { events = <>; };
 '''
+BOOT_ACTION = '''
+#include <dt-bindings/keypaw/rgb_matrix.h>
+&rgb_conditions {
+    reinterpreted_selection: reinterpreted_selection {
+        compatible = "keypaw,rgb-condition-effect-selected";
+        selector = <&selector_a>; effect = <&probe_c>;
+    };
+};
+/ {
+    settings_boot_actions {
+        compatible = "keypaw,rgb-trigger-table";
+        selected { condition = <&reinterpreted_selection>;
+            on-enter = <&rgb_matrix RGB_OFF_CMD 0>; };
+    };
+};
+'''
 CONF = '''CONFIG_KEYPAW_SIM_SELECTOR_TEST=n
 CONFIG_SETTINGS=y
 CONFIG_SETTINGS_CUSTOM=y
 CONFIG_KEYPAW_SIM_SETTINGS_TEST=y
 CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20
 '''
-SCENARIOS = ("repeated-commits", "existing", "validation", "old-custom-ids", "runtime-parameters", "normalized-names", "debounce", "global-failure", "staged-reset",
-             "selector-dirty", "selector-reset", "selector-failed-dirty",
-             "selector-failed-reset", "global-dirty", "global-reset",
-             "global-failed-dirty", "global-failed-reset", "reset-revision-second-failure", "reordering")
-CONFIGS = {
-    "auto": ("", ""),
-    "provider": ("", ""),
-    "reordered": ("", ""),
-    "normalized-names": ("", ""),
-}
+SCENARIOS = ("existing", "validation", "runtime-parameters", "repeated-commits",
+             "debounce", "global-failure", "staged-reset",
+             "selector-dirty", "selector-failed-dirty",
+             "selector-dirty-second-failure", "selector-failed-dirty-second-failure",
+             "selector-reset", "selector-failed-reset",
+             "selector-reset-second-failure", "selector-failed-reset-second-failure",
+             "global-reset", "global-failed-reset",
+             "global-reset-second-failure", "global-failed-reset-second-failure",
+             "reordering")
+CONFIGS = ("auto", "original", "reordered")
 
 
 def unique_log(root, stem):
@@ -84,6 +85,28 @@ def unique_log(root, stem):
         path = root / f"{stem}-{attempt}.log"
         attempt += 1
     return path
+
+
+def run_case(root, name, scenario, storage=None):
+    command = [str(root / name / "build/zephyr/zmk.exe"), "-no-rt",
+               "--stop_at=10", f"--settings-scenario={scenario}"]
+    if storage is not None:
+        command.append(f"--settings-storage={storage}")
+    print("COMMAND", " ".join(command), flush=True)
+    result = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, timeout=30,
+                        log_path=unique_log(root, f"{name}-{scenario}"))
+    assert result.returncode == 0, result.stdout[-20000:]
+    assert f"PASS settings {scenario}" in result.stdout, result.stdout
+    assert "PASS scoped settings provider before restoration" in result.stdout
+    if scenario == "reordering":
+        assert "PASS settings positional boot action" in result.stdout
+    if scenario == "existing":
+        assert "PASS scoped settings legacy records ignored" in result.stdout
+    errors = [line for line in result.stdout.splitlines() if "<err>" in line]
+    assert all("set-value failure. key: keypaw/rgb_matrix/" in line
+               for line in errors), result.stdout
+    print(f"PASS scoped settings native {name}/{scenario}", flush=True)
 
 
 def main():
@@ -96,56 +119,40 @@ def main():
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
-    root = args.artifacts or Path(tempfile.mkdtemp(prefix="rgb-scoped-settings-"))
+    root = (args.artifacts or Path(tempfile.mkdtemp(prefix="rgb-scoped-settings-"))).resolve()
     root.mkdir(parents=True, exist_ok=True)
     print(f"ARTIFACTS {root}", flush=True)
-    for name in args.config or CONFIGS:
-        fragment, config = CONFIGS[name]
+    configs = args.config or CONFIGS
+    if "reordered" in configs and "original" not in configs:
+        parser.error("--config reordered requires --config original for the shared-blob oracle")
+    for name in configs:
         if not args.no_build:
-            selectors = (REORDERED if name == "reordered" else
-                         NORMALIZED_SELECTORS if name == "normalized-names" else SELECTORS)
-            result = build(root, name, fragment, runtime=True,
-                           selectors=selectors,
-                           extra_conf=CONF + config)
+            result = build(root, name, BOOT_ACTION if name in ("original", "reordered") else "",
+                           runtime=True, selectors=REORDERED if name == "reordered" else SELECTORS,
+                           extra_conf=CONF + ("\nCONFIG_KEYPAW_RGB_TRIGGERS=y\n"
+                                              if name in ("original", "reordered") else ""))
             assert result.returncode == 0, result.stdout[-20000:]
-        scenarios = (("normalized-names",) if name == "normalized-names" else
-                     ("reordering", "validation", "old-custom-ids", "staged-reset") if name == "reordered" else
-                     tuple(scenario for scenario in SCENARIOS if scenario != "normalized-names"))
-        selected = args.scenario or scenarios
-        assert all(scenario in scenarios for scenario in selected), (name, selected, scenarios)
-        for scenario in (scenario for _ in range(args.repeat) for scenario in selected):
-            command = [str(root / name / "build/zephyr/zmk.exe"), "-no-rt",
-                       "--stop_at=10", f"--settings-scenario={scenario}"]
-            if scenario == "reordering":
-                command.append(f"--settings-storage={root / 'settings-storage.bin'}")
-            print("COMMAND", " ".join(command), flush=True)
-            result = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=30,
-                                log_path=unique_log(root, f"{name}-{scenario}"))
-            assert result.returncode == 0, result.stdout[-20000:]
-            markers = ("restored at global boundary", "legacy records ignored",
-                       "independent save despite persistent failure",
-                       "addressed save/reset/reload isolation", "global reset/reload")
-            if scenario == "existing":
-                for marker in markers:
-                    assert f"PASS scoped settings {marker}" in result.stdout, result.stdout
-            else:
-                assert f"PASS settings {scenario}" in result.stdout, result.stdout
-            assert "PASS scoped settings provider before restoration" in result.stdout
-            errors = [line for line in result.stdout.splitlines() if "<err>" in line]
-            assert all("set-value failure. key: keypaw/rgb_matrix/" in line
-                       for line in errors), result.stdout
-            print(f"PASS scoped settings native {name}/{scenario}", flush=True)
+        if name in ("original", "reordered"):
+            continue
+        scenarios = args.scenario or SCENARIOS
+        for _ in range(args.repeat):
+            for scenario in scenarios:
+                if scenario != "reordering":
+                    run_case(root, name, scenario)
+    if (not args.scenario or "reordering" in args.scenario) and "original" in configs:
+        for repeat in range(args.repeat):
+            storage = root / f"settings-storage-{repeat}.bin"
+            storage.unlink(missing_ok=True)
+            run_case(root, "original", "reordering", storage)
+            original = storage.read_bytes()
+            assert original == bytes((1, 1, 61, 0, 3, 0, 0, 0, 0, 0, 1, 0)), original
+            if "reordered" in configs:
+                run_case(root, "reordered", "reordering", storage)
+                assert storage.read_bytes() == original
+                run_case(root, "original", "reordering", storage)
+                assert storage.read_bytes() == original
+                print("PASS settings same blob original/reordered/original boot actions", flush=True)
 
-    if (not args.scenario or "reordering" in args.scenario) and all(
-            name in (args.config or CONFIGS) for name in ("auto", "reordered")):
-        command = [str(root / "auto/build/zephyr/zmk.exe"), "-no-rt", "--stop_at=10",
-                   "--settings-scenario=reordering", f"--settings-storage={root / 'settings-storage.bin'}"]
-        result = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, timeout=30,
-                            log_path=unique_log(root, "reordered-back-to-auto"))
-        assert result.returncode == 0 and "PASS settings reordering" in result.stdout, result.stdout
-        print("PASS settings reordered firmware back to original slots", flush=True)
 
 if __name__ == "__main__":
     main()

@@ -8,15 +8,14 @@
 #include <limits.h>
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
-#include <zmk/rgb_persist.h>
 #include <zmk/rgb_selector.h>
 #include <zmk/events/position_state_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"
+#include "../../../../src/rgb_persist_internal.h"
+#include "../../../../src/rgb_selector_internal.h"
 
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
-#define KP_TEST_NODE_TOKEN(node) STRINGIFY(DT_NODE_FULL_NAME_TOKEN(node))
-#define KP_TEST_SELECTOR_A_STATE \
-    "keypaw/rgb_matrix/selectors/" KP_TEST_NODE_TOKEN(DT_NODELABEL(selector_a)) "/state"
+#define KP_TEST_SELECTOR_CAPACITY 16
 struct source {
     atomic_t value, calls, pause;
     bool short_circuit;
@@ -130,6 +129,37 @@ static bool peripheral(void) {
     return IS_ENABLED(CONFIG_ZMK_SPLIT) && !IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL);
 }
 
+#if IS_ENABLED(CONFIG_SETTINGS)
+static int store_snapshot(const struct device *target_selector,
+                          const struct device *target_effect) {
+    uint16_t selections[KP_TEST_SELECTOR_CAPACITY];
+    size_t count = kp_rgb_selector_registry_count();
+    KP_CHECK(count <= ARRAY_SIZE(selections));
+    kp_rgb_matrix_lock();
+    for (size_t i = 0; i < count; i++) {
+        struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+        selections[i] = selector->effect_index;
+        if (selector->owner == target_selector) {
+            size_t slot;
+            for (slot = 0; slot < selector->effect_count; slot++)
+                if (selector->members[slot].effect == target_effect) break;
+            KP_CHECK(slot < selector->effect_count && slot <= UINT16_MAX);
+            selections[i] = (uint16_t)slot;
+        }
+    }
+    struct kp_rgb_persist_state state = {
+        .user_on = kp_rgb_global.user_on,
+        .brightness = kp_rgb_global.brightness,
+        .selection_count = (uint16_t)count,
+    };
+    kp_rgb_matrix_unlock();
+
+    uint8_t bytes[KP_RGB_PERSIST_SIZE(KP_TEST_SELECTOR_CAPACITY)];
+    size_t len = KP_RGB_PERSIST_SIZE(count);
+    KP_CHECK(kp_rgb_persist_encode(&state, selections, bytes, len) == 0);
+    return settings_runtime_set(KP_RGB_PERSIST_KEY, bytes, len);
+}
+#endif
 struct action_record { uint32_t code, parameter; int64_t timestamp; };
 static struct action_record actions[128];
 static unsigned action_count, release_count;
@@ -533,12 +563,10 @@ static int auto_prepare(void) {
     atomic_set(&src(DEV(cc_noreg))->value, true);
 #endif
 #if IS_ENABLED(CONFIG_SETTINGS)
-    if (kp_test_case("startup-normalized-names") || kp_test_case("startup-settings-staged")) {
-        struct kp_rgb_persist_selector_record record;
-        const char *member = kp_test_case("startup-normalized-names") ?
-            KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)) : KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c));
-        KP_CHECK(kp_rgb_persist_encode_selector(member, &record) == 0);
-        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+    if (kp_test_case("startup-positional") || kp_test_case("startup-settings-staged")) {
+        const struct device *effect = kp_test_case("startup-positional") ?
+            DEV(probe_a) : DEV(probe_c);
+        KP_CHECK(store_snapshot(DEV(selector_a), effect) == 0);
     }
 #endif
     KP_CHECK(calls(DEV(cc_root)) == 0);
@@ -560,9 +588,7 @@ static int settings_provider_commit(void) {
     atomic_set(&src(DEV(cc_root))->value, true);
     provider_commits++;
     if (kp_test_case("startup-settings-staged")) return 0;
-    struct kp_rgb_persist_selector_record record;
-    KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
-    KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+    KP_CHECK(store_snapshot(DEV(selector_a), DEV(probe_c)) == 0);
     return 0;
 }
 SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_source",
@@ -570,7 +596,7 @@ SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(cc_settings_source, "cc_settings_sourc
 #endif
 
 static void special_cases(void) {
-    if (kp_test_case("startup-normalized-names")) {
+    if (kp_test_case("startup-positional")) {
         wait_ready();
         KP_CHECK(device_is_ready(DEV(selector_a)) && device_is_ready(DEV(probe_a)));
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
@@ -605,9 +631,7 @@ static void special_cases(void) {
         drain();
         KP_CHECK(calls(DEV(cc_root)) == 1 && calls(DEV(cc_event)) == 1 &&
                  calls(DEV(cc_event_b)) == 1);
-        struct kp_rgb_persist_selector_record record;
-        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_a)), &record) == 0);
-        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+        KP_CHECK(store_snapshot(DEV(selector_a), DEV(probe_a)) == 0);
         KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
         expect_selection(true);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
@@ -763,10 +787,8 @@ static void stale_source_refresh(bool source_only, bool newer_resume) {
     atomic_set(&src(DEV(cc_root))->value, !source_only);
     if (reload) {
 #if DT_NODE_EXISTS(DT_NODELABEL(cc_observer)) && IS_ENABLED(CONFIG_SETTINGS)
-        struct kp_rgb_persist_selector_record record;
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-        KP_CHECK(kp_rgb_persist_encode_selector(KP_TEST_NODE_TOKEN(DT_NODELABEL(probe_c)), &record) == 0);
-        KP_CHECK(settings_runtime_set(KP_TEST_SELECTOR_A_STATE, &record, sizeof(record)) == 0);
+        KP_CHECK(store_snapshot(DEV(selector_a), DEV(probe_c)) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
         KP_CHECK(settings_commit_subtree(KP_RGB_PERSIST_SUBTREE) == 0);
         KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
@@ -837,7 +859,7 @@ void kp_test_conditions_run(void) {
 #else
         KP_CHECK(false);
 #endif
-    } else if (kp_test_case("startup-normalized-names") ||
+    } else if (kp_test_case("startup-positional") ||
         kp_test_case("startup-auto") || kp_test_case("startup-unrestored-settings") ||
         kp_test_case("startup-settings-staged") ||
         kp_test_case("overlay-zero") || kp_test_case("trigger-no-table") ||

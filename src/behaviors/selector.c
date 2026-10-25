@@ -45,11 +45,11 @@ int kp_rgb_selector_binding_apply(const struct device *selector,
     else
       kp_rgb_split_selector_dirty_locked(selector);
   }
-  kp_rgb_matrix_unlock();
   if (err >= 0 &&
       (command == RGB_EFF_CMD || command == RGB_EFR_CMD ||
        command == RGB_EFS_CMD || command == RGB_RESET_CMD))
     err = kp_rgb_save_selector_state(selector, command == RGB_RESET_CMD);
+  kp_rgb_matrix_unlock();
   return err;
 }
 

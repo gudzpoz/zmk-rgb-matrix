@@ -16,7 +16,7 @@ SCENARIOS = (
     'initial-shared', 'cross-selector', 'third-party', 'selection-burst',
     'trigger-mutation', 'resume-selection', 'external-interruption',
     'external-unused-interruption', 'overlay-gate', 'split-visibility',
-    'startup-normalized-names', 'startup-auto',
+    'startup-positional', 'startup-auto',
     'startup-unrestored-settings', 'startup-settings-staged',
     'overlay-zero', 'trigger-no-table', 'trigger-actions', 'trigger-unregistered-root',
     'stale-source-refresh', 'pending-source', 'runtime-reload-freshness',
@@ -93,7 +93,7 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 
 
 VARIANTS = {
-    'startup-normalized-names': ('normalized', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
+    'startup-positional': ('positional', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'startup-auto': ('auto', '', ''),
     'startup-unrestored-settings': ('settings-auto', '',
         'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
@@ -236,19 +236,6 @@ def main():
         for (variant, addition, options), scenarios in groups.items():
             image = f'{role}-{variant}'
             selectors = SELECTOR_FIXTURE
-            if variant == 'normalized':
-                selectors = (selectors
-                    .replace('&rgb_matrix {', '&rgb_matrix { #address-cells = <1>; #size-cells = <0>;')
-                    .replace('compatible = "keypaw,rgb-overlay";',
-                             'compatible = "test,rgb-token-selector", "keypaw,rgb-overlay";')
-                    .replace('compatible = "keypaw,rgb-matrix-solid";',
-                             'compatible = "test,rgb-token-solid", "keypaw,rgb-matrix-solid";')
-                    .replace('selector_a: selector_a {',
-                             'selector_a: selector-a@1 { reg = <1>; #address-cells = <1>; #size-cells = <0>;')
-                    .replace('selector_b: selector_b {',
-                             'selector_b: selector-b@2 { reg = <2>; #address-cells = <1>; #size-cells = <0>;')
-                    .replace('probe_c: a_motion {', 'probe_c: a-motion@3 { reg = <3>;')
-                    .replace('probe_a: a_static {', 'probe_a: a-static@4 { reg = <4>;'))
             result = build(root, image, fragment + addition, selectors=selectors,
                            extra_conf=conf + options)
             if result.returncode:

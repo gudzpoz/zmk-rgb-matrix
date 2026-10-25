@@ -11,118 +11,84 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/util.h>
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_persist.h>
 
 #include "rgb_matrix_internal.h"
+#include "rgb_persist_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_SETTINGS)
 
-#define KP_RGB_PERSIST_KEY KP_RGB_PERSIST_SUBTREE "/state"
+#define KP_RGB_SETTINGS_SIZE KP_RGB_PERSIST_SIZE(KP_RGB_SELECTOR_COUNT)
 
-struct kp_selector_load {
-  struct kp_rgb_persist_selector_record selection;
-  bool selection_pending;
-  bool dirty;
-  uint32_t revision;
-};
+BUILD_ASSERT(KP_RGB_SELECTOR_COUNT <= UINT16_MAX,
+             "RGB selector count exceeds settings count field");
+BUILD_ASSERT(KP_RGB_SETTINGS_SIZE <= SETTINGS_MAX_VAL_LEN,
+             "RGB snapshot exceeds SETTINGS_MAX_VAL_LEN");
 
-static struct kp_selector_load
-    kp_selectors[MAX(1, KP_RGB_SELECTOR_COUNT)];
-static struct kp_rgb_persist_global_state kp_global_load;
-static bool kp_global_pending, kp_global_dirty;
-static uint32_t kp_global_revision;
+static struct kp_rgb_persist_state kp_load;
+static uint16_t kp_load_selections[MAX(1, KP_RGB_SELECTOR_COUNT)];
+static bool kp_load_pending;
+static bool kp_save_pending;
+static int64_t kp_save_deadline;
 
 static void kp_rgb_save_work_handler(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(kp_rgb_save_work, kp_rgb_save_work_handler);
 
-static void kp_path(char *out, const char *selector) {
-  snprintk(out, SETTINGS_MAX_NAME_LEN + 1, "%s%s/state",
-           KP_RGB_PERSIST_SELECTOR_PREFIX, selector);
-}
-
-static int kp_read(size_t len, size_t expected, settings_read_cb read_cb,
-                   void *cb_arg, void *out) {
-  if (len != expected)
-    return -EINVAL;
-  int rc = read_cb(cb_arg, out, expected);
-  return rc < 0 ? rc : (rc == (int)expected ? 0 : -EINVAL);
+static uint16_t kp_initial_slot(const struct kp_rgb_selector *selector) {
+  return selector->initial_effect < selector->effect_count
+             ? selector->initial_effect
+             : 0;
 }
 
 static int kp_rgb_load_cb(const char *name, size_t len,
                           settings_read_cb read_cb, void *cb_arg) {
-  if (strcmp(name, "state") == 0) {
-    struct kp_rgb_persist_global_record bytes;
-    struct kp_rgb_persist_global_state value;
-    int err = kp_read(len, sizeof(bytes), read_cb, cb_arg, &bytes);
-    if (err == 0)
-      err = kp_rgb_persist_decode_global(&bytes, sizeof(bytes), &value);
-    if (err < 0)
-      return err;
-    kp_rgb_matrix_lock();
-    kp_global_load = value;
-    kp_global_pending = true;
-    kp_rgb_matrix_unlock();
+  if (strcmp(name, "snapshot") != 0)
     return 0;
-  }
+  if (len < KP_RGB_PERSIST_HEADER_SIZE ||
+      (len - KP_RGB_PERSIST_HEADER_SIZE) % 2 != 0 ||
+      (len - KP_RGB_PERSIST_HEADER_SIZE) / 2 > UINT16_MAX)
+    return -EINVAL;
 
-  char path[SETTINGS_MAX_NAME_LEN + 1];
-  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-    const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-    kp_path(path, selector->id);
-    if (strcmp(name, path + sizeof(KP_RGB_PERSIST_SUBTREE)) == 0) {
-      struct kp_rgb_persist_selector_record bytes, value;
-      int err = kp_read(len, sizeof(bytes), read_cb, cb_arg, &bytes);
-      if (err == 0)
-        err = kp_rgb_persist_decode_selector(&bytes, sizeof(bytes), &value);
-      if (err < 0)
-        return err;
-      kp_rgb_matrix_lock();
-      kp_selectors[i].selection = value;
-      kp_selectors[i].selection_pending = true;
-      kp_rgb_matrix_unlock();
-      return 0;
-    }
-  }
+  uint8_t bytes[KP_RGB_SETTINGS_SIZE];
+  uint16_t selections[MAX(1, KP_RGB_SELECTOR_COUNT)];
+  struct kp_rgb_persist_state value;
+  size_t prefix_len = MIN(len, sizeof(bytes));
+  int rc = read_cb(cb_arg, bytes, prefix_len);
+  if (rc < 0)
+    return rc;
+  if (rc != (int)prefix_len)
+    return -EINVAL;
+  rc = kp_rgb_persist_decode(bytes, prefix_len, len, &value, selections,
+                             KP_RGB_SELECTOR_COUNT);
+  if (rc < 0)
+    return rc;
+
+  kp_rgb_matrix_lock();
+  kp_load = value;
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+    kp_load_selections[i] = i < value.selection_count
+                                ? selections[i]
+                                : kp_initial_slot(kp_rgb_selector_registry_at(i));
+  kp_load_pending = true;
+  kp_rgb_matrix_unlock();
   return 0;
 }
 
-static void kp_dirty_selector_locked(size_t index) {
-  kp_selectors[index].dirty = true;
-  kp_selectors[index].revision++;
-}
-
-static void kp_dirty_global_locked(void) {
-  kp_global_dirty = true;
-  kp_global_revision++;
-}
-
 void kp_rgb_settings_restore_locked(void) {
-  if (kp_global_pending) {
-    kp_rgb_global.user_on = kp_global_load.user_on;
-    kp_rgb_global.brightness = kp_global_load.brightness;
+  if (kp_load_pending) {
+    kp_rgb_global.user_on = kp_load.user_on;
+    kp_rgb_global.brightness = kp_load.brightness;
     kp_rgb_reconcile_power_locked();
-  }
-  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-    struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-    struct kp_selector_load *load = &kp_selectors[i];
-    if (load->selection_pending) {
-      size_t slot = selector->initial_effect;
+    for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
+      struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
+      uint16_t slot = kp_load_selections[i];
       if (slot >= selector->effect_count)
-        slot = 0;
-      for (size_t j = 0; j < selector->effect_count; j++) {
-        const char *id = selector->members[j].id;
-        if (id != NULL && strcmp(load->selection.selected_id, id) == 0) {
-          slot = j;
-          break;
-        }
-      }
+        slot = kp_initial_slot(selector);
       kp_rgb_selector_select_locked(selector, slot);
     }
-    load->selection_pending = false;
+    kp_load_pending = false;
   }
-  kp_global_pending = false;
   zmk_rgb_matrix_flush();
 }
 
@@ -131,70 +97,44 @@ SETTINGS_STATIC_HANDLER_DEFINE_WITH_CPRIO(kp_rgb_matrix, KP_RGB_PERSIST_SUBTREE,
                                           kp_rgb_control_commit, NULL,
                                           INT_MAX);
 
-static int kp_save_selector(size_t index, uint32_t *revision) {
-  const struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(index);
-  struct kp_rgb_persist_selector_record selection;
-  kp_rgb_matrix_lock();
-  *revision = kp_selectors[index].revision;
-  int err = -ENODEV;
-  if (kp_rgb_selector_overlay_state_locked(selector->owner) == selector &&
-      kp_rgb_selector_selected(selector) != NULL) {
-    err = kp_rgb_persist_encode_selector(
-        selector->members[selector->effect_index].id, &selection);
-  }
-  kp_rgb_matrix_unlock();
-  if (err < 0)
-    return err;
-  char path[SETTINGS_MAX_NAME_LEN + 1];
-  kp_path(path, selector->id);
-  return settings_save_one(path, &selection, sizeof(selection));
-}
-
-static int kp_save_global(void) {
-  struct kp_rgb_persist_global_record bytes;
-  kp_rgb_matrix_lock();
-  struct kp_rgb_persist_global_state state = {
-      .user_on = kp_rgb_global.user_on, .brightness = kp_rgb_global.brightness};
-  kp_rgb_persist_encode_global(&state, &bytes);
-  kp_rgb_matrix_unlock();
-  return settings_save_one(KP_RGB_PERSIST_KEY, &bytes, sizeof(bytes));
+static int kp_request_save_locked(int64_t delay_ms) {
+  kp_save_pending = true;
+  kp_save_deadline = k_uptime_get() + delay_ms;
+  return MIN(k_work_reschedule(&kp_rgb_save_work, K_MSEC(delay_ms)), 0);
 }
 
 static void kp_rgb_save_work_handler(struct k_work *work) {
   ARG_UNUSED(work);
-  int err = 0;
-  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-    kp_rgb_matrix_lock();
-    bool dirty = kp_selectors[i].dirty;
-    kp_rgb_matrix_unlock();
-    if (!dirty)
-      continue;
-    uint32_t revision;
-    int rc = kp_save_selector(i, &revision);
-    kp_rgb_matrix_lock();
-    if (rc == 0 && revision == kp_selectors[i].revision)
-      kp_selectors[i].dirty = false;
-    if (kp_selectors[i].dirty && err == 0)
-      err = rc < 0 ? rc : -EAGAIN;
-    kp_rgb_matrix_unlock();
-  }
+  uint8_t bytes[KP_RGB_SETTINGS_SIZE];
+  uint16_t selections[MAX(1, KP_RGB_SELECTOR_COUNT)];
+
   kp_rgb_matrix_lock();
-  bool dirty = kp_global_dirty;
-  uint32_t revision = kp_global_revision;
-  kp_rgb_matrix_unlock();
-  if (dirty) {
-    int rc = kp_save_global();
-    kp_rgb_matrix_lock();
-    if (rc == 0 && revision == kp_global_revision)
-      kp_global_dirty = false;
-    if (kp_global_dirty && err == 0)
-      err = rc < 0 ? rc : -EAGAIN;
+  if (!kp_save_pending) {
     kp_rgb_matrix_unlock();
+    return;
   }
-  if (err < 0) {
-    LOG_WRN("RGB settings save incomplete (err %d); retrying", err);
-    k_work_reschedule(&kp_rgb_save_work, K_MSEC(1000));
+  int64_t remaining = kp_save_deadline - k_uptime_get();
+  if (remaining > 0) {
+    k_work_reschedule(&kp_rgb_save_work, K_MSEC(remaining));
+    kp_rgb_matrix_unlock();
+    return;
   }
+  kp_save_pending = false;
+  struct kp_rgb_persist_state state = {
+      .user_on = kp_rgb_global.user_on,
+      .brightness = kp_rgb_global.brightness,
+      .selection_count = KP_RGB_SELECTOR_COUNT,
+  };
+  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++)
+    selections[i] = kp_rgb_selector_registry_at(i)->effect_index;
+  int err = kp_rgb_persist_encode(&state, selections, bytes, sizeof(bytes));
+  kp_rgb_matrix_unlock();
+
+  /* Flash I/O uses the larger system work queue stack. */
+  if (err == 0)
+    err = settings_save_one(KP_RGB_PERSIST_KEY, bytes, sizeof(bytes));
+  if (err < 0)
+    LOG_WRN("RGB settings save failed (err %d)", err);
 }
 
 #else
@@ -206,12 +146,9 @@ void kp_rgb_settings_restore_locked(void) {}
 int kp_rgb_save_state(void) {
 #if IS_ENABLED(CONFIG_SETTINGS)
   kp_rgb_matrix_lock();
-  kp_dirty_global_locked();
+  int err = kp_request_save_locked(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
   kp_rgb_matrix_unlock();
-  /* Flash I/O uses the larger system work queue stack. */
-  return MIN(k_work_reschedule(&kp_rgb_save_work,
-                               K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE)),
-             0);
+  return err;
 #else
   return 0;
 #endif
@@ -219,24 +156,19 @@ int kp_rgb_save_state(void) {
 
 int kp_rgb_save_selector_state(const struct device *selector, bool reset) {
 #if IS_ENABLED(CONFIG_SETTINGS)
-  bool found = false;
+  int err = -ENODEV;
   kp_rgb_matrix_lock();
   for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
     const struct kp_rgb_selector *state = kp_rgb_selector_registry_at(i);
     if (state->owner != selector)
       continue;
-    kp_dirty_selector_locked(i);
-    if (reset)
-      kp_selectors[i].selection_pending = false;
-    found = true;
+    if (reset && kp_load_pending)
+      kp_load_selections[i] = state->effect_index;
+    err = kp_request_save_locked(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
     break;
   }
   kp_rgb_matrix_unlock();
-  if (!found)
-    return -ENODEV;
-  return MIN(k_work_reschedule(&kp_rgb_save_work,
-                               K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE)),
-             0);
+  return err;
 #else
   ARG_UNUSED(selector);
   ARG_UNUSED(reset);
@@ -250,15 +182,8 @@ void kp_rgb_reset_state(void) {
   kp_rgb_selector_overlays_defaults_locked();
   kp_rgb_request_runtime_reset_locked();
 #if IS_ENABLED(CONFIG_SETTINGS)
-  kp_global_pending = false;
-  for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
-    kp_selectors[i].selection_pending = false;
-    kp_dirty_selector_locked(i);
-  }
-  kp_dirty_global_locked();
+  kp_load_pending = false;
+  kp_request_save_locked(0);
 #endif
   kp_rgb_matrix_unlock();
-#if IS_ENABLED(CONFIG_SETTINGS)
-  k_work_reschedule(&kp_rgb_save_work, K_NO_WAIT);
-#endif
 }

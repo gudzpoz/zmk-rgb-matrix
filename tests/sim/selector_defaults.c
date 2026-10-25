@@ -4,7 +4,6 @@
 #define DT_DRV_COMPAT test_rgb_default_effect
 #include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -47,10 +46,10 @@ DT_INST_FOREACH_STATUS_OKAY(MISSING_DEFINE)
   } \
 } while (0)
 
-static struct kp_rgb_selector *find_selector(const char *id) {
+static struct kp_rgb_selector *find_selector(const struct device *owner) {
   for (size_t i = 0; i < kp_rgb_selector_registry_count(); i++) {
     struct kp_rgb_selector *selector = kp_rgb_selector_registry_at(i);
-    if (selector != NULL && selector->id != NULL && strcmp(selector->id, id) == 0)
+    if (selector != NULL && selector->owner == owner)
       return selector;
   }
   return NULL;
@@ -58,16 +57,13 @@ static struct kp_rgb_selector *find_selector(const char *id) {
 
 static void check_static_metadata(void) {
   CHECK(kp_rgb_selector_registry_at(kp_rgb_selector_registry_count()) == NULL);
-  CHECK(find_selector("default_disabled") == NULL);
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == NULL);
-  struct kp_rgb_selector *selector = find_selector("default_selector");
+  struct kp_rgb_selector *selector = find_selector(DEV(default_selector));
   CHECK(selector != NULL);
   CHECK(selector->owner == DEV(default_selector));
   CHECK(selector->effect_count == 4);
   CHECK(selector->members[0].effect == DEV(default_ready));
-  CHECK(strcmp(selector->members[0].id, "ready") == 0);
   CHECK(selector->members[1].effect == DEV(default_explicit));
-  CHECK(strcmp(selector->members[1].id, "explicit") == 0);
   CHECK(selector->members[2].effect == DEV(default_breathe));
   CHECK(selector->members[3].effect == DEV(missing_selected));
   CHECK(kp_rgb_effect_cfg(DEV(default_ready))->defaults.duration_ms == 1000);
@@ -84,15 +80,14 @@ static void check_static_metadata(void) {
   CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.color.s == 100);
   CHECK(kp_rgb_effect_cfg(DEV(missing_selected))->defaults.color.b == 50);
 
-  selector = find_selector("default_late_selector");
+  selector = find_selector(DEV(default_late_selector));
   CHECK(selector != NULL && selector->effect_count == 3);
   CHECK(selector->owner == DEV(default_late_selector));
   CHECK(selector->members[0].effect == DEV(default_late));
-  CHECK(strcmp(selector->members[0].id, "late") == 0);
 }
 
 static void check_dense_selection(void) {
-  struct kp_rgb_selector *selector = find_selector("default_selector");
+  struct kp_rgb_selector *selector = find_selector(DEV(default_selector));
   CHECK(selector != NULL);
   kp_rgb_matrix_lock();
   CHECK(selector->effect_count == 4);
@@ -230,7 +225,7 @@ static int prepare_deferred_effect(void) {
   CHECK(zmk_rgb_matrix_set_color(DEV(missing_selected), &early_color) == 0);
   CHECK(zmk_rgb_matrix_set_period(DEV(missing_selected), 4321) == 0);
   kp_rgb_matrix_lock();
-  CHECK(kp_rgb_selector_at(find_selector("default_late_selector"), 0) == DEV(default_late));
+  CHECK(kp_rgb_selector_at(find_selector(DEV(default_late_selector)), 0) == DEV(default_late));
   kp_rgb_matrix_unlock();
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);

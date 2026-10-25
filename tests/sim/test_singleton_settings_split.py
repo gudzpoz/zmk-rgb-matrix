@@ -45,7 +45,8 @@ SPLIT_SCENARIOS = (
 )
 SCENARIOS = {
     "settings": ("existing", "validation", "rejection-current-first", "rejection-legacy-first",
-                 "failure", "dirty", "reset", "failed-dirty", "failed-reset", "debounce", "staged-reset"),
+                 "failure", "dirty", "reset", "failed-dirty", "failed-reset", "debounce",
+                 "staged-reset", "repeated-commits"),
     "settings-disabled": ("disabled",),
     "split": SPLIT_SCENARIOS,
     "split-zero": SPLIT_SCENARIOS,
@@ -96,8 +97,10 @@ def main():
         for iteration in range(args.repeat):
             for scenario in scenarios:
                 kind = "split" if split else "settings"
-                run(root, name, scenario, arguments=("--stop_at=20",),
-                    scenario_option=f"{kind}-scenario", marker=f"PASS singleton {kind} {scenario}")
+                result = run(root, name, scenario, arguments=("--stop_at=20",),
+                             scenario_option=f"{kind}-scenario", marker=f"PASS singleton {kind} {scenario}")
+                if name == "settings" and scenario in ("failure", "failed-dirty", "failed-reset"):
+                    assert "RGB settings save failed" in result.stdout, result.stdout
                 print(f"PASS native singleton {name}/{scenario} iteration={iteration + 1}", flush=True)
 
 

@@ -114,7 +114,12 @@ static int control_load(struct settings_store *store, const struct settings_load
 static int control_save(struct settings_store *store, const char *name, const char *value, size_t len) {
     ARG_UNUSED(store); ARG_UNUSED(name); ARG_UNUSED(value); ARG_UNUSED(len);
     if (kp_test_case("control-one-child")) {
-        KP_CHECK(!strcmp(name, "keypaw/rgb_matrix/selectors/single_control/state"));
+        const uint8_t *bytes = (const uint8_t *)value;
+        size_t count = kp_rgb_selector_registry_count();
+        KP_CHECK(!strcmp(name, "keypaw/rgb_matrix/snapshot"));
+        KP_CHECK(len == 6 + 2 * count);
+        KP_CHECK(bytes[0] == 1 && bytes[3] == 0);
+        KP_CHECK((bytes[4] | ((size_t)bytes[5] << 8)) == count);
     }
     atomic_inc(&storage_writes); return 0;
 }

@@ -16,12 +16,10 @@
 /* Enabled selector children in declaration order. */
 struct kp_rgb_selector_member {
   const struct device *effect;
-  const char *id;
 };
 
 struct kp_rgb_selector {
   const struct device *owner;
-  const char *id;
   const struct kp_rgb_selector_member *members;
   size_t effect_count;
   size_t effect_index;

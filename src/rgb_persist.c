@@ -2,86 +2,59 @@
  * Copyright (c) 2026 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
- *
- * On-flash record codec for RGB matrix settings.
  */
 
 #include <errno.h>
-#include <string.h>
 
-#include <zephyr/settings/settings.h>
-#include <zephyr/sys/util.h>
+#include "rgb_persist_internal.h"
 
-#include <zmk/rgb_color.h>
-#include <zmk/rgb_persist.h>
+static uint16_t kp_read_u16(const uint8_t *bytes) {
+  return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
+}
 
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_global_record) == 4,
-             "global settings wire size changed");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_selector_record) == 33,
-             "selector settings wire size changed");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_selector_record) <=
-                 SETTINGS_MAX_VAL_LEN,
-             "selector settings record exceeds SETTINGS_MAX_VAL_LEN");
-BUILD_ASSERT(sizeof(KP_RGB_PERSIST_SELECTOR_PREFIX) - 1 +
-                     KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH - 1 +
-                     sizeof("/state") - 1 <=
-                 SETTINGS_MAX_NAME_LEN,
-             "selector settings key exceeds SETTINGS_MAX_NAME_LEN");
+static void kp_write_u16(uint8_t *bytes, uint16_t value) {
+  bytes[0] = (uint8_t)value;
+  bytes[1] = (uint8_t)(value >> 8);
+}
 
-int kp_rgb_persist_encode_global(
-    const struct kp_rgb_persist_global_state *state,
-    struct kp_rgb_persist_global_record *out) {
-  if (state == NULL || out == NULL || state->brightness > KP_RGB_BRT_MAX)
+int kp_rgb_persist_encode(const struct kp_rgb_persist_state *state,
+                          const uint16_t *selections, uint8_t *bytes, size_t len) {
+  if (state == NULL || bytes == NULL || state->brightness > 100 ||
+      (state->selection_count != 0 && selections == NULL) ||
+      len != KP_RGB_PERSIST_SIZE(state->selection_count))
     return -EINVAL;
-  *out = (struct kp_rgb_persist_global_record){
-      .version = KP_RGB_PERSIST_GLOBAL_VERSION,
-      .user_on = state->user_on,
-      .brightness = state->brightness,
+
+  bytes[0] = KP_RGB_PERSIST_VERSION;
+  bytes[1] = state->user_on ? 1 : 0;
+  bytes[2] = state->brightness;
+  bytes[3] = 0;
+  kp_write_u16(bytes + 4, state->selection_count);
+  for (size_t i = 0; i < state->selection_count; i++)
+    kp_write_u16(bytes + KP_RGB_PERSIST_HEADER_SIZE + 2 * i, selections[i]);
+  return 0;
+}
+
+int kp_rgb_persist_decode(const uint8_t *prefix, size_t prefix_len, size_t record_len,
+                          struct kp_rgb_persist_state *state, uint16_t *selections,
+                          size_t capacity) {
+  if (prefix == NULL || state == NULL || prefix_len < KP_RGB_PERSIST_HEADER_SIZE ||
+      prefix_len > record_len || prefix[0] != KP_RGB_PERSIST_VERSION ||
+      prefix[1] > 1 || prefix[2] > 100 || prefix[3] != 0)
+    return -EINVAL;
+
+  uint16_t count = kp_read_u16(prefix + 4);
+  size_t copied = count < capacity ? count : capacity;
+  if (record_len != KP_RGB_PERSIST_SIZE(count) ||
+      prefix_len < KP_RGB_PERSIST_SIZE(copied) ||
+      (copied != 0 && selections == NULL))
+    return -EINVAL;
+
+  for (size_t i = 0; i < copied; i++)
+    selections[i] = kp_read_u16(prefix + KP_RGB_PERSIST_HEADER_SIZE + 2 * i);
+  *state = (struct kp_rgb_persist_state){
+      .user_on = prefix[1] != 0,
+      .brightness = prefix[2],
+      .selection_count = count,
   };
-  return 0;
-}
-
-int kp_rgb_persist_decode_global(const void *bytes, size_t len,
-                                 struct kp_rgb_persist_global_state *out) {
-  if (bytes == NULL || out == NULL ||
-      len != sizeof(struct kp_rgb_persist_global_record))
-    return -EINVAL;
-  struct kp_rgb_persist_global_record record;
-  memcpy(&record, bytes, sizeof(record));
-  if (record.version != KP_RGB_PERSIST_GLOBAL_VERSION || record.user_on > 1 ||
-      record.brightness > KP_RGB_BRT_MAX || record.reserved != 0)
-    return -EINVAL;
-  *out = (struct kp_rgb_persist_global_state){.user_on = record.user_on != 0,
-                                              .brightness = record.brightness};
-  return 0;
-}
-
-int kp_rgb_persist_encode_selector(const char *selected_id,
-                                   struct kp_rgb_persist_selector_record *out) {
-  if (out == NULL || selected_id == NULL)
-    return -EINVAL;
-  size_t length = 0;
-  while (length < KP_RGB_PERSIST_MAX_ID_LENGTH && selected_id[length] != '\0')
-    length++;
-  if (length == 0 || length == KP_RGB_PERSIST_MAX_ID_LENGTH)
-    return -EINVAL;
-  struct kp_rgb_persist_selector_record record = {
-      .version = KP_RGB_PERSIST_SELECTOR_VERSION};
-  memcpy(record.selected_id, selected_id, length + 1);
-  *out = record;
-  return 0;
-}
-
-int kp_rgb_persist_decode_selector(const void *bytes, size_t len,
-                                   struct kp_rgb_persist_selector_record *out) {
-  if (bytes == NULL || out == NULL || len != sizeof(*out))
-    return -EINVAL;
-  struct kp_rgb_persist_selector_record record;
-  memcpy(&record, bytes, sizeof(record));
-  if (record.version != KP_RGB_PERSIST_SELECTOR_VERSION ||
-      record.selected_id[0] == '\0' ||
-      memchr(record.selected_id, '\0', sizeof(record.selected_id)) == NULL)
-    return -EINVAL;
-  *out = record;
   return 0;
 }

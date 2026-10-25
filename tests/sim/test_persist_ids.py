@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-"""Validate selector persistence-token DTS rules with settings on and off."""
+"""Validate that node names do not constrain positional persistence."""
 from pathlib import Path
-import re
 import subprocess
 import tempfile
 
@@ -20,7 +19,6 @@ def run_image(root, name):
         cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         timeout=30, log_path=root / f"{name}.log")
     assert run.returncode == 0, run.stdout
-    assert "persistence IDs invalid" not in run.stdout, run.stdout
     assert "<err>" not in run.stdout, run.stdout
 
 
@@ -51,22 +49,21 @@ def main():
         result = build(root, name, "", selectors=maximum, extra_conf=conf)
         assert result.returncode == 0, result.stdout[-16000:]
         run_image(root, name)
-        print(f"PASS maximum token lengths settings-{suffix}", flush=True)
+        print(f"PASS former token boundaries accepted settings-{suffix}", flush=True)
 
         for target, declaration in (("selector", "selector_a: selector_a {"),
                                     ("member", "probe_a: a_static {")):
             selectors = SELECTOR_IDS.replace(
-                declaration, declaration.split(":")[0] + ": " + "x" * (31 if target == "selector" else 32) + " {")
+                declaration, declaration.split(":")[0] + ": " + "x" * 64 + " {")
+            if target == "member":
+                # The Zephyr device-name limit is independent of persistence.
+                selectors = selectors.replace("x" * 64 + " {", "x" * 64 + ' { label = "longfx";')
             name = f"overlong-{target}-settings-{suffix}"
             result = build(root, name, "", selectors=selectors, extra_conf=conf)
-            assert result.returncode != 0, result.stdout[-16000:]
-            errors = "\n".join(line for line in result.stdout.splitlines() if "error:" in line)
-            diagnostic = ("KP_RGB_PERSIST_MAX_SELECTOR_ID_LENGTH" if target == "selector"
-                          else "KP_RGB_PERSIST_MAX_ID_LENGTH")
-            assert re.search(diagnostic, errors), result.stdout[-16000:]
-            print(f"PASS compile-time {target} bound settings-{suffix}", flush=True)
+            assert result.returncode == 0, result.stdout[-16000:]
+            run_image(root, name)
+            print(f"PASS long {target} name accepted settings-{suffix}", flush=True)
 
-    # Selectors may no longer use a second parent, even when settings are off.
     collision = SELECTOR_IDS + '''
 / { second_parent {
     collision_selector: selector-a {
