@@ -14,6 +14,7 @@
 #include <drivers/behavior.h>
 
 #include "../rgb_matrix_internal.h"
+#include "../rgb_replication_internal.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -260,7 +261,10 @@ static void kp_selector_defaults_locked(const struct device *dev) {
     return;
   }
   kp_rgb_selector_apply_defaults_locked(&data->selector);
-  data->selector.effect_index = data->selector.initial_effect;
+  if (data->selector.effect_index != data->selector.initial_effect) {
+    data->selector.effect_index = data->selector.initial_effect;
+    kp_rgb_replication_changed_locked();
+  }
   data->reset_requested = true;
   zmk_rgb_matrix_flush();
 }

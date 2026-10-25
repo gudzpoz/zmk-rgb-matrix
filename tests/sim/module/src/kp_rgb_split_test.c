@@ -12,6 +12,7 @@
 #include <zmk/split/transport/central.h>
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_sync_internal.h"
+#include "rgb_replication_internal.h"
 
 #include "cmdline.h"
 #include "soc.h"
@@ -119,13 +120,17 @@ static void query_thread(void *a, void *b, void *c) {
 }
 K_THREAD_DEFINE(split_query, 1024, query_thread, NULL, NULL, NULL, 5, 0, 0);
 
+#include "kp_rgb_replication_test.inc"
+
 static int send_command(uint8_t source, struct zmk_split_transport_central_command cmd) {
     CHECK(source < 2);
     CHECK(cmd.type == ZMK_SPLIT_TRANSPORT_CENTRAL_CMD_TYPE_INVOKE_BEHAVIOR);
+    if (ordering_case()) return ordering_send(source, cmd);
     if (k_current_get() == binding_thread) {
         CHECK(framework_invoking);
         CHECK(!strcmp(cmd.data.invoke_behavior.behavior_dev, DEV(selector_a)->name));
-        CHECK(cmd.data.invoke_behavior.param1 ==
+        CHECK(cmd.data.invoke_behavior.param1 & KP_RGB_INVOCATION_MARKER);
+        CHECK(kp_rgb_invocation_command(cmd.data.invoke_behavior.param1) ==
               KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_a)));
         CHECK(cmd.data.invoke_behavior.param2 == framework_color);
         CHECK(cmd.data.invoke_behavior.state == 1);
@@ -146,7 +151,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
     CHECK(k_uptime_get() >= reconnect_floor[source]);
     CHECK(cmd.data.invoke_behavior.state == 1);
     /* Initial condition publication also broadcasts overlay state with source 0. */
-    if (!strncmp(split_case, "late-", 5) && cmd.data.invoke_behavior.param1 == RGB_OVL_STATE_CMD)
+    if (!strncmp(split_case, "late-", 5) && kp_rgb_invocation_command(cmd.data.invoke_behavior.param1) == RGB_OVL_STATE_CMD)
         CHECK(cmd.data.invoke_behavior.event_source == 0 || cmd.data.invoke_behavior.event_source == source);
     else
         CHECK(cmd.data.invoke_behavior.event_source == source);
@@ -158,7 +163,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
 
     k_mutex_lock(&records_lock, K_FOREVER);
     CHECK(connected & BIT(source));
-    uint32_t command = cmd.data.invoke_behavior.param1;
+    uint32_t command = kp_rgb_invocation_command(cmd.data.invoke_behavior.param1);
     uint32_t argument = cmd.data.invoke_behavior.param2;
     const char *endpoint = cmd.data.invoke_behavior.behavior_dev;
     int index = !strcmp(endpoint, DEV(selector_a)->name) ? 0 :
@@ -264,6 +269,7 @@ static int send_command(uint8_t source, struct zmk_split_transport_central_comma
 }
 
 static int sources(uint8_t *ids) {
+    if (ordering_case()) return 0;
     k_mutex_lock(&records_lock, K_FOREVER);
     if (query_error) { int error = query_error; k_mutex_unlock(&records_lock); return error; }
     int count = 0;
@@ -782,6 +788,7 @@ static void test_thread(void *a, void *b, void *c) {
     snapshot_validation();
     CHECK(zmk_rgb_matrix_off() == 0);
     CHECK(zmk_rgb_matrix_set_inhibited(true) == 0);
+    if (ordering_case()) ordering_run();
     if (!strcmp(split_case, "binding-forwarding")) {
         apply(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_a));
         connect(3);
@@ -1157,6 +1164,33 @@ static void receiving(void *a, void *b, void *c) {
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
     CHECK(receive(DEV(rgb_matrix), RGB_RESET_CMD, 0) == 0);
     CHECK(kp_rgb_global.brightness == 100);
+    kp_rgb_matrix_lock();
+    struct kp_rgb_replication_status replication_before = kp_rgb_replication_status_locked();
+    kp_rgb_matrix_unlock();
+    CHECK(replication_before.outstanding == 0);
+    CHECK(receive(DEV(selector_a), KP_RGB_INVOCATION_MARKER |
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)),
+        RGB_COLOR_HSB_VAL(123, 45, 67)) == 0);
+    CHECK(receive(DEV(selector_a), KP_RGB_INVOCATION_MARKER |
+        KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2345) == 0);
+    CHECK(receive(DEV(selector_a), KP_RGB_INVOCATION_MARKER | RGB_EFS_CMD, A_SLOT(probe_c)) == 0);
+    CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 123);
+    CHECK(kp_rgb_effect_period(DEV(probe_c)) == 2345);
+    CHECK(receive(DEV(rgb_matrix), KP_RGB_INVOCATION_MARKER | RGB_BRT_SET_CMD, 43) == 0);
+    CHECK(kp_rgb_global.brightness == 43);
+    CHECK(receive(DEV(rgb_matrix), KP_RGB_INVOCATION_MARKER | RGB_ON_CMD, 0) == 0);
+    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
+    uint32_t high_slot = KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, UINT16_MAX);
+    CHECK((kp_rgb_invocation_command(high_slot | KP_RGB_INVOCATION_MARKER) >> 16) == UINT16_MAX);
+    CHECK(receive(DEV(selector_a), high_slot | KP_RGB_INVOCATION_MARKER, 0) == -EINVAL);
+    CHECK(receive(DEV(selector_a), 0x10a | KP_RGB_INVOCATION_MARKER, 0) == -ENOTSUP);
+    CHECK(receive(DEV(rgb_matrix), 0x10a | KP_RGB_INVOCATION_MARKER, 0) == -ENOTSUP);
+    kp_rgb_matrix_lock();
+    struct kp_rgb_replication_status replication_after = kp_rgb_replication_status_locked();
+    kp_rgb_matrix_unlock();
+    CHECK(replication_after.outstanding == 0);
+    CHECK(replication_after.generation == replication_before.generation);
     k_sleep(K_MSEC(200)); CHECK(peripheral_reports == 0);
     printk("PASS split receiving\n"); exit(0);
 }

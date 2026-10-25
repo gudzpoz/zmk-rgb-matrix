@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import tempfile
 
-from native_build import build, run
+from native_build import SELECTORS, build, run
 from native_protocol import SOLID_SELECTORS, CONF
 
 ZERO = '''
@@ -15,6 +15,19 @@ ZERO = '''
 &selector_b { /delete-property/ leds; };
 &ordinary { /delete-property/ leds; };
 '''
+ORDERING_SELECTORS = (SELECTORS.replace("keypaw,rgb-matrix-selector-probe",
+                                       "keypaw,rgb-matrix-solid").replace(" animate;", ""))
+ORDERING_GATES = '''
+&rgb_conditions {
+    ordering_local: ordering_local {
+        compatible = "keypaw,rgb-condition-effect-selected";
+        selector = <&selector_b>; effect = <&probe_d>;
+    };
+};
+&ordinary { local; condition = <&ordering_local>; };
+'''
+ORDERING_SETTINGS_CONF = (CONF + "CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"
+                          "CONFIG_SETTINGS_RUNTIME=y\n")
 SCENARIOS = ("existing", "color", "period", "selection", "reset-color", "reset-period",
              "reset-selection", "pacing-color", "pacing-period", "pacing-selection",
              "fairness", "transport-change", "local-silence", "clock", "binding-forwarding")
@@ -24,6 +37,12 @@ SCENARIOS += tuple(f"global-reset-{kind}-{phase}" for kind in ("success", "faile
                    for phase in ("color", "period", "selection"))
 SCENARIOS += ("identical", "dirty-hook", "dirty-timing", "no-transport", "negative-query")
 SCENARIOS += ("brightness-frozen", "brightness-reset")
+ORDERING_SCENARIOS = ("ordering-before", "ordering-during", "ordering-overlap-forward",
+                      "ordering-overlap-reverse", "ordering-release", "ordering-enqueue-error",
+                      "ordering-reset", "ordering-cleanup", "ordering-publications",
+                      "ordering-noop", "ordering-defaults")
+ORDERING_SCENARIOS += ("ordering-gates",)
+SETTINGS_SCENARIOS = ("ordering-settings",)
 THREE = '''&selector_a { probe_e: a_third { compatible = "keypaw,rgb-matrix-solid";
     color = <0xff0000>; duration = <1700>; }; };'''
 DIM = '''&probe_a { color = <0x008000>; };
@@ -32,6 +51,8 @@ DIM = '''&probe_a { color = <0x008000>; };
 &probe_d { color = <0x004040>; };'''
 CONFIGS = {
     "transport": ("", CONF), "transport-zero": (ZERO, CONF),
+    "ordering": (ORDERING_GATES, CONF), "ordering-zero": (ORDERING_GATES + ZERO, CONF),
+    "ordering-settings": (ORDERING_GATES, ORDERING_SETTINGS_CONF),
     "brightness": (DIM, CONF), "brightness-zero": (DIM + ZERO, CONF),
     "transport-dirty-timing": ("", CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
     "transport-dirty-timing-zero": (ZERO, CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
@@ -48,6 +69,10 @@ for name in ("receiving", "receiving-zero"):
 
 
 def supported(name):
+    if name == "ordering-settings":
+        return SETTINGS_SCENARIOS
+    if name.startswith("ordering"):
+        return ORDERING_SCENARIOS
     if name.startswith("receiving"):
         return ("receiving",)
     if name.startswith("brightness"):
@@ -69,7 +94,7 @@ def runtime(root, name, scenarios, repeat=1, no_build=False):
     if not no_build:
         result = build(root, name, '''/ { chosen { zephyr,bt-hci = &test_hci; };
             test_hci: bt_hci { compatible = "zephyr,bt-hci-userchan"; }; };''' + fragment,
-                       runtime=True, selectors=SOLID_SELECTORS, extra_conf=config)
+                       runtime=True, selectors=ORDERING_SELECTORS if name.startswith("ordering") else SOLID_SELECTORS, extra_conf=config)
         assert result.returncode == 0, result.stdout[-20000:]
     assert (root / name / "build/zephyr/zmk.exe").is_file()
     for scenario in scenarios * repeat:
@@ -100,7 +125,7 @@ def runtime(root, name, scenarios, repeat=1, no_build=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=SCENARIOS + ("receiving", "late-global"), action="append")
+    parser.add_argument("--scenario", choices=SCENARIOS + ORDERING_SCENARIOS + SETTINGS_SCENARIOS + ("receiving", "late-global"), action="append")
     parser.add_argument("--config", choices=CONFIGS, action="append")
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--repeat", type=int, default=1)

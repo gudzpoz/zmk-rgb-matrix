@@ -24,6 +24,7 @@
 #include <zmk/events/activity_state_changed.h>
 
 #include "rgb_matrix_internal.h"
+#include "rgb_replication_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -607,7 +608,10 @@ ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_activity_state_changed);
 static int kp_rgb_set_user_on(bool on) {
   if (k_is_in_isr()) return -EWOULDBLOCK;
   kp_rgb_matrix_lock();
-  kp_rgb_global.user_on = on;
+  if (kp_rgb_global.user_on != on) {
+    kp_rgb_global.user_on = on;
+    kp_rgb_replication_changed_locked();
+  }
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
@@ -621,6 +625,7 @@ int zmk_rgb_matrix_toggle(void) {
   if (k_is_in_isr()) return -EWOULDBLOCK;
   kp_rgb_matrix_lock();
   kp_rgb_global.user_on = !kp_rgb_global.user_on;
+  kp_rgb_replication_changed_locked();
   kp_rgb_reconcile_power_locked();
   kp_rgb_matrix_unlock();
   return 0;
@@ -647,6 +652,10 @@ int zmk_rgb_matrix_get_user_state(bool *user_on) {
 
 void kp_rgb_apply_defaults(void) {
   kp_rgb_matrix_lock();
+  if (kp_rgb_global.user_on != kp_rgb_config.initial_on ||
+      kp_rgb_global.brightness != kp_rgb_config.initial_brightness) {
+    kp_rgb_replication_changed_locked();
+  }
   kp_rgb_global.user_on = kp_rgb_config.initial_on;
   kp_rgb_global.brightness = kp_rgb_config.initial_brightness;
   kp_rgb_reconcile_power_locked();
@@ -670,6 +679,7 @@ int kp_rgb_set_color_locked(const struct device *fx,
   if (data->color.h != next.h || data->color.s != next.s ||
       data->color.b != next.b) {
     data->color = next;
+    kp_rgb_replication_effect_changed_locked(fx);
     zmk_rgb_matrix_flush();
   }
   return 0;
@@ -686,6 +696,7 @@ int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
   struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
   if (data->duration_ms != period_ms) {
     data->duration_ms = (uint16_t)period_ms;
+    kp_rgb_replication_effect_changed_locked(fx);
     zmk_rgb_matrix_flush();
   }
   return 0;

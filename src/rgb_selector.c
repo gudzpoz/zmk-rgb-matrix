@@ -11,6 +11,7 @@
 #include <zmk/rgb_matrix.h>
 
 #include "rgb_selector_internal.h"
+#include "rgb_replication_internal.h"
 
 const struct device *kp_rgb_selector_at(const struct kp_rgb_selector *selector,
                                         size_t slot) {
@@ -46,7 +47,16 @@ int kp_rgb_selector_resolve_locked(struct kp_rgb_selector *selector,
 void kp_rgb_selector_apply_defaults_locked(struct kp_rgb_selector *selector) {
   for (size_t i = 0; i < selector->effect_count; i++) {
     const struct device *fx = kp_rgb_selector_at(selector, i);
-    *kp_rgb_effect_data(fx) = kp_rgb_effect_cfg(fx)->defaults;
+    struct kp_rgb_effect_common_data *data = kp_rgb_effect_data(fx);
+    const struct kp_rgb_effect_common_data *defaults =
+        &kp_rgb_effect_cfg(fx)->defaults;
+    if (data->color.h != defaults->color.h ||
+        data->color.s != defaults->color.s ||
+        data->color.b != defaults->color.b ||
+        data->duration_ms != defaults->duration_ms) {
+      kp_rgb_replication_changed_locked();
+    }
+    *data = *defaults;
   }
 }
 

@@ -14,6 +14,7 @@
 
 #include "rgb_matrix_internal.h"
 #include "rgb_persist_internal.h"
+#include "rgb_replication_internal.h"
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -77,6 +78,10 @@ static int kp_rgb_load_cb(const char *name, size_t len,
 
 void kp_rgb_settings_restore_locked(void) {
   if (kp_load_pending) {
+    if (kp_rgb_global.user_on != kp_load.user_on ||
+        kp_rgb_global.brightness != kp_load.brightness) {
+      kp_rgb_replication_changed_locked();
+    }
     kp_rgb_global.user_on = kp_load.user_on;
     kp_rgb_global.brightness = kp_load.brightness;
     kp_rgb_reconcile_power_locked();

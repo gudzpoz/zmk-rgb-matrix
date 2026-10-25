@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <errno.h>
 #include <drivers/behavior.h>
 #include <zephyr/sys/util.h>
 #include <zmk/behavior.h>
 
 #include "../rgb_matrix_internal.h"
 #include "../rgb_selector_sync_internal.h"
+#include "../rgb_replication_internal.h"
 
 int kp_rgb_selector_binding_convert(const struct device *selector,
                                     struct zmk_behavior_binding *binding) {
@@ -61,20 +63,28 @@ kp_control_selector(const struct zmk_behavior_binding *binding) {
 static int kp_selector_convert(struct zmk_behavior_binding *binding,
                                struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  return kp_rgb_selector_binding_convert(kp_control_selector(binding), binding);
+  if (binding->param1 & KP_RGB_INVOCATION_MARKER)
+    return -ENOTSUP;
+  int err = kp_rgb_selector_binding_convert(kp_control_selector(binding), binding);
+  if (err == 0)
+    err = kp_rgb_invocation_begin(binding);
+  return err;
 }
 
 static int kp_selector_pressed(struct zmk_behavior_binding *binding,
                                struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  return kp_rgb_selector_binding_apply(kp_control_selector(binding),
-                                       binding->param1, binding->param2);
+  uint32_t command = kp_rgb_invocation_command(binding->param1);
+  int err = kp_rgb_selector_binding_apply(kp_control_selector(binding), command,
+                                          binding->param2);
+  kp_rgb_invocation_finish(binding);
+  return err;
 }
 
 static int kp_selector_released(struct zmk_behavior_binding *binding,
                                 struct zmk_behavior_binding_event event) {
-  ARG_UNUSED(binding);
   ARG_UNUSED(event);
+  kp_rgb_invocation_finish(binding);
   return ZMK_BEHAVIOR_OPAQUE;
 }
 

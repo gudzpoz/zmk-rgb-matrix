@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include <zmk/events/position_state_changed.h>
+#include "rgb_replication_internal.h"
 
 struct singleton_send {
     uint8_t source;
@@ -117,7 +118,8 @@ static int singleton_send_command(uint8_t source, struct zmk_split_transport_cen
     CHECK(ordinary || cmd.data.invoke_behavior.event_source == source);
     if (cmd.data.invoke_behavior.position == 42)
         CHECK(cmd.data.invoke_behavior.event_source == ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL);
-    uint32_t command = cmd.data.invoke_behavior.param1, argument = cmd.data.invoke_behavior.param2;
+    uint32_t command = kp_rgb_invocation_command(cmd.data.invoke_behavior.param1);
+    uint32_t argument = cmd.data.invoke_behavior.param2;
     bool fail = !ordinary && !source && command == singleton_fail_command &&
         (command != RGB_OVL_STATE_CMD || singleton_fail_word < 0 ||
          (argument >> 16) == singleton_fail_word);

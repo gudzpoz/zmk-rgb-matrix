@@ -7,6 +7,7 @@
 #include <zmk/behavior.h>
 
 #include "rgb_matrix_internal.h"
+#include "rgb_replication_internal.h"
 
 /* State words are written by the central control worker or received split commands.
  * Local overlay gates are published by the local control worker.
@@ -36,6 +37,7 @@ bool kp_rgb_overlay_set_word(uint16_t word, uint16_t value) {
   bool changed = word < KP_RGB_OVERLAY_WORDS && kp_overlay_state[word] != value;
   if (changed) {
     kp_overlay_state[word] = value;
+    kp_rgb_replication_changed_locked();
     zmk_rgb_matrix_flush();
   }
   kp_rgb_matrix_unlock();
@@ -103,10 +105,13 @@ bool kp_rgb_overlay_refresh(void) {
   }
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+  bool state_changed = false;
   for (uint16_t w = 0; w < KP_RGB_OVERLAY_WORDS; w++) {
+    state_changed |= kp_overlay_state[w] != next[w];
     changed |= kp_overlay_state[w] != next[w];
     kp_overlay_state[w] = next[w];
   }
+  if (state_changed) kp_rgb_replication_changed_locked();
 #else
   ARG_UNUSED(next);
 #endif
