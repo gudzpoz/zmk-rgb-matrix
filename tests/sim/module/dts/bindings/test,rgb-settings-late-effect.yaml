@@ -1,6 +1,0 @@
-description: Deferred real solid effect for settings readiness regressions
-compatible: "test,rgb-settings-late-effect"
-include: keypaw,rgb-matrix-solid.yaml
-properties:
-  zephyr,deferred-init:
-    type: boolean

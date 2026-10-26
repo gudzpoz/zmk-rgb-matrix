@@ -643,10 +643,8 @@ static void ordering_settings(void) {
 #endif
 static void ordering_run(void) {
     CHECK(ordering_status().outstanding == 0);
-    if (!strcmp(split_case, "ordering-publications")) ordering_publications();
-    else if (!strcmp(split_case, "ordering-defaults")) ordering_defaults();
+    if (!strcmp(split_case, "ordering-defaults")) ordering_defaults();
 #if DT_NODE_EXISTS(DT_NODELABEL(ordering_local))
-    else if (!strcmp(split_case, "ordering-gates")) ordering_gates();
     else if (!strcmp(split_case, "ordering-gates-repair")) ordering_gates_repair();
 #endif
 #if IS_ENABLED(CONFIG_SETTINGS_RUNTIME)

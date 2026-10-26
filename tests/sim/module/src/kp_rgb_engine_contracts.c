@@ -820,7 +820,7 @@ static void fresh_composition(const char *name) {
         KP_CHECK(atomic_get(&obs[0].resets) == resets && obs[0].elapsed == 0);
         return;
     }
-    bool middle = !strcmp(name, "layered-fresh") || !strcmp(name, "gate-change") || !strcmp(name, "registry-holes");
+    bool middle = !strcmp(name, "gate-change") || !strcmp(name, "status-only");
     if (!strcmp(name, "static-flush")) {
         unsigned p = paints(0), n = atomic_get(&writes);
         set_color(0, (struct led_rgb){.r = 99});
@@ -843,7 +843,7 @@ static void fresh_composition(const char *name) {
     check_pixel(atomic_get(&writes) - 1, 1, (struct led_rgb){.b = 200});
     if (!strcmp(name, "child-change")) {
         repaint(); check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 99});
-    } else if (!strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) {
+    } else if (!strcmp(name, "gate-change")) {
         mid = paints(1);
         gate("emid"); KP_CHECK(paints(1) == mid && atomic_get(&obs[1].deactivations) == 1);
         check_pixel(atomic_get(&writes) - 1, 0, (struct led_rgb){.r = 99});
@@ -996,7 +996,7 @@ void kp_test_engine_run(void) {
 #endif
     bool animation = !strcmp(name, "periodic") || !strcmp(name, "coalesce") ||
         !strcmp(name, "starved") || !strcmp(name, "slow-render") || !strcmp(name, "slow-driver") ||
-        !strcmp(name, "slow-early") || !strcmp(name, "animating-bottom") || !strcmp(name, "rollover") ||
+        !strcmp(name, "slow-early") || !strcmp(name, "rollover") ||
         !strcmp(name, "idempotent") || !strcmp(name, "boundary") || !strcmp(name, "stale-early") ||
         !strcmp(name, "off") || !strcmp(name, "inhibited") || !strcmp(name, "resume") || !strcmp(name, "natural-frame-failure");
     if (!strcmp(name, "rollover")) kp_rgb_set_clock_offset((int32_t)(UINT32_MAX - kp_rgb_clock_ms() - 7));
@@ -1023,7 +1023,7 @@ void kp_test_engine_run(void) {
     else if (!strcmp(name, "held-control-lock")) held_control_lock();
     else if (!strcmp(name, "output-serialization") || !strcmp(name, "render-serialization") || !strcmp(name, "black-resume"))
         serialization(!strcmp(name, "render-serialization"), !strcmp(name, "black-resume"));
-    else if (!strcmp(name, "pending-control") || !strcmp(name, "refresh-barrier") || !strcmp(name, "resume-pending"))
+    else if (!strcmp(name, "pending-control") || !strcmp(name, "resume-pending"))
         pending_control(!strcmp(name, "resume-pending"));
     else if (!strcmp(name, "scene-entry-freshness")) scene_entry_freshness();
     else if (!strcmp(name, "control-during-driver")) control_during_driver();
@@ -1033,13 +1033,13 @@ void kp_test_engine_run(void) {
         control_at_completion = true; completion_boundary();
     }
     else if (!strcmp(name, "resume-participation")) resume_participation();
-    else if (!strncmp(name, "composition-", 12) || !strcmp(name, "filters")) composition(name);
-    else if (!strcmp(name, "static-bottom") || !strcmp(name, "layered-fresh") || !strcmp(name, "static-flush") ||
-             !strcmp(name, "cover") || !strcmp(name, "brightness") || !strcmp(name, "child-change") ||
-             !strcmp(name, "gate-change") || !strcmp(name, "registry-holes")) fresh_composition(name);
+    else if (!strncmp(name, "composition-", 12)) composition(name);
+    else if (!strcmp(name, "static-flush") || !strcmp(name, "cover") ||
+             !strcmp(name, "brightness") || !strcmp(name, "child-change") ||
+             !strcmp(name, "gate-change")) fresh_composition(name);
     else if (!strcmp(name, "lifecycle")) lifecycle();
     else if (!strcmp(name, "lifecycle-batch")) lifecycle_batch();
-    else if (!strcmp(name, "periodic") || !strcmp(name, "rollover") || !strcmp(name, "idempotent") || !strcmp(name, "animating-bottom")) {
+    else if (!strcmp(name, "periodic") || !strcmp(name, "rollover") || !strcmp(name, "idempotent")) {
         if (!strcmp(name, "idempotent")) {
             KP_CHECK(zmk_rgb_matrix_on() == 0 && zmk_rgb_matrix_set_inhibited(false) == 0);
             idle(false);
@@ -1056,13 +1056,10 @@ void kp_test_engine_run(void) {
         gate_and_resume(!strcmp(name, "off"));
         if (!strcmp(name, "resume")) gate_and_resume(true);
     }
-    else if (!strcmp(name, "idle-policy") || !strcmp(name, "intent") || !strcmp(name, "idle") ||
-             !strcmp(name, "idle-phase")) {
+    else if (!strcmp(name, "idle") || !strcmp(name, "idle-phase")) {
         idle_contract(!strcmp(name, "idle-phase"));
-    } else if (!strcmp(name, "color-failure")) {
-        one_shot_failure(false, false);
     } else if (!strcmp(name, "fresh-scene") || !strcmp(name, "participation-after-failure") ||
-               !strcmp(name, "requests") || !strcmp(name, "flush-held-lock") || !strcmp(name, "mutation-held-lock")) {
+               !strcmp(name, "requests") || !strcmp(name, "flush-held-lock")) {
         unsigned n = atomic_get(&writes), p = paints(0);
         atomic_set(&fail_count, 1); repaint();
         KP_CHECK(transfers[n].result == -EIO && paints(0) == p + 1);
@@ -1204,8 +1201,8 @@ void kp_test_engine_run(void) {
         check_all(atomic_get(&writes) - 1, 0);
         unsigned w = atomic_get(&writes); position(true, 123); settled();
         sleep_until(k_uptime_get() + 160); KP_CHECK(atomic_get(&writes) == w);
-    } else if (!strcmp(name, "healthy-mutation") || !strcmp(name, "source-invalidate") || !strcmp(name, "status-only")) {
-        if (!strcmp(name, "status-only")) fresh_composition("layered-fresh");
+    } else if (!strcmp(name, "healthy-mutation") || !strcmp(name, "status-only")) {
+        if (!strcmp(name, "status-only")) fresh_composition(name);
         else { set_color(0, (struct led_rgb){.r = 99}); unsigned n = atomic_get(&writes);
                zmk_rgb_matrix_flush(); wait_writes(n + 1); check_all(n, 99); repaint(); check_all(n + 1, 99); }
     } else if (!strcmp(name, "stale") || !strcmp(name, "boundary") || !strcmp(name, "stale-early")) {

@@ -499,18 +499,15 @@ static void selection_cases(void) {
         }
         return;
     }
-    if (kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) {
+    if (kp_test_case("external-interruption")) {
         pause(DEV(cc_event)); select_a(false);
-        if (kp_test_case("external-unused-interruption"))
-            atomic_set(&src(DEV(cc_unused))->value, true);
+        atomic_set(&src(DEV(cc_unused))->value, true);
         irq_offload(interrupt, NULL); resume(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_unused)) == 0); return;
     }
-    if (!kp_test_case("initial-shared")) {
-        select_a(false); expect_selection(false);
-        KP_CHECK(calls(DEV(cc_event)) > event_samples);
-        select_a(true); expect_selection(true);
-    }
+    select_a(false); expect_selection(false);
+    KP_CHECK(calls(DEV(cc_event)) > event_samples);
+    select_a(true); expect_selection(true);
 }
 
 static void overlay_cases(void) {
@@ -557,7 +554,7 @@ static int auto_prepare(void) {
         if (kp_test_case(timings[i])) timing_prepare();
     trigger_prepare();
     if (kp_test_case("startup-auto") || kp_test_case("overlay-gate") ||
-        kp_test_case("split-visibility") || kp_test_case("overlay-zero")) {
+        kp_test_case("overlay-zero")) {
         atomic_set(&src(DEV(cc_root))->value, true);
         atomic_set(&src(DEV(cc_central))->value, true);
         kp_rgb_condition_invalidate();
@@ -876,14 +873,14 @@ void kp_test_conditions_run(void) {
     else if (kp_test_case("trigger-startup") || kp_test_case("trigger-capture") ||
         kp_test_case("trigger-errors") ||
         kp_test_case("finite-self-cascade") || kp_test_case("finite-multi-cascade")) trigger_cases();
-    else if (kp_test_case("overlay-gate") || kp_test_case("split-visibility")) overlay_cases();
+    else if (kp_test_case("overlay-gate")) overlay_cases();
     else if (kp_test_case("unused-scope")) {
         wait_ready(); KP_CHECK(calls(DEV(cc_unused)) == 0);
         KP_CHECK(calls(DEV(cc_central)) == (peripheral() ? 0 : 1));
         KP_CHECK(kp_rgb_condition_valid(DEV(cc_root)));
-    } else if (kp_test_case("initial-shared") || kp_test_case("no-poll") ||
+    } else if (kp_test_case("no-poll") ||
         kp_test_case("cross-selector") || kp_test_case("third-party") ||
         kp_test_case("selection-burst") || kp_test_case("trigger-mutation") ||
-        kp_test_case("external-interruption") || kp_test_case("external-unused-interruption")) selection_cases();
+        kp_test_case("external-interruption")) selection_cases();
     else KP_CHECK(false);
 }

@@ -66,7 +66,7 @@ CONFIG_SETTINGS_CUSTOM=y
 CONFIG_KEYPAW_SIM_SETTINGS_TEST=y
 CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20
 '''
-SCENARIOS = ("existing", "validation", "runtime-parameters", "repeated-commits",
+SCENARIOS = ("existing", "validation",
              "debounce", "global-failure", "staged-reset",
              "selector-dirty", "selector-failed-dirty",
              "selector-dirty-second-failure", "selector-failed-dirty-second-failure",

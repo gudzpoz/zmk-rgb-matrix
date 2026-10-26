@@ -45,7 +45,7 @@ CONFIGS = {
 }
 SPLIT_SCENARIOS = (
     "brightness", "power", "overlay",
-    "race-brightness", "race-power", "race-gate", "race-final",
+    "race-brightness", "race-power", "race-gate",
     *(f"current-retry-{phase}" for phase in ("brightness", "power", "gate")),
     "persistent-failure", "global-isolation", "query-error",
 )
@@ -57,8 +57,8 @@ SCENARIOS = {
     "split": SPLIT_SCENARIOS,
     "split-zero": SPLIT_SCENARIOS,
     "split-unready": ("unready",),
-    "split-multiword": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later"),
-    "split-multiword-zero": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later"),
+    "split-multiword": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later", "race-final"),
+    "split-multiword-zero": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later", "race-final"),
 }
 
 

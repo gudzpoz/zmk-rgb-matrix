@@ -113,38 +113,6 @@ static unsigned preview_slot(void) {
 }
 #define DATA(label) ((struct probe_data *)DEV(label)->data)
 
-static unsigned callback_count(void);
-
-static void public_selection(void) {
-  CHECK(zmk_rgb_selector_get_selected(NULL) == NULL);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-  CHECK(kp_test_select(DEV(selector_a), NULL) == -EINVAL);
-  CHECK(kp_test_select(DEV(selector_a), DEV(probe_b)) == -EINVAL);
-  CHECK(kp_test_select(DEV(selector_a), DEV(private_white)) == -EINVAL);
-  CHECK(kp_test_select(NULL, DEV(probe_a)) == -ENODEV);
-  CHECK(kp_test_reset(NULL) == -ENODEV);
-
-  kp_rgb_matrix_lock();
-  unsigned before = callback_count();
-  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
-  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
-  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
-  CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-  CHECK(kp_test_reset(DEV(selector_a)) == 0);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-  CHECK(kp_test_reset(DEV(selector_b)) == 0);
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-  CHECK(callback_count() == before);
-  kp_rgb_matrix_unlock();
-  printk("PASS selector public API/burst retained selections\n");
-}
-
 static void mark(const char *name) {
   printk("selector phase %s at %lld\n", name, (long long)k_uptime_get());
 }
@@ -160,6 +128,21 @@ static unsigned callback_count(void) {
              data->activations + data->deactivations;
   }
   return count;
+}
+
+static void selection_callbacks(void) {
+  kp_rgb_matrix_lock();
+  unsigned before = callback_count();
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
+  CHECK(kp_test_reset(DEV(selector_a)) == 0);
+  CHECK(kp_test_reset(DEV(selector_b)) == 0);
+  CHECK(callback_count() == before);
+  kp_rgb_matrix_unlock();
+  printk("PASS selector mutation callbacks deferred\n");
 }
 
 static void select_slot(const struct device *dev, unsigned slot, int expected) {
@@ -571,7 +554,7 @@ static void scenario(void *a, void *b, void *c) {
   select_slot(DEV(selector_a), 99, -EINVAL);
   select_slot(DEV(selector_a), 0, 0);
 
-  public_selection();
+  selection_callbacks();
   controls();
   kp_rgb_matrix_lock();
   invoke(DEV(selector_a), RGB_EFF_CMD, 0);

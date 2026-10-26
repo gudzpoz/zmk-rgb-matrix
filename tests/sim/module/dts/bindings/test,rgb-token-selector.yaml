@@ -1,9 +1,0 @@
-# Copyright (c) 2026 The ZMK Contributors
-# SPDX-License-Identifier: MIT
-
-description: RGB selector with a unit address for persistence-token tests
-compatible: "test,rgb-token-selector"
-include: "keypaw,rgb-overlay.yaml"
-properties:
-  reg:
-    type: array

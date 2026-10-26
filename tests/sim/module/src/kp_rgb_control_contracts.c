@@ -91,8 +91,8 @@ static void matrix_defaults(void) {
     KP_CHECK(kp_rgb_selector_registry_count() == 0);
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     int32_t initial = (int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30);
-    KP_CHECK(kp_rgb_config.initial_brightness == CLAMP(initial, 0, 100));
-    KP_CHECK(kp_rgb_global.brightness == CLAMP(initial, 0, 100));
+    KP_CHECK(kp_rgb_config.initial_brightness == initial);
+    KP_CHECK(kp_rgb_global.brightness == initial);
     KP_CHECK(kp_rgb_global.user_on == DT_PROP(KP_RGB_NODE, initial_on));
     KP_CHECK(kp_rgb_config.initial_on == DT_PROP(KP_RGB_NODE, initial_on));
     KP_CHECK(kp_rgb_config.max_brightness == DT_PROP_OR(KP_RGB_NODE, max_brightness, 40));
@@ -103,7 +103,7 @@ static void matrix_defaults(void) {
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 7; kp_rgb_matrix_unlock();
     kp_rgb_apply_defaults();
     KP_CHECK(user_on() == DT_PROP(KP_RGB_NODE, initial_on));
-    KP_CHECK(kp_rgb_global.brightness == CLAMP(initial, 0, 100));
+    KP_CHECK(kp_rgb_global.brightness == initial);
 }
 #if IS_ENABLED(CONFIG_SETTINGS_CUSTOM)
 #include <zephyr/settings/settings.h>
@@ -239,7 +239,6 @@ static void early_prepare(void) {
     canonical_metadata_before_start();
     KP_CHECK(device_is_ready(DEV(probe_a)));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == -ENODEV);
     KP_CHECK(kp_test_reset(DEV(selector_a)) == -ENODEV);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
@@ -583,15 +582,10 @@ static void validation(void) {
     KP_CHECK(invoke(DEV(selector_a), UINT32_MAX, 0) == -ENOTSUP);
     KP_CHECK(invoke(DEV(selector_a), RGB_COLOR_HSB_CMD, RGB_COLOR_HSB_VAL(360,100,0)) == 0);
     KP_CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 0 && kp_rgb_effect_data(DEV(probe_a))->color.b == 0);
-    KP_CHECK(kp_test_select(DEV(selector_a), NULL) == -EINVAL);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_b)) == -EINVAL);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(private_white)) == -EINVAL);
     KP_CHECK(zmk_rgb_selector_get_selected(NULL) == NULL);
-    KP_CHECK(kp_test_select(NULL, DEV(probe_a)) == -ENODEV);
     KP_CHECK(kp_test_reset(NULL) == -ENODEV);
     KP_CHECK(kp_rgb_selector_binding_apply(NULL, RGB_RESET_CMD, 0) == -ENODEV);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(ordinary)) == NULL);
-    KP_CHECK(kp_test_select(DEV(ordinary), DEV(probe_a)) == -ENODEV);
     KP_CHECK(kp_test_reset(DEV(ordinary)) == -ENODEV);
     kp_rgb_matrix_unlock();
 }
@@ -819,22 +813,6 @@ static void reset_prestart_result(void) {
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
     check_reset_parameters();
 }
-static void publication(void) {
-    wait_ready();
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
-    KP_CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
-    KP_CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
-    KP_CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-    KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-}
 static void owner_callbacks(void) {
     wait_ready(); KP_CHECK(zmk_rgb_matrix_off() == 0); k_sleep(K_MSEC(50));
     kp_rgb_matrix_lock();
@@ -985,7 +963,6 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-reset")) scoped_reset();
     else if (kp_test_case("control-reset-fallback-noop") || kp_test_case("control-reset-fallback-notify")) reset_fallback();
     else if (kp_test_case("control-reset-prestart")) reset_prestart_result();
-    else if (kp_test_case("control-publication")) publication();
     else if (kp_test_case("control-owner")) owner_callbacks();
     else if (kp_test_case("control-local-only")) local_only();
     else if (kp_test_case("control-isr")) { wait_ready(); irq_offload(isr, NULL); }

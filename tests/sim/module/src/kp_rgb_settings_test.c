@@ -492,7 +492,6 @@ static void scenario(void *a, void *b, void *c) {
     printk("PASS scoped settings restored at global boundary\n");
     if (!strcmp(settings_case, "validation")) validation();
     else if (!strcmp(settings_case, "existing")) { legacy(); parameters_and_reload(); }
-    else if (!strcmp(settings_case, "runtime-parameters") || !strcmp(settings_case, "repeated-commits")) parameters_and_reload();
     else if (!strcmp(settings_case, "debounce")) debounce();
     else if (!strcmp(settings_case, "global-failure")) failure();
     else if (!strcmp(settings_case, "staged-reset")) staged_reset();

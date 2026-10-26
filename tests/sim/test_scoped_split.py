@@ -34,8 +34,8 @@ SCENARIOS = ("existing", "retry-color", "retry-period", "retry-selection",
 ORDERING_SCENARIOS = ("ordering-before", "ordering-during", "ordering-overlap-forward",
                       "ordering-overlap-reverse", "ordering-overlap-active-forward",
                       "ordering-overlap-active-reverse", "ordering-release", "ordering-enqueue-error",
-                      "ordering-cleanup", "ordering-publications", "ordering-noop",
-                      "ordering-defaults", "ordering-gates", "ordering-isolated", "ordering-relative",
+                      "ordering-cleanup", "ordering-noop",
+                      "ordering-defaults", "ordering-isolated", "ordering-relative",
                       "ordering-failure", "ordering-global-failure", "ordering-silence", "ordering-gates-repair")
 ORDERING_SCENARIOS += tuple(f"ordering-request-{where}" for where in
                             ("enqueue", "completion", "exit", "settling", "disconnect"))

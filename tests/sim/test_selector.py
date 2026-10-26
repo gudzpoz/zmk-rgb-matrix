@@ -243,7 +243,7 @@ def main(root=None):
     run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
                      stderr=subprocess.STDOUT, log_path=root / "runtime.log")
     assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout[-12000:]
-    assert "PASS selector public API/burst retained selections" in run.stdout, run.stdout
+    assert "PASS selector mutation callbacks deferred" in run.stdout, run.stdout
     ordered = ["a_static active=0", "a_motion reset", "a_motion active=1",
                "a_motion input before renders=0", "a_motion render elapsed=0 demand=1"]
     positions = [run.stdout.index(f"selector child {entry}") for entry in ordered]

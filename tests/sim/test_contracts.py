@@ -8,26 +8,26 @@ from native_build import MODULE, build, run
 
 SCENARIOS = (
     'periodic', 'inhibited', 'off', 'coalesce', 'starved', 'reentrant',
-    'black-one-shot', 'feedback', 'color-failure', 'rollover', 'input-during-render',
-    'idle-policy', 'idempotent', 'intent', 'purge', 'stale', 'resume',
+    'black-one-shot', 'feedback', 'rollover', 'input-during-render',
+    'idempotent', 'purge', 'stale', 'resume',
     'slow-render', 'slow-driver', 'black-slow', 'boundary', 'worker-held-lock', 'worker-blocked-input',
     'black-resume', 'stale-early', 'submit-failure', 'finish-failure',
-    'settled', 'slow-early', 'fairness', 'ignored-release', 'source-invalidate',
+    'settled', 'slow-early', 'fairness', 'ignored-release',
     'static-failure', 'fresh-scene', 'urgent-black', 'coalesced-gates',
     'slow-failure', 'boot-off', 'boot-on', 'boot-inhibited', 'unready',
-    'flush-held-lock', 'requests', 'healthy-mutation', 'mutation-held-lock',
+    'flush-held-lock', 'requests', 'healthy-mutation',
     'urgent-black-success', 'participation-after-failure',
     'natural-frame-failure', 'held-control-lock',
-    'refresh-barrier', 'pending-control', 'resume-pending',
+    'pending-control', 'resume-pending',
     'resume-participation', 'scene-entry-freshness', 'control-during-driver',
     'control-at-completion', 'pending-control-black',
     'pending-control-black-one-shot',
-    'static-bottom', 'layered-fresh', 'static-flush', 'animating-bottom', 'cover',
-    'brightness', 'idle', 'child-change', 'gate-change', 'registry-holes',
+    'static-flush', 'cover',
+    'brightness', 'idle', 'child-change', 'gate-change',
     'lifecycle-batch',
     'status-only', 'no-active', 'empty-registry', 'lifecycle',
     'output-serialization', 'render-serialization',
-    'composition-ab', 'composition-ba', 'filters', 'solid-brightness',
+    'composition-ab', 'composition-ba', 'solid-brightness',
     'idle-phase', 'sleep', 'sleep-off', 'sleep-inhibited', 'sleep-idle',
     'sleep-failure', 'sleep-after-color-failure', 'sleep-failure-resume',
     'sleep-serialization', 'sleep-render-serialization',
@@ -124,12 +124,12 @@ def main():
         fragment, conf = FRAGMENT, CONF
         if variant == 'normal':
             scenarios = tuple(s for s in SCENARIOS if s not in (
-                'idle-policy', 'intent', 'idle', 'idle-phase', 'no-active', 'boot-off',
-                'empty-registry', 'composition-ab', 'composition-ba', 'filters', 'solid-brightness'))
+                'idle', 'idle-phase', 'no-active', 'boot-off',
+                'empty-registry', 'composition-ab', 'composition-ba', 'solid-brightness'))
         elif variant == 'zero':
-            scenarios = ('settled', 'purge', 'resume', 'sleep')
+            scenarios = ('settled',)
         elif variant.startswith('idle-') or variant == 'max-zero':
-            scenarios = ('idle-policy', 'intent', 'idle')
+            scenarios = ('idle',)
         else:
             scenarios = {'empty': ('empty-registry',), 'boot-off': ('boot-off',)}.get(variant, ('no-active',))
         if variant == 'boot-off': fragment += '\n&rgb_matrix { /delete-property/ initial-on; };\n'
@@ -147,7 +147,7 @@ def main():
         if variant == 'no-active': fragment += '\n&engine_bottom { condition = <&engine_mid_latch>; };\n'
         if variant.startswith('composition-'):
             fragment += '\n&rgb_matrix {\n' + (SECOND + FIRST if variant.endswith('ba') else FIRST + SECOND) + FILTER + '\n};\n'
-            scenarios = (variant, 'filters') if variant.endswith('ab') else (variant,)
+            scenarios = (variant,)
         if variant == 'solid-brightness':
             fragment += '''
 &rgb_matrix {

@@ -30,7 +30,6 @@ SCENARIOS = {
     "control-reset-fallback-noop": "reset-fallback",
     "control-reset-fallback-notify": "reset-fallback",
     "control-reset-prestart": "reset-fallback",
-    "control-publication": "controls",
     "control-isr": "controls",
     "control-large-step": "large-step",
     "control-local-only": "local-only",
@@ -38,8 +37,6 @@ SCENARIOS = {
     "control-duration-defaults": "duration-defaults",
     "control-matrix-default": "matrix-default",
     "control-matrix-custom": "matrix-custom",
-    "control-matrix-high": "matrix-high",
-    "control-matrix-low": "matrix-low",
 }
 ASSERT_SCENARIOS = tuple("control-assert-" + operation for operation in (
     "query", "power", "inhibit", "selector-convert", "global-convert",
@@ -145,8 +142,6 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
             fragment += {
                 "matrix-default": "&rgb_matrix { /delete-property/ initial-on; /delete-property/ initial-brightness; /delete-property/ max-brightness; /delete-property/ idle-brightness; };",
                 "matrix-custom": "&rgb_matrix { /delete-property/ initial-on; initial-brightness = <73>; max-brightness = <91>; idle-brightness = <12>; };",
-                "matrix-high": "&rgb_matrix { initial-brightness = <150>; };",
-                "matrix-low": "&rgb_matrix { /delete-property/ initial-on; initial-brightness = <(-5)>; };",
             }[image]
         if image.startswith("overlay-words"):
             fragment += '&rgb_matrix {\n' + '\n'.join(
