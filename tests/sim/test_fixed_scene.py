@@ -56,14 +56,12 @@ def main():
         result = build(root, name, extra, runtime=True, selectors=SCENE,
                        extra_conf="CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\n"
                                   "CONFIG_KEYPAW_SIM_FIXED_SCENE_TEST=y\n" +
-                                  ("CONFIG_KEYPAW_RGB_TRIGGERS=y\n" if name.startswith("api-only") else "") +
                                   ("CONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n" if "split" in name else ""))
         assert result.returncode == 0, result.stdout[-16000:]
-        if name.startswith("api-only"):
-            config = (root / name / "build/zephyr/.config").read_text()
-            if "split" not in name:
-                assert "CONFIG_KEYPAW_RGB_TRIGGERS=y" in config, config
-            assert "CONFIG_KEYPAW_RGB_MATRIX=y" in config, config
+        config = (root / name / "build/zephyr/.config").read_text()
+        assert ("CONFIG_KEYPAW_RGB_TRIGGERS=y" in config) == (name.startswith("api-only") and "split" not in name), config
+        assert "CONFIG_KEYPAW_RGB_SPLIT_SYNC=y" not in config, config
+        assert "CONFIG_KEYPAW_RGB_MATRIX=y" in config, config
         capture = root / f"{name}.bin"
         command = [str(root / name / "build/zephyr/zmk.exe"),
                    f"--capture={capture}", "--stop_at=2", "-no-rt"]

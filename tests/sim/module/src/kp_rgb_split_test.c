@@ -8,6 +8,7 @@
 #include <string.h>
 #include <zephyr/sys/printk.h>
 #include <zmk/rgb_selector.h>
+#include "kp_rgb_test_mutations.h"
 #include <drivers/behavior.h>
 #include <zmk/split/transport/central.h>
 #include "rgb_matrix_internal.h"
@@ -529,9 +530,9 @@ static void retry_case(void) {
     connect(3);
     bounded_wait(&worker_accepted);
     uint32_t latest = RGB_COLOR_HSB_VAL(217, 43, 0);
-    CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &(struct kp_rgb_hsb){.h=217, .s=43, .b=0}) == 0);
-    CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2345) == 0);
-    CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    CHECK(kp_test_set_color(DEV(probe_a), &(struct kp_rgb_hsb){.h=217, .s=43, .b=0}) == 0);
+    CHECK(kp_test_set_period(DEV(probe_a), 2345) == 0);
+    CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
     k_sem_give(&worker_resume);
     k_sleep(K_MSEC(4600));
     check_remote(1);
@@ -590,7 +591,7 @@ static void transport_case(void) {
     } else if (!strcmp(split_case, "transport-change")) {
         connect(0); k_sleep(K_MSEC(100));
         unsigned before = state_count();
-        CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 2345) == 0);
+        CHECK(kp_test_set_period(DEV(probe_c), 2345) == 0);
         k_mutex_lock(&records_lock, K_FOREVER); alternate_transport = true; k_mutex_unlock(&records_lock);
         connect(3); k_sleep(K_MSEC(20)); CHECK(state_count() == before);
         settle(); check_remote(0); check_remote(1);
@@ -664,11 +665,13 @@ static int receive(const struct device *endpoint, uint32_t command, uint32_t arg
     cmd.data.invoke_behavior.state = 1;
     return zmk_split_transport_peripheral_command_handler(&receive_mock, cmd);
 }
-static int irq_result;
+static bool irq_checked;
 static void receiving_irq(const void *unused) {
     ARG_UNUSED(unused);
     CHECK(k_is_in_isr());
-    irq_result = receive(DEV(selector_a), RGB_EFS_CMD, 1);
+    zmk_rgb_matrix_flush();
+    kp_rgb_condition_invalidate();
+    irq_checked = true;
 }
 static void receiving(void *a, void *b, void *c) {
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
@@ -735,7 +738,7 @@ static void receiving(void *a, void *b, void *c) {
     struct zmk_behavior_binding no_control = {.behavior_dev = NULL, .param1 = RGB_EFS_CMD, .param2 = 1};
     CHECK(behavior_keymap_binding_pressed(&no_control, (struct zmk_behavior_binding_event){0}) == -EINVAL);
     irq_offload(receiving_irq, NULL);
-    CHECK(irq_result == -EWOULDBLOCK);
+    CHECK(irq_checked);
     CHECK(receive(DEV(selector_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_COLOR_CMD, A_SLOT(probe_c)), RGB_COLOR_HSB_VAL(220, 70, 0)) == 0);
     CHECK(receive(DEV(selector_a), KP_RGB_SELECTOR_MEMBER_COMMAND(RGB_SELECTOR_PERIOD_CMD, A_SLOT(probe_c)), 2300) == 0);
     CHECK(receive(DEV(selector_a), RGB_EFS_CMD, A_SLOT(probe_c)) == 0);

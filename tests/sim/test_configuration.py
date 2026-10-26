@@ -122,6 +122,15 @@ CASES = {
     "inert-effect-binding-cells": (True, '&fx_solid { #binding-cells = <0>; };'),
     "removed-effect-display-name": (False, '&fx_solid { display-name = "Solid"; };'),
     "direct-effect-keymap-binding": (False, ""),
+    "triggers-present": (True, '''/ { stage14_triggers {
+        compatible = "keypaw,rgb-trigger-table";
+        edge { condition = <&fixture_latch>; on-enter = <&none>; };
+    }; };'''),
+    "triggers-disabled": (True, '''/ { stage14_triggers {
+        compatible = "keypaw,rgb-trigger-table"; status = "disabled";
+        edge { condition = <&fixture_latch>; on-enter = <&none>; };
+    }; };'''),
+    "advanced-overrides": (True, ""),
 }
 
 
@@ -132,22 +141,22 @@ DIAGNOSTICS = {
     "overlay-wrong-parent": r"overlay must be a child of the keypaw,rgb-matrix node",
     "missing-binding-cells": r"#binding-cells.*required|required.*#binding-cells",
     "removed-global-alias": r"['\"]selector['\"].*not declared",
-    "controller-leds": r"whole strip|['\"]leds['\"].*not declared",
+    "controller-leds": r"['\"]leds['\"].*not declared",
     "flat-controller-child": r"matrix children must be overlays, not effects",
-    "removed-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
-    "removed-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
-    "removed-private-overlays": r"['\"]overlays['\"].*not declared|properties have been removed",
-    "removed-private-no-overlays": r"['\"]no-overlays['\"].*not declared|properties have been removed",
-    "removed-flat-default": r"['\"]initial-effect['\"].*not declared|defaults moved",
+    "removed-overlays": r"['\"]overlays['\"].*not declared",
+    "removed-no-overlays": r"['\"]no-overlays['\"].*not declared",
+    "removed-private-overlays": r"['\"]overlays['\"].*not declared",
+    "removed-private-no-overlays": r"['\"]no-overlays['\"].*not declared",
+    "removed-flat-default": r"['\"]initial-effect['\"].*not declared",
     "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
-    "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
+    "effect-reference": r"['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
     "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
     "removed-heatmap-slim": r"['\"]slim['\"].*not declared|unknown property.*slim",
     "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
     "removed-selector-initial-duration-ms": r"['\"]initial-duration-ms['\"].*not declared",
-    "removed-effect-display-name": r"['\"]display-name['\"].*not declared|properties have been removed",
+    "removed-effect-display-name": r"['\"]display-name['\"].*not declared",
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
@@ -215,6 +224,39 @@ def compile_overlay_index(directory, index):
     return result
 
 
+def check_public_surface(directory):
+    commands = json.loads((directory / "build/compile_commands.json").read_text())
+    entry = next(item for item in commands
+                 if Path(item["file"]) == MODULE / "src/overlays/overlay.c")
+    removed = ("zmk_rgb_selector_select", "zmk_rgb_selector_reset",
+               "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period")
+    retained = ("zmk_rgb_selector_get_selected", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
+                "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "zmk_rgb_matrix_get_user_state",
+                "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
+                "zmk_rgb_matrix_flush", "kp_rgb_condition_invalidate", "kp_rgb_effect_render")
+    for name, symbols, valid in (("retained", retained, True), *(
+            (symbol, (symbol,), False) for symbol in removed)):
+        probe = directory / f"surface-{name}.c"
+        probe.write_text('#include <zmk/rgb_matrix.h>\n#include <zmk/rgb_selector.h>\n' +
+                         "\n".join(f"__typeof__(&{symbol}) probe_{i} = &{symbol};"
+                                   for i, symbol in enumerate(symbols)) + "\n")
+        command = shlex.split(entry["command"])
+        command[command.index("-c") + 1] = str(probe)
+        command[command.index("-o") + 1] = str(directory / f"surface-{name}.o")
+        result = subprocess.run(command, cwd=entry["directory"], text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+        (directory / f"surface-{name}.log").write_text(result.stdout)
+        assert (result.returncode == 0) == valid, (name, result.stdout)
+        if not valid:
+            assert symbols[0] in result.stdout and "undeclared" in result.stdout, result.stdout
+    result = subprocess.run(["nm", str(directory / "build/zephyr/zmk.elf")], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    (directory / "surface-symbols.log").write_text(result.stdout)
+    assert result.returncode == 0, result.stdout
+    exported = {line.split()[-1] for line in result.stdout.splitlines() if line.split()}
+    assert not exported.intersection(removed), exported.intersection(removed)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", choices=CASES, action="append")
@@ -236,6 +278,16 @@ def main():
             text = (SIM / "config" / filename).read_text()
             if filename.endswith(".keymap") and name == "direct-effect-keymap-binding":
                 text = text.replace("                &none", "                &fx_reactive", 1)
+            if filename.endswith(".conf") and name == "advanced-overrides":
+                text += ("\nCONFIG_KEYPAW_RGB_MATRIX_TICK_MS=17\n"
+                         "CONFIG_KEYPAW_RGB_WORKQUEUE_STACK_SIZE=3072\n"
+                         "CONFIG_KEYPAW_RGB_WORKQUEUE_PRIORITY=11\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP=13\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP=12\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP=11\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=123\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS=120\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS=9000\n")
             if filename.endswith(".conf") and name == "no-controller":
                 text += "\nCONFIG_KEYPAW_RGB_MATRIX=y\n"
             if filename.endswith(".conf") and name.startswith("startup-priority-"):
@@ -260,6 +312,17 @@ def main():
         if valid:
             generated = (root / name / "build/zephyr/.config").read_text()
             assert "CONFIG_CHECK_INIT_PRIORITIES=y" in generated
+            assert "CONFIG_KEYPAW_RGB_SPLIT_SYNC=y" not in generated, generated
+            assert ("CONFIG_KEYPAW_RGB_TRIGGERS=y" in generated) == (name == "triggers-present"), generated
+            if name == "advanced-overrides":
+                for symbol, value in (("MATRIX_TICK_MS", 17), ("WORKQUEUE_STACK_SIZE", 3072),
+                                      ("WORKQUEUE_PRIORITY", 11), ("MATRIX_HUE_STEP", 13),
+                                      ("MATRIX_SAT_STEP", 12), ("MATRIX_BRT_STEP", 11),
+                                      ("MATRIX_DURATION_STEP", 123), ("MATRIX_DURATION_MIN_MS", 120),
+                                      ("MATRIX_DURATION_MAX_MS", 9000)):
+                    assert f"CONFIG_KEYPAW_RGB_{symbol}={value}\n" in generated, generated
+            if name == "baseline":
+                check_public_surface(root / name)
         if name.startswith("period-"):
             assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
         if not valid:

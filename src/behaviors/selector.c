@@ -14,8 +14,7 @@
 
 int kp_rgb_selector_binding_convert(const struct device *selector,
                                     struct zmk_behavior_binding *binding) {
-  if (k_is_in_isr())
-    return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
@@ -32,8 +31,7 @@ int kp_rgb_selector_binding_convert(const struct device *selector,
 
 int kp_rgb_selector_binding_apply(const struct device *selector,
                                   uint32_t command, uint32_t argument) {
-  if (k_is_in_isr())
-    return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   struct kp_rgb_selector *state =
       kp_rgb_selector_overlay_state_locked(selector);
@@ -56,6 +54,7 @@ kp_control_selector(const struct zmk_behavior_binding *binding) {
 static int kp_selector_convert(struct zmk_behavior_binding *binding,
                                struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  kp_rgb_assert_thread_context();
   if (binding->param1 & KP_RGB_INVOCATION_MARKER)
     return -ENOTSUP;
   int err = kp_rgb_selector_binding_convert(kp_control_selector(binding), binding);
@@ -67,6 +66,7 @@ static int kp_selector_convert(struct zmk_behavior_binding *binding,
 static int kp_selector_pressed(struct zmk_behavior_binding *binding,
                                struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  kp_rgb_invocation_assert_thread(binding);
   uint32_t command = kp_rgb_invocation_command(binding->param1);
   int err = kp_rgb_selector_binding_apply(kp_control_selector(binding), command,
                                           binding->param2);
@@ -77,6 +77,7 @@ static int kp_selector_pressed(struct zmk_behavior_binding *binding,
 static int kp_selector_released(struct zmk_behavior_binding *binding,
                                 struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  kp_rgb_invocation_assert_thread(binding);
   kp_rgb_invocation_finish(binding, ZMK_BEHAVIOR_OPAQUE);
   return ZMK_BEHAVIOR_OPAQUE;
 }

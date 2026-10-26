@@ -9,6 +9,7 @@
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/rgb_selector.h>
+#include "kp_rgb_test_mutations.h"
 #include <zmk/rgb_matrix.h>
 #include <zmk/events/position_state_changed.h>
 #include "../../../../src/rgb_matrix_internal.h"
@@ -216,7 +217,7 @@ static int pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_bin
         KP_CHECK(calls(DEV(cc_right)) == sentinel_right_calls);
     }
     if (selector_mutation && (binding->param1 == 10 || binding->param1 == 11))
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_a),
+        KP_CHECK(kp_test_select(DEV(selector_a),
             binding->param1 == 10 ? DEV(probe_c) : DEV(probe_a)) == 0);
     bool root_edge = binding->param1 == 10 || binding->param1 == 11;
     bool right_edge = binding->param1 == 25 || binding->param1 == 26;
@@ -250,7 +251,7 @@ static void expect_selection(bool a) {
     KP_CHECK(gate(DEV(cc_event_gate)) == a);
 }
 static void select_a(bool a) {
-    KP_CHECK(zmk_rgb_selector_select(DEV(selector_a), a ? DEV(probe_a) : DEV(probe_c)) == 0);
+    KP_CHECK(kp_test_select(DEV(selector_a), a ? DEV(probe_a) : DEV(probe_c)) == 0);
 }
 static void pause(const struct device *dev) {
     atomic_set(&src(dev)->pause, 1);
@@ -463,7 +464,7 @@ static void selection_cases(void) {
         KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 1);
         KP_CHECK(calls(DEV(cc_root)) == root_samples + 1);
         KP_CHECK(gate(DEV(cc_event_b_gate)));
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+        KP_CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
         drain(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_event)) == event_samples + 2);
         KP_CHECK(calls(DEV(cc_event_b)) == samples_b + 2);
@@ -474,7 +475,7 @@ static void selection_cases(void) {
         unsigned samples_b = calls(DEV(cc_event_b)), root_samples = calls(DEV(cc_root));
         pause(DEV(cc_root));
         select_a(false); select_a(true); select_a(false);
-        KP_CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+        KP_CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
         resume(); expect_selection(false);
         KP_CHECK(calls(DEV(cc_root)) == root_samples + 2);
         KP_CHECK(calls(DEV(cc_event)) == event_samples + 2);

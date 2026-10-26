@@ -187,8 +187,14 @@ static uint8_t kp_rgb_brightness_cap_locked(void) {
              : MIN(kp_rgb_config.idle_brightness, kp_rgb_config.max_brightness);
 }
 
-void kp_rgb_matrix_lock(void) { k_mutex_lock(&kp_rgb_lock, K_FOREVER); }
-void kp_rgb_matrix_unlock(void) { k_mutex_unlock(&kp_rgb_lock); }
+void kp_rgb_matrix_lock(void) {
+  kp_rgb_assert_thread_context();
+  k_mutex_lock(&kp_rgb_lock, K_FOREVER);
+}
+void kp_rgb_matrix_unlock(void) {
+  kp_rgb_assert_thread_context();
+  k_mutex_unlock(&kp_rgb_lock);
+}
 
 uint32_t kp_rgb_clock_ms(void) {
   return (uint32_t)k_uptime_get() +
@@ -461,9 +467,7 @@ static void kp_rgb_coordinator_handler(struct k_work *work) {
 }
 
 int zmk_rgb_matrix_set_inhibited(bool inhibited) {
-  if (k_is_in_isr()) {
-    return -EWOULDBLOCK;
-  }
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   if (atomic_get(&kp_rgb_inhibited) != inhibited) {
     atomic_set(&kp_rgb_inhibited, inhibited);
@@ -606,7 +610,7 @@ ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_position_state_changed);
 ZMK_SUBSCRIPTION(kp_rgb_matrix, zmk_activity_state_changed);
 
 static int kp_rgb_set_user_on(bool on) {
-  if (k_is_in_isr()) return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   if (kp_rgb_global.user_on != on) {
     kp_rgb_global.user_on = on;
@@ -622,7 +626,7 @@ int zmk_rgb_matrix_on(void) { return kp_rgb_set_user_on(true); }
 int zmk_rgb_matrix_off(void) { return kp_rgb_set_user_on(false); }
 
 int zmk_rgb_matrix_toggle(void) {
-  if (k_is_in_isr()) return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   kp_rgb_global.user_on = !kp_rgb_global.user_on;
   kp_rgb_replication_changed_locked();
@@ -632,7 +636,7 @@ int zmk_rgb_matrix_toggle(void) {
 }
 
 int zmk_rgb_matrix_get_state(bool *on_off) {
-  if (k_is_in_isr()) return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   if (on_off == NULL)
     return -EINVAL;
   kp_rgb_matrix_lock();
@@ -642,7 +646,7 @@ int zmk_rgb_matrix_get_state(bool *on_off) {
 }
 
 int zmk_rgb_matrix_get_user_state(bool *user_on) {
-  if (k_is_in_isr()) return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   if (user_on == NULL) return -EINVAL;
   kp_rgb_matrix_lock();
   *user_on = kp_rgb_global.user_on;
@@ -700,27 +704,6 @@ int kp_rgb_set_period_locked(const struct device *fx, uint32_t period_ms) {
     zmk_rgb_matrix_flush();
   }
   return 0;
-}
-
-int zmk_rgb_matrix_set_color(const struct device *fx,
-                            const struct kp_rgb_hsb *color) {
-  if (k_is_in_isr()) {
-    return -EWOULDBLOCK;
-  }
-  kp_rgb_matrix_lock();
-  int ret = kp_rgb_set_color_locked(fx, color);
-  kp_rgb_matrix_unlock();
-  return ret;
-}
-
-int zmk_rgb_matrix_set_period(const struct device *fx, uint32_t period_ms) {
-  if (k_is_in_isr()) {
-    return -EWOULDBLOCK;
-  }
-  kp_rgb_matrix_lock();
-  int ret = kp_rgb_set_period_locked(fx, period_ms);
-  kp_rgb_matrix_unlock();
-  return ret;
 }
 
 static int kp_rgb_matrix_layout_init(void) {

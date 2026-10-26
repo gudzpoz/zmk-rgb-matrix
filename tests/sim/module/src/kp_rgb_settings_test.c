@@ -14,6 +14,7 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 #include <zmk/rgb_selector.h>
+#include "kp_rgb_test_mutations.h"
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include "cmdline.h"
@@ -260,7 +261,7 @@ static void validation(void) {
     }
     stage(&bad); read_mode = 0;
     commit(); check_runtime(&valid);
-    CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+    CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
   }
   for (unsigned n = 0; n <= count + 2; n++) {
     struct record r = record(n, n % 2, 27 + n);
@@ -306,11 +307,11 @@ static void parameters_and_reload(void) {
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == 3888);
   for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
     struct kp_rgb_hsb color = {.h = 211 + i, .s = 37, .b = 43};
-    CHECK(zmk_rgb_matrix_set_color(effects[i], &color) == 0);
-    CHECK(zmk_rgb_matrix_set_period(effects[i], 2300 + i) == 0);
+    CHECK(kp_test_set_color(effects[i], &color) == 0);
+    CHECK(kp_test_set_period(effects[i], 2300 + i) == 0);
   }
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_b)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
   CHECK(zmk_rgb_matrix_off() == 0);
   no_retry(0);
   for (unsigned pass = 0; pass < 4; pass++) {
@@ -324,7 +325,7 @@ static void parameters_and_reload(void) {
     }
   }
   settle(0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_b)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
   select_member(DEV(selector_a), DEV(probe_c)); /* Successful no-op still saves B. */
   settle(1);
   check_snapshot(&durable, true, 61, DEV(probe_c), DEV(probe_b));
@@ -350,9 +351,9 @@ static void failure(void) {
   struct record old = durable;
   failure_mask = BIT(0);
   struct kp_rgb_hsb color = {.h = 279, .s = 39, .b = 17};
-  CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(probe_a), 2789) == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_b)) == 0);
+  CHECK(kp_test_set_color(DEV(probe_a), &color) == 0);
+  CHECK(kp_test_set_period(DEV(probe_a), 2789) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
   select_member(DEV(selector_a), DEV(probe_a));
   settle(1); CHECK(journal[0].result == -EIO);
   CHECK(durable.len == old.len && !memcmp(durable.bytes, old.bytes, old.len));
@@ -396,7 +397,7 @@ static void concurrent_save(void) {
   bool fail_second = strstr(settings_case, "second-failure") != NULL;
   struct record old = durable;
   failure_mask = (fail_first ? BIT(0) : 0) | (fail_second ? BIT(1) : 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_b)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
   hook_action = global ? 3 : reset ? 2 : 1;
   select_member(DEV(selector_a), reset ? DEV(probe_c) : DEV(probe_a));
   CHECK(k_sem_take(&hook_finished, K_MSEC(500)) == 0);
@@ -423,9 +424,9 @@ static void staged_reset(void) {
   put_slot(&r, selector_index(DEV(selector_a)), member_slot(DEV(selector_a), DEV(probe_c)));
   put_slot(&r, selector_index(DEV(selector_b)), member_slot(DEV(selector_b), DEV(probe_d)));
   struct kp_rgb_hsb color = {.h = 267, .s = 61, .b = 27};
-  CHECK(zmk_rgb_matrix_set_color(DEV(probe_b), &color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(probe_b), 2345) == 0);
-  CHECK(zmk_rgb_matrix_set_color(DEV(probe_a), &color) == 0);
+  CHECK(kp_test_set_color(DEV(probe_b), &color) == 0);
+  CHECK(kp_test_set_period(DEV(probe_b), 2345) == 0);
+  CHECK(kp_test_set_color(DEV(probe_a), &color) == 0);
   stage(&r);
   CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
   commit();

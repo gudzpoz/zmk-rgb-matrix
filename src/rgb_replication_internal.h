@@ -6,11 +6,14 @@
 
 #pragma once
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #include <zephyr/sys/util.h>
 #include <drivers/behavior.h>
+
+#include "rgb_matrix_internal.h"
 
 #define KP_RGB_INVOCATION_MARKER BIT(15)
 static inline uint32_t kp_rgb_invocation_command(uint32_t command) {
@@ -53,3 +56,12 @@ static inline void kp_rgb_invocation_finish(struct zmk_behavior_binding *binding
   binding->param1 = kp_rgb_invocation_command(binding->param1);
 }
 #endif
+
+/* Drain converted accounting before asserting: an assertion handler may terminate
+ * only the caller. This does not make ISR invocation supported. */
+static inline void
+kp_rgb_invocation_assert_thread(struct zmk_behavior_binding *binding) {
+  if (k_is_in_isr())
+    kp_rgb_invocation_finish(binding, -EWOULDBLOCK);
+  kp_rgb_assert_thread_context();
+}

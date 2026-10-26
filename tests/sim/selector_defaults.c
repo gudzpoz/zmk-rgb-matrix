@@ -10,6 +10,7 @@
 #include <zephyr/settings/settings.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
+#include "module/include/kp_rgb_test_mutations.h"
 #include "../../src/rgb_matrix_internal.h"
 #include "../../src/rgb_selector_internal.h"
 
@@ -206,8 +207,8 @@ static int before_startup(void) {
   check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
   check_parameters(DEV(default_private), (struct kp_rgb_hsb){0, 100, 50}, 1000);
   check_parameters(DEV(default_disabled_child), (struct kp_rgb_hsb){0, 100, 50}, 1000);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 4321) == 0);
+  CHECK(kp_test_set_color(DEV(default_ready), &early_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_ready), 4321) == 0);
   return 0;
 }
 SYS_INIT(before_startup, APPLICATION, 80);
@@ -222,14 +223,14 @@ static int prepare_deferred_effect(void) {
   CHECK(device_init(DEV(missing_selected)) == 0);
   CHECK(device_is_ready(DEV(missing_selected)));
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
-  CHECK(zmk_rgb_matrix_set_color(DEV(missing_selected), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(missing_selected), 4321) == 0);
+  CHECK(kp_test_set_color(DEV(missing_selected), &early_color) == 0);
+  CHECK(kp_test_set_period(DEV(missing_selected), 4321) == 0);
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_selector_at(find_selector(DEV(default_late_selector)), 0) == DEV(default_late));
   kp_rgb_matrix_unlock();
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
+  CHECK(kp_test_set_color(DEV(default_late), &late_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_late), 3456) == 0);
   return 0;
 }
 SYS_INIT(prepare_deferred_effect, APPLICATION, 98);
@@ -278,15 +279,15 @@ static void defaults_test(void *a, void *b, void *c) {
   check_parameters(DEV(default_late), late_color, 3456);
   check_period_cases(false);
   check_parameters(DEV(missing_selected), early_color, 4321);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 0) == -EINVAL);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 99) == -EINVAL);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 10001) == -EINVAL);
+  CHECK(kp_test_set_period(DEV(default_ready), 0) == -EINVAL);
+  CHECK(kp_test_set_period(DEV(default_ready), 99) == -EINVAL);
+  CHECK(kp_test_set_period(DEV(default_ready), 10001) == -EINVAL);
   check_parameters(DEV(default_ready), early_color, 4321);
   CHECK(zmk_rgb_selector_get_selected(DEV(default_selector)) == DEV(default_ready));
   CHECK(zmk_rgb_selector_get_selected(DEV(default_late_selector)) == DEV(default_late));
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_breathe), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_breathe), 4321) == 0);
-  CHECK(zmk_rgb_selector_reset(DEV(default_selector)) == 0);
+  CHECK(kp_test_set_color(DEV(default_breathe), &early_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_breathe), 4321) == 0);
+  CHECK(kp_test_reset(DEV(default_selector)) == 0);
   check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
   check_defaults_match_data(DEV(default_ready));
   check_parameters(DEV(default_explicit), (struct kp_rgb_hsb){240, 100, 50},
@@ -297,34 +298,34 @@ static void defaults_test(void *a, void *b, void *c) {
   check_parameters(DEV(default_late), late_color, 3456);
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_defaults_match_data(DEV(missing_selected));
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_white), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_black), 4567) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_white), 5678) == 0);
-  CHECK(zmk_rgb_selector_reset(DEV(default_late_selector)) == 0);
+  CHECK(kp_test_set_color(DEV(default_black), &early_color) == 0);
+  CHECK(kp_test_set_color(DEV(default_white), &late_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_black), 4567) == 0);
+  CHECK(kp_test_set_period(DEV(default_white), 5678) == 0);
+  CHECK(kp_test_reset(DEV(default_late_selector)) == 0);
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0}, 1000);
   check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_ready), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_late), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_black), &early_color) == 0);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_white), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_ready), 4321) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_late), 3456) == 0);
+  CHECK(kp_test_set_color(DEV(default_ready), &early_color) == 0);
+  CHECK(kp_test_set_color(DEV(default_late), &late_color) == 0);
+  CHECK(kp_test_set_color(DEV(default_black), &early_color) == 0);
+  CHECK(kp_test_set_color(DEV(default_white), &late_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_ready), 4321) == 0);
+  CHECK(kp_test_set_period(DEV(default_late), 3456) == 0);
   for (size_t i = 0; i < ARRAY_SIZE(period_cases); i++) {
     const struct period_case *test = &period_cases[i];
     if (test->selector != NULL) {
-      CHECK(zmk_rgb_matrix_set_period(test->effect, 4321) == 0);
-      CHECK(zmk_rgb_matrix_set_color(test->effect, &early_color) == 0);
+      CHECK(kp_test_set_period(test->effect, 4321) == 0);
+      CHECK(kp_test_set_color(test->effect, &early_color) == 0);
     }
   }
   for (size_t i = 0; i < ARRAY_SIZE(period_cases); i++) {
     if (period_cases[i].selector != NULL)
-      CHECK(zmk_rgb_selector_reset(period_cases[i].selector) == 0);
+      CHECK(kp_test_reset(period_cases[i].selector) == 0);
   }
   check_period_cases(true);
-  CHECK(zmk_rgb_matrix_set_color(DEV(default_breathe), &late_color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(default_breathe), 5678) == 0);
+  CHECK(kp_test_set_color(DEV(default_breathe), &late_color) == 0);
+  CHECK(kp_test_set_period(DEV(default_breathe), 5678) == 0);
   kp_rgb_reset_state();
   check_parameters(DEV(default_ready), (struct kp_rgb_hsb){120, 100, 50}, 1000);
   check_defaults_match_data(DEV(default_ready));

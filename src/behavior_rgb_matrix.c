@@ -80,8 +80,7 @@ static int on_keymap_binding_convert_central_state_dependent_params(
   ARG_UNUSED(event);
   if (binding->param1 & KP_RGB_INVOCATION_MARKER)
     return -ENOTSUP;
-  if (k_is_in_isr())
-    return -EWOULDBLOCK;
+  kp_rgb_assert_thread_context();
   kp_rgb_matrix_lock();
   int ret = 0;
   uint32_t command = binding->param1;
@@ -175,11 +174,9 @@ static int on_keymap_binding_pressed_command(uint32_t command,
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
-  int ret = k_is_in_isr()
-                ? -EWOULDBLOCK
-                : on_keymap_binding_pressed_command(
-                      kp_rgb_invocation_command(binding->param1),
-                      binding->param2);
+  uint32_t command = kp_rgb_invocation_command(binding->param1);
+  kp_rgb_invocation_assert_thread(binding);
+  int ret = on_keymap_binding_pressed_command(command, binding->param2);
   kp_rgb_invocation_finish(binding, ret);
   return ret;
 }
@@ -187,6 +184,7 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
 static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
                                       struct zmk_behavior_binding_event event) {
   ARG_UNUSED(event);
+  kp_rgb_invocation_assert_thread(binding);
   kp_rgb_invocation_finish(binding, ZMK_BEHAVIOR_OPAQUE);
   return ZMK_BEHAVIOR_OPAQUE;
 }

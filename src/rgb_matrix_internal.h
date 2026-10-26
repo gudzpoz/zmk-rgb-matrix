@@ -12,6 +12,7 @@
 
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/__assert.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/toolchain.h>
 
@@ -19,6 +20,10 @@
 #include <zmk/rgb_matrix.h>
 
 #include "rgb_selector_internal.h"
+
+static inline void kp_rgb_assert_thread_context(void) {
+  __ASSERT(!k_is_in_isr(), "RGB operation requires thread context");
+}
 
 struct kp_rgb_config {
   bool initial_on;

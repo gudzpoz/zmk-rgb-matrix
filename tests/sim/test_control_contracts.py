@@ -5,6 +5,8 @@
 import argparse
 from pathlib import Path
 import tempfile
+import subprocess
+from native_process import run_logged
 
 from native_build import build, run, SIM, SELECTORS, COMPACT_PREVIEW
 
@@ -39,7 +41,25 @@ SCENARIOS = {
     "control-matrix-high": "matrix-high",
     "control-matrix-low": "matrix-low",
 }
+ASSERT_SCENARIOS = tuple("control-assert-" + operation for operation in (
+    "query", "power", "inhibit", "selector-convert", "global-convert",
+    "selector-apply", "global-apply"))
+SCENARIOS.update(dict.fromkeys(ASSERT_SCENARIOS, "controls"))
 CONF = "\nCONFIG_KEYPAW_SIM_CONTROL_CONTRACTS=y\nCONFIG_TEST=y\nCONFIG_IRQ_OFFLOAD=y\n"
+
+
+def run_assertion(root, image, scenario):
+    result = run_logged([str(root / image / "build/zephyr/zmk.exe"), "-no-rt",
+                         f"--rgb-test-scenario={scenario}", "--stop_at=2"],
+                        text=True, stderr=subprocess.STDOUT, timeout=15,
+                        log_path=root / f"{image}-{scenario}.log")
+    assert result.returncode != 0, result.stdout
+    assert f"STAGE14 assertion probe {scenario}" in result.stdout, result.stdout
+    assert "ASSERTION FAIL" in result.stdout, result.stdout
+    assert "rgb_matrix_internal.h" in result.stdout, result.stdout
+    assert "RGB operation requires thread context" in result.stdout, result.stdout
+    assert "STAGE14 assertion unexpectedly returned" not in result.stdout, result.stdout
+    assert f"PASS {scenario}" not in result.stdout, result.stdout
 
 
 def main():
@@ -108,7 +128,6 @@ CONFIG_ZMK_SPLIT_BLE=y
 CONFIG_ZMK_SPLIT_BLE_CENTRAL_PERIPHERALS=1
 CONFIG_BT_MAX_CONN=2
 CONFIG_BT_MAX_PAIRED=2
-CONFIG_KEYPAW_RGB_SPLIT_SYNC=y
 CONFIG_KEYPAW_RGB_SPLIT_SYNC_POLL_MS=25
 CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=30
 CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
@@ -141,7 +160,10 @@ CONFIG_KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS=1000
         for scenario in selected:
             if SCENARIOS[scenario] == image:
                 for _ in range(args.repeat):
-                    run(root, image, "control-conversion" if scenario == "control-conversion-metadata-off" else scenario)
+                    if scenario in ASSERT_SCENARIOS:
+                        run_assertion(root, image, scenario)
+                    else:
+                        run(root, image, "control-conversion" if scenario == "control-conversion-metadata-off" else scenario)
                 print(f"PASS {scenario} x{args.repeat}", flush=True)
 
 

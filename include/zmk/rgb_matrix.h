@@ -260,10 +260,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
   }
 #define KP_RGB_EFFECT_SELECTION_ASSERT(node_id)                                \
   BUILD_ASSERT(!DT_NODE_HAS_COMPAT(DT_PARENT(node_id), keypaw_rgb_matrix),     \
-               "matrix children must be overlays, not effects");               \
-  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, overlays) &&                         \
-                   !DT_NODE_HAS_PROP(node_id, no_overlays),                    \
-               "effect overlays/no-overlays properties have been removed");
+               "matrix children must be overlays, not effects");
 
 /* Registers an ordinary device. callbacks_expr must point to a lifetime-long,
  * immutable struct kp_rgb_effect_callbacks table, exposed directly as dev->api.
@@ -493,9 +490,6 @@ void kp_rgb_overlay_paint_pixels(const struct kp_rgb_frame *frame, const size_t 
   DT_FOREACH_CHILD_STATUS_OKAY(node_id, KP_RGB_OVERLAY_EFFECT_ONE)
 
 #define KP_RGB_OVERLAY_EFFECT_ASSERT(node_id)                                  \
-  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, effect),                             \
-               "overlay effect references are not supported; "                 \
-               "use a nested child");                                          \
   BUILD_ASSERT(DT_CHILD_NUM_STATUS_OKAY(node_id) == 1,                         \
                "overlay requires exactly one enabled nested effect");
 
@@ -516,30 +510,19 @@ bool zmk_rgb_matrix_is_inhibited(void);
 
 /* Set or toggle local user intent; toggle inverts intent even while idle or
  * inhibited. Activity suppression and inhibition may still prevent output.
- * Thread context only. Return 0 on success or a negative lock error; success
- * does not promise hardware settlement. These calls neither save settings nor
- * send split commands. */
+ * Thread context only. Return 0 on success; success does not promise hardware
+ * settlement. These calls neither save settings nor send split commands. */
 int zmk_rgb_matrix_toggle(void);
 int zmk_rgb_matrix_on(void);
 int zmk_rgb_matrix_off(void);
 /* Returns user intent after activity suppression: false during SLEEP and during
- * IDLE with idle-brightness=0. Inhibition and brightness scaling do not alter it. */
+ * IDLE with idle-brightness=0. Inhibition and brightness scaling do not alter it.
+ * Thread context only, including effect/overlay callbacks; NULL returns -EINVAL. */
 int zmk_rgb_matrix_get_state(bool *on_off);
 
-/* Return retained user intent before activity suppression. Thread context only;
- * NULL returns -EINVAL, ISR calls return -EWOULDBLOCK. */
+/* Return retained user intent before activity suppression. Thread context only,
+ * including effect/overlay callbacks; NULL returns -EINVAL. */
 int zmk_rgb_matrix_get_user_state(bool *user_on);
-
-/* Set effect parameters. Thread context only.
- * Supply an initialized RGB effect device; composition membership is not required.
- * Hue accepts 0..360 (360 becomes 0); saturation/brightness accept 0..100.
- * Period accepts configured DURATION_MIN_MS..DURATION_MAX_MS without clamping.
- * NULL color/invalid values return -EINVAL; NULL effect devices return -ENODEV;
- * ISR calls return -EWOULDBLOCK. Changed values request repaint
- * without resetting clocks. Success means state acceptance, not strip delivery.
- * Neither call saves settings, sends split commands or changes user intent. */
-int zmk_rgb_matrix_set_color(const struct device *effect, const struct kp_rgb_hsb *color);
-int zmk_rgb_matrix_set_period(const struct device *effect, uint32_t period_ms);
 
 /* Request a scene pass: reconcile activity and repaint if output is eligible.
  * Notify after a synchronized source update changes pixels or animation demand.

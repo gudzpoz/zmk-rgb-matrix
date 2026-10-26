@@ -36,7 +36,7 @@ ORDERING_SCENARIOS = ("ordering-before", "ordering-during", "ordering-overlap-fo
                       "ordering-overlap-active-reverse", "ordering-release", "ordering-enqueue-error",
                       "ordering-cleanup", "ordering-publications", "ordering-noop",
                       "ordering-defaults", "ordering-gates", "ordering-isolated", "ordering-relative",
-                      "ordering-failure", "ordering-isr-failure", "ordering-silence", "ordering-gates-repair")
+                      "ordering-failure", "ordering-global-failure", "ordering-silence", "ordering-gates-repair")
 ORDERING_SCENARIOS += tuple(f"ordering-request-{where}" for where in
                             ("enqueue", "completion", "exit", "settling", "disconnect"))
 SWEEP_SCENARIOS = tuple(f"ordering-sweep-{kind}-{phase}" for kind in

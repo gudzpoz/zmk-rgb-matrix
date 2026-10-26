@@ -129,8 +129,7 @@ def main():
         if not args.no_build:
             result = build(root, name, BOOT_ACTION if name in ("original", "reordered") else "",
                            runtime=True, selectors=REORDERED if name == "reordered" else SELECTORS,
-                           extra_conf=CONF + ("\nCONFIG_KEYPAW_RGB_TRIGGERS=y\n"
-                                              if name in ("original", "reordered") else ""))
+                           extra_conf=CONF)
             assert result.returncode == 0, result.stdout[-20000:]
         if name in ("original", "reordered"):
             continue

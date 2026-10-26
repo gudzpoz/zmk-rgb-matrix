@@ -6,6 +6,8 @@ import ast
 from pathlib import Path
 import re
 import unittest
+import importlib.util
+import tempfile
 
 TESTS = Path(__file__).resolve().parents[1]
 HOST_TESTS = {
@@ -133,6 +135,73 @@ def fixture_violations(text, path):
 
 
 class FixtureStructureTests(unittest.TestCase):
+    def test_stage14_kconfig_contract(self):
+        module = TESTS.parent
+        try:
+            import kconfiglib as parser
+        except ImportError:
+            parser_path = module.parents[1] / "zmk/zephyr/scripts/kconfig/kconfiglib.py"
+            if not parser_path.is_file():
+                self.skipTest("Stage14 Kconfig checks need kconfiglib or an existing ZMK workspace")
+            spec = importlib.util.spec_from_file_location("stage14_kconfiglib", parser_path)
+            parser = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(parser)
+        symbols = (
+            "DT_HAS_ZMK_LED_STRIP_COMPOSITE_ENABLED", "DT_HAS_KEYPAW_RGB_MATRIX_ENABLED",
+            "DT_HAS_KEYPAW_RGB_CONDITION_CAPS_LOCK_ENABLED", "DT_HAS_KEYPAW_RGB_CONDITION_BLE_ENABLED",
+            "DT_HAS_KEYPAW_RGB_TRIGGER_TABLE_ENABLED", "ZMK_SPLIT", "ZMK_SPLIT_ROLE_CENTRAL",
+            "LED_STRIP", "ZMK_HID_INDICATORS")
+        advanced = {
+            "KEYPAW_RGB_WORKQUEUE_PRIORITY": "10", "KEYPAW_RGB_MATRIX_HUE_STEP": "10",
+            "KEYPAW_RGB_MATRIX_SAT_STEP": "10", "KEYPAW_RGB_MATRIX_BRT_STEP": "10",
+            "KEYPAW_RGB_MATRIX_DURATION_STEP": "100", "KEYPAW_RGB_MATRIX_DURATION_MIN_MS": "100",
+            "KEYPAW_RGB_MATRIX_DURATION_MAX_MS": "10000", "KEYPAW_RGB_SPLIT_SYNC_POLL_MS": "1000",
+            "KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS": "1000", "KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS": "30000"}
+        with tempfile.TemporaryDirectory(prefix="rgb-kconfig-") as directory:
+            wrapper = Path(directory) / "Kconfig"
+            for matrix, table, split, central in (
+                    (True, False, False, False), (True, True, False, False),
+                    (True, True, True, False), (True, True, True, True),
+                    (True, False, True, True), (False, True, True, True),
+                    (False, False, False, False)):
+                enabled = {"DT_HAS_ZMK_LED_STRIP_COMPOSITE_ENABLED"}
+                for present, name in ((matrix, "DT_HAS_KEYPAW_RGB_MATRIX_ENABLED"),
+                                      (table, "DT_HAS_KEYPAW_RGB_TRIGGER_TABLE_ENABLED"),
+                                      (split, "ZMK_SPLIT"), (central, "ZMK_SPLIT_ROLE_CENTRAL")):
+                    if present:
+                        enabled.add(name)
+                wrapper.write_text("\n".join(
+                    f"config {name}\n    bool\n    default {'y' if name in enabled else 'n'}"
+                    for name in symbols) + f'\nsource "{module / "Kconfig"}"\n')
+                config = parser.Kconfig(str(wrapper), warn_to_stderr=False)
+                for name, expected in (("KEYPAW_RGB_TRIGGERS", matrix and table and (not split or central)),
+                                       ("KEYPAW_RGB_SPLIT_SYNC", matrix and split and central)):
+                    symbol = config.syms[name]
+                    self.assertTrue(all(node.prompt is None for node in symbol.nodes), name)
+                    self.assertEqual(symbol.str_value, "y" if expected else "n", name)
+                    self.assertEqual(symbol.assignable, (), name)
+                self.assertEqual(config.syms["LED_STRIP_COMPOSITE"].str_value, "y")
+                self.assertEqual(config.syms["LED_STRIP_COMPOSITE_INIT_PRIORITY"].str_value, "91")
+                config.syms["LED_STRIP_COMPOSITE_INIT_PRIORITY"].set_value("90")
+                self.assertEqual(config.syms["LED_STRIP_COMPOSITE_INIT_PRIORITY"].str_value, "90")
+                if not matrix:
+                    continue
+                for name, default in (("KEYPAW_RGB_MATRIX_TICK_MS", "32"),
+                                      ("KEYPAW_RGB_WORKQUEUE_STACK_SIZE", "2048")):
+                    symbol = config.syms[name]
+                    self.assertEqual(symbol.str_value, default, name)
+                    self.assertTrue(symbol.nodes[0].prompt, name)
+                    self.assertEqual(symbol.nodes[0].parent.item.name, "KEYPAW_RGB_MATRIX", name)
+                for name, default in advanced.items():
+                    if "SPLIT_SYNC_" in name and not (split and central):
+                        continue
+                    symbol = config.syms[name]
+                    self.assertEqual(symbol.str_value, default, name)
+                    self.assertIn("Advanced RGB", symbol.nodes[0].parent.prompt[0], name)
+                    symbol.set_value(str(int(default) + 1))
+                    self.assertEqual(symbol.str_value, str(int(default) + 1), name)
+                self.assertEqual(config.warnings, [])
+
     def test_retired_startup_controls_are_absent(self):
         module = TESTS.parent
         paths = set(sources())

@@ -50,10 +50,6 @@ struct kp_trig {
       (NULL))
 
 #define KP_TRIG_ASSERT(node_id)                                                \
-  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, bindings),                           \
-               "RGB triggers use on-enter, not bindings");                     \
-  BUILD_ASSERT(!DT_NODE_HAS_PROP(node_id, startup),                            \
-               "RGB trigger startup is unsupported");                          \
   BUILD_ASSERT(DT_PROP_LEN_OR(node_id, on_enter, 0) +                          \
                        DT_PROP_LEN_OR(node_id, on_exit, 0) >                   \
                    0,                                                          \

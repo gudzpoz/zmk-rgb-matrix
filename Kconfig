@@ -34,12 +34,21 @@ config KEYPAW_RGB_WORKQUEUE_STACK_SIZE
     default 2048
     range 1024 8192
     help
-      Stack for the module's dedicated low-priority work queue, which runs all
-      engine work: render passes, condition and trigger evaluation, split sync
-      and the settings reset. Size it for the deepest chain, not just rendering:
-      a fired trigger invokes a selector control, which on the split central
-      reaches the BLE transport. Keep it above the observed high-water mark with
-      margin.
+      Stack for the dedicated RGB work queue, including rendering, condition
+      evaluation, trigger behavior invocation and split transport calls. Size it
+      for the deepest invocation chain with margin above the measured high-water
+      mark.
+
+config KEYPAW_RGB_MATRIX_TICK_MS
+    int "Animation tick period (ms)"
+    default 32
+    range 1 1000
+    help
+      Interval between animated frames. Static scenes sleep until a repaint is
+      requested; animation ticks do not poll conditions.
+
+menu "Advanced RGB matrix settings"
+    depends on KEYPAW_RGB_MATRIX
 
 config KEYPAW_RGB_WORKQUEUE_PRIORITY
     int "RGB matrix work queue thread priority"
@@ -47,14 +56,6 @@ config KEYPAW_RGB_WORKQUEUE_PRIORITY
     help
       Priority of the module's work queue thread. The default matches ZMK's
       low-priority work queue so RGB work never preempts typing.
-
-config KEYPAW_RGB_MATRIX_TICK_MS
-    int "Animation tick period (ms)"
-    default 32
-    range 1 1000
-    help
-      Upstream underglow uses 50 ms; 32 ms is noticeably smoother for the
-      reactive and ripple effects. One update costs ~1.5 ms of blocking SPI.
 
 config KEYPAW_RGB_MATRIX_HUE_STEP
     int "Hue adjustment step"
@@ -88,8 +89,7 @@ config KEYPAW_RGB_MATRIX_DURATION_MAX_MS
     default 10000
     range 1 60000
 
-# Caps Lock will pull in a HID-indicator event dependency. Disable it if you
-# don't need that.
+endmenu
 config KEYPAW_RGB_CONDITION_CAPS_LOCK
     bool
     default y
@@ -115,7 +115,7 @@ config KEYPAW_RGB_CONDITION_BLE
 endif # KEYPAW_RGB_MATRIX
 
 config KEYPAW_RGB_TRIGGERS
-    bool "RGB matrix trigger table"
+    bool
     default y
     depends on KEYPAW_RGB_MATRIX
     depends on DT_HAS_KEYPAW_RGB_TRIGGER_TABLE_ENABLED
@@ -132,7 +132,7 @@ config KEYPAW_RGB_TRIGGERS
       halves because the behavior is BEHAVIOR_LOCALITY_GLOBAL.
 
 config KEYPAW_RGB_SPLIT_SYNC
-    bool "Push the RGB state to a split peripheral when it connects"
+    bool
     default y
     depends on KEYPAW_RGB_MATRIX
     depends on ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL
@@ -157,7 +157,8 @@ config KEYPAW_RGB_SPLIT_SYNC
       power, brightness, overlay gates and shared-clock commands, even when
       no selectors are configured.
 
-if KEYPAW_RGB_SPLIT_SYNC
+menu "Advanced RGB split synchronization settings"
+    depends on KEYPAW_RGB_SPLIT_SYNC
 
 config KEYPAW_RGB_SPLIT_SYNC_POLL_MS
     int "Peripheral connection poll period (ms)"
@@ -189,4 +190,4 @@ config KEYPAW_RGB_SPLIT_SYNC_CLOCK_MS
       independently of the connection poll; an early drop self-heals on the
       next period.
 
-endif # KEYPAW_RGB_SPLIT_SYNC
+endmenu

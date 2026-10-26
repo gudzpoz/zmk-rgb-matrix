@@ -6,6 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zmk/behavior.h>
 #include <zmk/rgb_matrix.h>
+#include "kp_rgb_test_mutations.h"
 #include "rgb_matrix_internal.h"
 
 BUILD_ASSERT(KP_RGB_DEVICE_INIT_PRIORITY == 99);
@@ -41,8 +42,8 @@ static void scenario(void *a, void *b, void *c) {
   CHECK(!strcmp(DEV(rgb_matrix)->name, "rgb"));
   const struct kp_rgb_hsb color = kp_rgb_effect_data(DEV(status_color))->color;
 
-  CHECK(zmk_rgb_matrix_set_color(DEV(status_color), &color) == 0);
-  CHECK(zmk_rgb_matrix_set_period(DEV(status_color), 1000) == 0);
+  CHECK(kp_test_set_color(DEV(status_color), &color) == 0);
+  CHECK(kp_test_set_period(DEV(status_color), 1000) == 0);
   kp_rgb_matrix_lock();
   CHECK(kp_rgb_global.brightness == 50);
   CHECK(kp_rgb_config.max_brightness == 75);

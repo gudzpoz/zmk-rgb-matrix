@@ -45,6 +45,7 @@
 #include <zmk/hid_indicators.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
+#include "kp_rgb_test_mutations.h"
 
 #include "rgb_matrix_internal.h"
 #include "cmdline.h"
@@ -290,7 +291,7 @@ static int kp_sim_apply(void) {
     int err = -EINVAL;
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(preview_selector), okay)
     if (requested_effect < ARRAY_SIZE(kp_sim_effects)) {
-      err = zmk_rgb_selector_select(DEVICE_DT_GET(DT_NODELABEL(preview_selector)),
+      err = kp_test_select(DEVICE_DT_GET(DT_NODELABEL(preview_selector)),
                                    kp_sim_effects[requested_effect]);
     }
 #endif

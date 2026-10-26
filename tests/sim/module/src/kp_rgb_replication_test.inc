@@ -200,11 +200,6 @@ static int ordering_callback(struct zmk_behavior_binding *binding, bool pressed)
     return pressed ? behavior_keymap_binding_pressed(binding, (struct zmk_behavior_binding_event){0}) :
                      behavior_keymap_binding_released(binding, (struct zmk_behavior_binding_event){0});
 }
-static int ordering_irq_result;
-static void ordering_irq(const void *arg) {
-    CHECK(k_is_in_isr());
-    ordering_irq_result = ordering_callback((struct zmk_behavior_binding *)arg, true);
-}
 static void ordering_cleanup(void) {
     for (unsigned global = 0; global < 2; global++) {
         const struct device *endpoint = global ? DEV(rgb_matrix) : DEV(selector_a);
@@ -232,13 +227,9 @@ static void ordering_cleanup(void) {
             CHECK(!ordering_complete(pending));
             CHECK(ordering_status().outstanding == before.outstanding + 1);
             if (mode == 2) binding.param2 = UINT32_MAX;
-            if (mode == 3) {
-                irq_offload(ordering_irq, &binding);
-                CHECK(ordering_irq_result == -EWOULDBLOCK);
-            } else {
-                int result = ordering_callback(&binding, mode != 1);
-                CHECK(mode == 2 ? result < 0 : result == 0);
-            }
+            if (mode == 3) binding.param1 = KP_RGB_INVOCATION_MARKER | 0x10a;
+            int result = ordering_callback(&binding, mode != 1);
+            CHECK(mode >= 2 ? result < 0 : result == 0);
             CHECK(!(binding.param1 & KP_RGB_INVOCATION_MARKER));
             CHECK(ordering_status().outstanding == before.outstanding);
             CHECK(ordering_status().generation > pending);
@@ -306,20 +297,20 @@ static void ordering_publications(void) {
     const struct device *members[] = {DEV(probe_a), DEV(probe_c)};
     for (size_t i = 0; i < ARRAY_SIZE(members); i++) {
         struct kp_rgb_hsb color = {.h = 19, .s = 83, .b = 67};
-        ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_color(members[i], &color) == 0), true);
-        ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_color(members[i], &color) == 0), false);
-        ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_period(members[i], 2345) == 0), true);
-        ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_period(members[i], 2345) == 0), false);
+        ORDERING_PUBLICATION(CHECK(kp_test_set_color(members[i], &color) == 0), true);
+        ORDERING_PUBLICATION(CHECK(kp_test_set_color(members[i], &color) == 0), false);
+        ORDERING_PUBLICATION(CHECK(kp_test_set_period(members[i], 2345) == 0), true);
+        ORDERING_PUBLICATION(CHECK(kp_test_set_period(members[i], 2345) == 0), false);
     }
-    ORDERING_PUBLICATION(CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0), true);
-    ORDERING_PUBLICATION(CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0), false);
+    ORDERING_PUBLICATION(CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0), true);
+    ORDERING_PUBLICATION(CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0), false);
     ORDERING_PUBLICATION(global_apply(RGB_RESET_CMD, 0), true);
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
     ORDERING_PUBLICATION(global_apply(RGB_CLOCK_CMD, 123456), false);
     ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_inhibited(false) == 0), false);
     struct kp_rgb_hsb private_color = {.h = 89, .s = 50, .b = 60};
-    ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_color(DEV(private_white), &private_color) == 0), false);
-    ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_period(DEV(private_white), 2345) == 0), false);
+    ORDERING_PUBLICATION(CHECK(kp_test_set_color(DEV(private_white), &private_color) == 0), false);
+    ORDERING_PUBLICATION(CHECK(kp_test_set_period(DEV(private_white), 2345) == 0), false);
     kp_rgb_matrix_lock();
     for (size_t index = 0; index < KP_RGB_OVERLAY_WORDS; index++) {
         uint32_t word = kp_rgb_overlay_get_word(index);
@@ -387,8 +378,8 @@ static void ordering_requests(void) {
         ordering_wait(&worker_accepted);
         uint64_t epoch = ordering_status().repair_epoch;
         if (exit_case) { k_sem_give(&worker_resume); ordering_barrier(); }
-        CHECK(zmk_rgb_matrix_set_color(DEV(probe_c), &(struct kp_rgb_hsb){.h=97, .s=63, .b=37}) == 0);
-        CHECK(zmk_rgb_matrix_set_period(DEV(probe_c), 3456) == 0);
+        CHECK(kp_test_set_color(DEV(probe_c), &(struct kp_rgb_hsb){.h=97, .s=63, .b=37}) == 0);
+        CHECK(kp_test_set_period(DEV(probe_c), 3456) == 0);
         ordering_exception();
         CHECK(ordering_status().repair_epoch == epoch + 1);
         /* A new successful reservation must survive completion of the older pass. */
@@ -416,8 +407,6 @@ static void ordering_silence(void) {
         binding.param1 = global ? RGB_BRT_SET_CMD : RGB_EFS_CMD;
         binding.param2 = UINT32_MAX;
         CHECK(ordering_callback(&binding, true) < 0);
-        irq_offload(ordering_irq, &binding);
-        CHECK(ordering_irq_result == -EWOULDBLOCK);
     }
     CHECK(ordering_status().repair_epoch == epoch);
     quiet(); CHECK(state_count() == before);
@@ -426,15 +415,14 @@ static void ordering_failure(void) {
     connect(3); settle(); quiet();
     unsigned before[2] = {sweeps(0), sweeps(1)};
     uint64_t epoch = ordering_status().repair_epoch;
-    struct zmk_behavior_binding binding = {.behavior_dev = DEV(selector_a)->name,
-        .param1 = RGB_EFS_CMD, .param2 = A_SLOT(probe_a)};
+    bool global = !strcmp(split_case, "ordering-global-failure");
+    struct zmk_behavior_binding binding = {.behavior_dev = global ? DEV(rgb_matrix)->name : DEV(selector_a)->name,
+        .param1 = global ? RGB_BRT_SET_CMD : RGB_EFS_CMD,
+        .param2 = global ? 37 : A_SLOT(probe_a)};
     CHECK(behavior_keymap_binding_convert_central_state_dependent_params(&binding,
         (struct zmk_behavior_binding_event){0}) == 0);
     binding.param2 = UINT32_MAX;
-    if (!strcmp(split_case, "ordering-isr-failure")) {
-        irq_offload(ordering_irq, &binding);
-        CHECK(ordering_irq_result == -EWOULDBLOCK);
-    } else CHECK(ordering_callback(&binding, true) == -EINVAL);
+    CHECK(ordering_callback(&binding, true) == -EINVAL);
     CHECK(ordering_status().outstanding == 0 && ordering_status().repair_epoch == epoch + 1);
     settle(); check_remote(0); check_remote(1); check_order(); quiet();
     CHECK(sweeps(0) == before[0] + 1 && sweeps(1) == before[1] + 1);
@@ -448,8 +436,8 @@ static void ordering_parameters(unsigned base) {
             if (!effect) continue;
             struct kp_rgb_hsb color = {.h = (base + i * 31 + slot * 7) % 360,
                 .s = 43, .b = effect == DEV(probe_c) && base == 217 ? 0 : 37};
-            CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
-            CHECK(zmk_rgb_matrix_set_period(effect, 1100 + base * 10 + i * 100 + slot) == 0);
+            CHECK(kp_test_set_color(effect, &color) == 0);
+            CHECK(kp_test_set_period(effect, 1100 + base * 10 + i * 100 + slot) == 0);
         }
     }
     kp_rgb_matrix_unlock();
@@ -474,7 +462,7 @@ static void ordering_sweep(void) {
     if (strstr(split_case, "reset")) global_apply(RGB_RESET_CMD, 0);
     else {
         ordering_parameters(217);
-        CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+        CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
         global_apply(RGB_BRT_SET_CMD, 37);
     }
     CHECK(ordering_status().generation > generation);
@@ -527,7 +515,7 @@ static void ordering_gates(void) {
         CHECK(local->local);
         uint32_t word = kp_rgb_overlay_get_word(0);
         uint64_t before = kp_rgb_replication_status_locked().generation;
-        CHECK(zmk_rgb_selector_select(DEV(selector_b), enabled ? DEV(probe_d) : DEV(probe_b)) == 0);
+        CHECK(kp_test_select(DEV(selector_b), enabled ? DEV(probe_d) : DEV(probe_b)) == 0);
         struct kp_rgb_replication_status selected = kp_rgb_replication_status_locked();
         CHECK(selected.generation > before && selected.outstanding == 0);
         kp_rgb_matrix_unlock();
@@ -541,7 +529,7 @@ static void ordering_gates(void) {
         bool enabled = pass != 0;
         kp_rgb_matrix_lock();
         uint32_t word = kp_rgb_overlay_get_word(0);
-        CHECK(zmk_rgb_selector_select(DEV(preview_selector), enabled ? DEV(fx_solid) : DEV(fx_breathe)) == 0);
+        CHECK(kp_test_select(DEV(preview_selector), enabled ? DEV(fx_solid) : DEV(fx_breathe)) == 0);
         struct kp_rgb_replication_status selected = kp_rgb_replication_status_locked();
         kp_rgb_matrix_unlock();
         ordering_wait_gate(DEV(selector_a), enabled);
@@ -562,7 +550,7 @@ static void ordering_gates_repair(void) {
     connect(3); settle(); check_remote(0); check_remote(1); quiet();
     unsigned before[2] = {sweeps(0), sweeps(1)};
     uint64_t epoch = ordering_status().repair_epoch;
-    CHECK(zmk_rgb_selector_select(DEV(preview_selector), DEV(fx_breathe)) == 0);
+    CHECK(kp_test_select(DEV(preview_selector), DEV(fx_breathe)) == 0);
     ordering_wait_gate(DEV(selector_a), false);
     CHECK(ordering_status().repair_epoch == epoch);
     quiet();
@@ -585,8 +573,8 @@ static void ordering_settings(void) {
     const struct device *effects[] = {DEV(probe_a), DEV(probe_c)};
     struct kp_rgb_hsb color = {.h = 217, .s = 43, .b = 61};
     for (size_t i = 0; i < ARRAY_SIZE(effects); i++) {
-        CHECK(zmk_rgb_matrix_set_color(effects[i], &color) == 0);
-        CHECK(zmk_rgb_matrix_set_period(effects[i], 2345) == 0);
+        CHECK(kp_test_set_color(effects[i], &color) == 0);
+        CHECK(kp_test_set_period(effects[i], 2345) == 0);
     }
     if (!active) ordering_barrier();
     kp_rgb_matrix_lock();
@@ -668,7 +656,7 @@ static void ordering_run(void) {
     else if (!strncmp(split_case, "ordering-overlap-", 17)) ordering_overlap();
     else if (!strncmp(split_case, "ordering-request-", 17)) ordering_requests();
     else if (!strncmp(split_case, "ordering-sweep-", 15)) ordering_sweep();
-    else if (!strcmp(split_case, "ordering-failure") || !strcmp(split_case, "ordering-isr-failure")) ordering_failure();
+    else if (!strcmp(split_case, "ordering-failure") || !strcmp(split_case, "ordering-global-failure")) ordering_failure();
     else if (!strcmp(split_case, "ordering-silence")) ordering_silence();
     else ordering_fifo_case();
     CHECK(ordering_status().outstanding == 0);

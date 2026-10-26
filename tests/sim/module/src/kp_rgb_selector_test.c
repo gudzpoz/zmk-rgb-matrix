@@ -13,6 +13,7 @@
 #include <zephyr/sys/printk.h>
 #include <zmk/rgb_matrix.h>
 #include <zmk/rgb_selector.h>
+#include "kp_rgb_test_mutations.h"
 #include <zmk/events/position_state_changed.h>
 #include "rgb_matrix_internal.h"
 #include "rgb_selector_internal.h"
@@ -103,7 +104,7 @@ DT_INST_FOREACH_STATUS_OKAY(PROBE_DEFINE)
 
 
 static int preview_select(unsigned slot) {
-  return zmk_rgb_selector_select(DEV(preview_selector),
+  return kp_test_select(DEV(preview_selector),
                                 slot ? DEV(fx_solid_v) : DEV(fx_solid));
 }
 
@@ -118,26 +119,26 @@ static void public_selection(void) {
   CHECK(zmk_rgb_selector_get_selected(NULL) == NULL);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), NULL) == -EINVAL);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_b)) == -EINVAL);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(private_white)) == -EINVAL);
-  CHECK(zmk_rgb_selector_select(NULL, DEV(probe_a)) == -ENODEV);
-  CHECK(zmk_rgb_selector_reset(NULL) == -ENODEV);
+  CHECK(kp_test_select(DEV(selector_a), NULL) == -EINVAL);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_b)) == -EINVAL);
+  CHECK(kp_test_select(DEV(selector_a), DEV(private_white)) == -EINVAL);
+  CHECK(kp_test_select(NULL, DEV(probe_a)) == -ENODEV);
+  CHECK(kp_test_reset(NULL) == -ENODEV);
 
   kp_rgb_matrix_lock();
   unsigned before = callback_count();
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_c));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-  CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == 0);
+  CHECK(kp_test_reset(DEV(selector_a)) == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
-  CHECK(zmk_rgb_selector_reset(DEV(selector_b)) == 0);
+  CHECK(kp_test_reset(DEV(selector_b)) == 0);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
   CHECK(callback_count() == before);
   kp_rgb_matrix_unlock();
@@ -202,12 +203,10 @@ K_SEM_DEFINE(isr_checked, 0, 1);
 static void isr_boundaries(struct k_timer *unused) {
   ARG_UNUSED(unused);
   CHECK(k_is_in_isr());
-  CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == -EWOULDBLOCK);
-  CHECK(zmk_rgb_selector_reset(DEV(selector_a)) == -EWOULDBLOCK);
-  CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_EFS_CMD, 1) == -EWOULDBLOCK);
-  struct zmk_behavior_binding value = binding(DEV(selector_a), RGB_EFF_CMD, 0);
-  CHECK(kp_rgb_selector_binding_convert(DEV(selector_a), &value) == -EWOULDBLOCK);
+  zmk_rgb_matrix_flush();
+  kp_rgb_condition_invalidate();
+  bool inhibited = zmk_rgb_matrix_is_inhibited();
+  CHECK(zmk_rgb_matrix_is_inhibited() == inhibited);
   k_sem_give(&isr_checked);
 }
 
@@ -291,7 +290,7 @@ static void controls(void) {
   CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->owner == DEV(selector_b));
   select_slot(DEV(selector_a), 2, -EINVAL);
   select_slot(DEV(selector_a), UINT16_MAX, -EINVAL);
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
   invoke(DEV(selector_a), RGB_EFR_CMD, 0);
   CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_c));
   invoke(DEV(selector_a), RGB_EFF_CMD, 0);
@@ -402,7 +401,7 @@ static void check_callback_gates(void) {
 
 static void condition_selection(const struct device *effect, bool selected) {
   unsigned samples = selector_test_samples();
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), effect) == 0);
+  CHECK(kp_test_select(DEV(selector_a), effect) == 0);
   k_sleep(K_MSEC(100));
   CHECK(selector_test_samples() > samples);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == effect);
@@ -423,15 +422,15 @@ static void selected_conditions(void) {
   CHECK(api->scope == KP_RGB_CONDITION_ANY_SIDE);
   CHECK(selector_test_samples() > 0);
   unsigned samples = selector_test_samples();
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
   k_sleep(K_MSEC(20));
   CHECK(selector_test_samples() == samples);
   samples = selector_test_samples();
-  CHECK(zmk_rgb_selector_select(DEV(selector_b), DEV(probe_d)) == 0);
+  CHECK(kp_test_select(DEV(selector_b), DEV(probe_d)) == 0);
   k_sleep(K_MSEC(50));
   CHECK(selector_test_samples() > samples);
   samples = selector_test_samples();
-  CHECK(zmk_rgb_selector_reset(DEV(selector_b)) == 0);
+  CHECK(kp_test_reset(DEV(selector_b)) == 0);
   k_sleep(K_MSEC(50));
   CHECK(selector_test_samples() > samples);
   check_selection_gates(true);
@@ -439,7 +438,7 @@ static void selected_conditions(void) {
   k_sleep(K_MSEC(1));
 #if DT_NODE_EXISTS(DT_NODELABEL(selected_trigger))
   unsigned old_samples = selector_test_samples();
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
   k_sleep(K_MSEC(200));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(selector_test_samples() > old_samples);
@@ -457,7 +456,7 @@ static void selected_conditions(void) {
 
   /* A pending control epoch must hold both input and rendering until it converges. */
   selector_test_arm_sample();
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_c)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0);
   CHECK(selector_test_wait_sample() == 0);
   kp_rgb_matrix_lock();
   unsigned before = delivery_count();
@@ -469,7 +468,7 @@ static void selected_conditions(void) {
   k_sleep(K_MSEC(50));
   kp_rgb_matrix_lock(); CHECK(delivery_count() == before); kp_rgb_matrix_unlock();
 
-  CHECK(zmk_rgb_selector_select(DEV(selector_a), DEV(probe_a)) == 0);
+  CHECK(kp_test_select(DEV(selector_a), DEV(probe_a)) == 0);
   k_sleep(K_MSEC(50));
   kp_rgb_matrix_lock(); CHECK(delivery_count() == before); kp_rgb_matrix_unlock();
   selector_test_arm_sample();

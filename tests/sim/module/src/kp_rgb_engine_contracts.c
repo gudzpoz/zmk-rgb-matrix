@@ -11,6 +11,7 @@
 #include <zmk/events/activity_state_changed.h>
 #include <zmk/events/position_state_changed.h>
 #include <zmk/rgb_matrix.h>
+#include "kp_rgb_test_mutations.h"
 #include "rgb_matrix_internal.h"
 #include "native_contract.h"
 
@@ -906,7 +907,7 @@ static void composition(const char *name) {
 static void solid_composition(void) {
     const struct device *effect = DEVICE_DT_GET(DT_NODELABEL(engine_solid));
     struct kp_rgb_hsb color = {.h = 30, .s = 80, .b = 50};
-    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    KP_CHECK(kp_test_set_color(effect, &color) == 0);
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 70; kp_rgb_matrix_unlock();
     setup(false);
     /* cap 60 * master 70 / 100 = 42; solid B50 -> (127,76,25).
@@ -922,7 +923,7 @@ static void solid_composition(void) {
     /* B80 yields (204,122,40), blend (86,45,14), output (36,18,5). */
     atomic_set(&fail_count, 2);
     color.b = 80;
-    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    KP_CHECK(kp_test_set_color(effect, &color) == 0);
     wait_writes(n + 1); settled();
     for (unsigned tx = n; tx < n + 3; tx++) {
         if (tx != n) repaint();
@@ -940,7 +941,7 @@ static void solid_composition(void) {
         check_pixel(n, i, i == 1 ? (struct led_rgb){36, 18, 5} : (struct led_rgb){7, 0, 0});
     n++;
     color.b = 0;
-    KP_CHECK(zmk_rgb_matrix_set_color(effect, &color) == 0);
+    KP_CHECK(kp_test_set_color(effect, &color) == 0);
     wait_writes(n + 1); settled();
     for (unsigned i = 0; i < KP_LED_COUNT; i++)
         check_pixel(n, i, i == 1 ? (struct led_rgb){4, 0, 0} : (struct led_rgb){7, 0, 0});

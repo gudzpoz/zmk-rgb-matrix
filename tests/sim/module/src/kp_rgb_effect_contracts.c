@@ -7,6 +7,7 @@
 #include <zephyr/irq_offload.h>
 #include <zephyr/init.h>
 #include <zmk/rgb_matrix.h>
+#include "kp_rgb_test_mutations.h"
 #include "../../../../src/rgb_matrix_internal.h"
 
 static int effects_prepare(void) {
@@ -321,7 +322,7 @@ static void brightness(void) {
         for (size_t level = 0; level < ARRAY_SIZE(levels); level++) {
             struct kp_rgb_hsb color = {.h = 23, .s = 73, .b = levels[level]};
             kp_rgb_matrix_unlock();
-            KP_CHECK(zmk_rgb_matrix_set_color(dev, &color) == 0);
+            KP_CHECK(kp_test_set_color(dev, &color) == 0);
             kp_rgb_matrix_lock();
             struct kp_rgb_effect_common_data saved = *kp_rgb_effect_data(dev);
             KP_CHECK(saved.color.h == 23 && saved.color.s == 73 && saved.color.b == levels[level]);
@@ -370,7 +371,7 @@ static void brightness(void) {
         }
         if (KP_LED_COUNT) KP_CHECK(lit);
         kp_rgb_matrix_unlock();
-        KP_CHECK(zmk_rgb_matrix_set_color(dev, &original.color) == 0);
+        KP_CHECK(kp_test_set_color(dev, &original.color) == 0);
         kp_rgb_matrix_lock(); common_equal(dev, original);
     }
 }
@@ -795,8 +796,8 @@ static void private_parameters(void) {
     KP_CHECK(rgb_equal(kp_rgb_hsb_to_rgb(kp_rgb_effect_data(dev)->color), kp_rgb_hsb_to_rgb((struct kp_rgb_hsb)KP_RGB_HSB_FROM_HEX(0x07111f))));
     kp_rgb_matrix_unlock();
     struct kp_rgb_hsb color = {.h = 120, .s = 90, .b = 80};
-    KP_CHECK(zmk_rgb_matrix_set_color(DEV(effects_reactive_a), &color) == 0);
-    KP_CHECK(zmk_rgb_matrix_set_period(DEV(effects_reactive_a), 1000) == 0);
+    KP_CHECK(kp_test_set_color(DEV(effects_reactive_a), &color) == 0);
+    KP_CHECK(kp_test_set_period(DEV(effects_reactive_a), 1000) == 0);
     irq_offload(flush_isr, NULL);
     kp_rgb_matrix_lock();
     dev = DEV(effects_reactive_a);

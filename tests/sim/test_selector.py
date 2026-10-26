@@ -289,7 +289,7 @@ def stage42(root):
         on-enter = <&selector_a RGB_RESET_CMD 0>; };
 }; };
 ''', runtime=True, selectors=SELECTED_CONDITIONS + SELECTORS,
-                   extra_conf="CONFIG_KEYPAW_RGB_TRIGGERS=y\n")
+                   extra_conf="")
     assert result.returncode == 0, result.stdout[-16000:]
     run = run_logged([str(root / "selected-trigger/build/zephyr/zmk.exe"),
                       "--stop_at=2", "-no-rt"], cwd=root, text=True,
