@@ -1,4 +1,0 @@
-/* SPDX-License-Identifier: MIT */
-&geometry_layout { keys = <>; };
-&geometry_strip { chain-length = <2>; };
-&rgb_matrix { mapping = <KP_RGB_NO_KEY(300, 400) KP_RGB_NO_KEY(350, 410)>; };

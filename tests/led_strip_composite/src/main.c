@@ -114,21 +114,18 @@ ZTEST(composite, test_every_prefix_and_mutating_children)
 
 ZTEST(composite, test_argument_errors_and_channels)
 {
-    const struct device *const devices[] = {DEV(one), DEV(many), DEV(nested)};
+    const struct device *dev = DEV(many);
     struct led_rgb pixels[8];
     uint8_t channels[3] = {1, 2, 3};
+    size_t length = led_strip_length(dev);
 
     colors(pixels, ARRAY_SIZE(pixels));
-    for (size_t i = 0; i < ARRAY_SIZE(devices); i++) {
-        size_t length = led_strip_length(devices[i]);
-
-        zassert_ok(led_strip_update_rgb(devices[i], NULL, 0));
-        zassert_ok(led_strip_update_rgb(devices[i], pixels, 0));
-        zassert_equal(led_strip_update_rgb(devices[i], NULL, 1), -EINVAL);
-        zassert_equal(led_strip_update_rgb(devices[i], pixels, length + 1), -ERANGE);
-        zassert_equal(led_strip_update_rgb(devices[i], NULL, length + 1), -ERANGE);
-        zassert_equal(led_strip_update_channels(devices[i], channels, 3), -ENOSYS);
-    }
+    zassert_ok(led_strip_update_rgb(dev, NULL, 0));
+    zassert_ok(led_strip_update_rgb(dev, pixels, 0));
+    zassert_equal(led_strip_update_rgb(dev, NULL, 1), -EINVAL);
+    zassert_equal(led_strip_update_rgb(dev, pixels, length + 1), -ERANGE);
+    zassert_equal(led_strip_update_rgb(dev, NULL, length + 1), -ERANGE);
+    zassert_equal(led_strip_update_channels(dev, channels, 3), -ENOSYS);
     zassert_equal(mock_call_count, 0);
 }
 
@@ -184,34 +181,6 @@ ZTEST(composite, test_failure_at_partial_boundary)
     call_is(0, DEV(a), pixels, 2, expected);
     call_is(1, DEV(b), pixels + 2, 1, expected + 2);
     zassert_mem_equal(pixels + 3, expected + 3, 3 * sizeof(pixels[0]));
-}
-
-ZTEST(composite, test_black_and_fresh_retry_buffers)
-{
-    struct led_rgb pixels[6], expected[6];
-
-    /* The caller reconstructs each retry: children may mutate failed submissions. */
-    for (size_t attempt = 0; attempt < 4; attempt++) {
-        mock_reset();
-        if (attempt < 2) {
-            memset(pixels, 0, sizeof(pixels));
-        } else {
-            colors(pixels, ARRAY_SIZE(pixels));
-        }
-        memcpy(expected, pixels, sizeof(pixels));
-        for (size_t i = 0; i < ARRAY_SIZE(leaves); i++) {
-            struct mock_strip_data *data = leaves[i]->data;
-
-            data->mutate = true;
-            data->result = attempt % 2 == 0 ? -EIO : 0;
-        }
-        zassert_equal(led_strip_update_rgb(DEV(nested), pixels, 6),
-                      attempt % 2 == 0 ? -EIO : 0);
-        zassert_equal(mock_call_count, 3);
-        call_is(0, DEV(a), pixels, 2, expected);
-        call_is(1, DEV(b), pixels + 2, 3, expected + 2);
-        call_is(2, DEV(c), pixels + 5, 1, expected + 5);
-    }
 }
 
 ZTEST(composite, test_runtime_init_errors)

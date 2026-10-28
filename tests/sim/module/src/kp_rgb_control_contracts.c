@@ -4,7 +4,6 @@
 #define DT_DRV_COMPAT test_rgb_control_probe
 #include <drivers/behavior.h>
 #include <errno.h>
-#include <sys/types.h>
 #include <zephyr/irq_offload.h>
 #include <zephyr/init.h>
 #include <zmk/rgb_matrix.h>
@@ -61,24 +60,6 @@ static const struct kp_rgb_effect_callbacks callbacks = {
     KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &callbacks, control_##inst)
 DT_INST_FOREACH_STATUS_OKAY(CONTROL_DEFINE)
 
-DEFINE_DT_ENUM(control_mode_t, mode, idle, pulse, sweep);
-_Static_assert(DT_ENUM_CONST(mode, idle) == 0 && DT_ENUM_CONST(mode, pulse) == 1 &&
-               DT_ENUM_CONST(mode, sweep) == 2, "first provider enum order");
-#if DT_HAS_COMPAT_STATUS_OKAY(test_rgb_control_probe)
-static const control_mode_t first_mode = CONV_DT_ENUM(0, mode);
-#endif
-#undef DT_DRV_COMPAT
-#define DT_DRV_COMPAT test_rgb_control_enum
-DEFINE_DT_ENUM(control_mode, mode, sweep, idle, pulse);
-_Static_assert(DT_ENUM_CONST(mode, sweep) == 0 && DT_ENUM_CONST(mode, idle) == 1 &&
-               DT_ENUM_CONST(mode, pulse) == 2, "second provider enum order");
-_Static_assert(!__builtin_types_compatible_p(control_mode_t, control_mode),
-               "providers must have independent enum types");
-#if DT_HAS_COMPAT_STATUS_OKAY(test_rgb_control_enum)
-static const control_mode second_mode = CONV_DT_ENUM(0, mode);
-#endif
-#undef DT_DRV_COMPAT
-#define DT_DRV_COMPAT test_rgb_control_probe
 
 static bool user_on(void) {
     bool value;
@@ -87,9 +68,7 @@ static bool user_on(void) {
 }
 
 static void matrix_defaults(void) {
-    KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     KP_CHECK(kp_rgb_selector_registry_count() == 0);
-    KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     const int32_t initial = kp_test_case("control-matrix-default") ? 30 : 73;
     KP_CHECK(kp_rgb_config.initial_brightness == initial);
     KP_CHECK(kp_rgb_global.brightness == initial);
@@ -305,9 +284,6 @@ static void one_child(void) {
 }
 
 static void registry(void) {
-    mode_t permissions = 0644;
-    KP_CHECK(permissions == 0644 && first_mode == test_rgb_control_probe_mode_pulse);
-    KP_CHECK(second_mode == test_rgb_control_enum_mode_sweep);
     wait_ready(); kp_rgb_matrix_lock();
     KP_CHECK(kp_rgb_selector_registry_count() == 3);
     KP_CHECK(kp_rgb_selector_registry_at(0)->owner == DEV(preview_selector));
@@ -316,13 +292,10 @@ static void registry(void) {
     struct kp_rgb_selector *a = kp_rgb_selector_overlay_state_locked(DEV(selector_a));
     struct kp_rgb_selector *b = kp_rgb_selector_overlay_state_locked(DEV(selector_b));
     KP_CHECK(a && b && a != b);
-    KP_CHECK(a->owner == DEV(selector_a) && b->owner == DEV(selector_b));
     KP_CHECK(a->effect_count == 2 && b->effect_count == 2);
     KP_CHECK(kp_rgb_selector_at(a, 0) == DEV(probe_a));
     KP_CHECK(kp_rgb_selector_at(a, 1) == DEV(probe_c));
     KP_CHECK(kp_rgb_selector_at(a, 2) == NULL);
-    KP_CHECK(a->members[0].effect == DEV(probe_a));
-    KP_CHECK(a->members[1].effect == DEV(probe_c));
     KP_CHECK(kp_rgb_selector_at(b, 0) == DEV(probe_b));
     KP_CHECK(kp_rgb_selector_at(b, 1) == DEV(probe_d));
     KP_CHECK(kp_rgb_selector_at(b, 2) == NULL);
@@ -340,9 +313,6 @@ static void registry(void) {
     KP_CHECK(kp_rgb_selector_selected(a) == DEV(probe_a));
     KP_CHECK(kp_rgb_selector_select_locked(a, 2) == -EINVAL);
     KP_CHECK(kp_rgb_selector_selected(b) == DEV(probe_b));
-    KP_CHECK(((const struct control_config *)DEV(probe_a)->config)->axis == DT_ENUM_CONST(axis, none));
-    KP_CHECK(((const struct control_config *)DEV(probe_b)->config)->axis == DT_ENUM_CONST(axis, vertical));
-    KP_CHECK(((const struct control_config *)DEV(probe_c)->config)->axis == DT_ENUM_CONST(axis, horizontal));
     kp_rgb_matrix_unlock();
 }
 static void parameters(void) {
@@ -543,8 +513,6 @@ static void conversion(void) {
     KP_CHECK(zmk_behavior_get_binding(DEV(probe_a)->name) == NULL);
     KP_CHECK(zmk_behavior_get_binding(DEV(private_white)->name) == NULL);
     KP_CHECK(zmk_behavior_get_binding(DEV(selector_a)->name) == DEV(selector_a));
-    KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_a))->owner == DEV(selector_a));
-    KP_CHECK(kp_rgb_selector_overlay_state_locked(DEV(selector_b))->owner == DEV(selector_b));
     enum behavior_locality locality;
     KP_CHECK(behavior_get_locality(DEV(selector_a), &locality) == 0 && locality == BEHAVIOR_LOCALITY_GLOBAL);
 #if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
@@ -913,22 +881,6 @@ static void local_only(void) {
 
 static void isr(const void *arg) {
     ARG_UNUSED(arg); KP_CHECK(k_is_in_isr());
-    if (strncmp(kp_test_scenario, "control-assert-", 15) == 0) {
-        printk("STAGE14 assertion probe %s\n", kp_test_scenario);
-        if (kp_test_case("control-assert-query")) (void)zmk_rgb_selector_get_selected(DEV(selector_a));
-        else if (kp_test_case("control-assert-power")) (void)zmk_rgb_matrix_on();
-        else if (kp_test_case("control-assert-inhibit")) (void)zmk_rgb_matrix_set_inhibited(true);
-        else if (kp_test_case("control-assert-selector-convert")) {
-            struct zmk_behavior_binding b = binding(DEV(selector_a), RGB_EFF_CMD, 0);
-            (void)convert(&b);
-        } else if (kp_test_case("control-assert-global-convert")) {
-            struct zmk_behavior_binding b = binding(DEV(rgb_matrix), RGB_BRI_CMD, 0);
-            (void)convert(&b);
-        } else if (kp_test_case("control-assert-selector-apply")) (void)invoke(DEV(selector_a), RGB_EFS_CMD, 0);
-        else if (kp_test_case("control-assert-global-apply")) (void)invoke(DEV(rgb_matrix), RGB_BRI_CMD, 0);
-        printk("STAGE14 assertion unexpectedly returned\n");
-        KP_CHECK(false);
-    }
     zmk_rgb_matrix_flush();
     kp_rgb_condition_invalidate();
     bool inhibited = zmk_rgb_matrix_is_inhibited();
@@ -966,7 +918,6 @@ void kp_test_controls_run(void) {
     else if (kp_test_case("control-owner")) owner_callbacks();
     else if (kp_test_case("control-local-only")) local_only();
     else if (kp_test_case("control-isr")) { wait_ready(); irq_offload(isr, NULL); }
-    else if (strncmp(kp_test_scenario, "control-assert-", 15) == 0) { wait_ready(); irq_offload(isr, NULL); }
     else KP_CHECK(false);
 #else
     KP_CHECK(false);

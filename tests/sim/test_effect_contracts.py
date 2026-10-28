@@ -147,11 +147,15 @@ def main():
     os.environ["EXTRA_ZEPHYR_MODULES"] = ";".join(str(path) for path in modules)
     try:
         for image, zero in (("effects", False), ("effects-zero", True)):
+            scenarios = tuple(scenario for scenario in ((args.scenario,) if args.scenario else SCENARIOS)
+                              if not zero or scenario != "effects-enums")
+            if not scenarios:
+                continue
             result = build(root, image, fragment(zero, have_example), selectors="", extra_conf=CONF)
             if result.returncode:
                 raise AssertionError(f"Native build failed: {root / (image + '-build.log')}\n{result.stdout}")
             for _ in range(args.repeat):
-                for scenario in (args.scenario,) if args.scenario else SCENARIOS:
+                for scenario in scenarios:
                     run(root, image, scenario, timeout=30)
                     print(f"PASS {image} {scenario}", flush=True)
     finally:

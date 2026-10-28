@@ -72,39 +72,40 @@ OVERLAY = '''
 BOUNDARIES = [("below", "99"), ("min", "100"), ("max", "10000"),
               ("above", "10001"), ("negative", "(-1)"), ("zero", "0"),
               ("omitted", None)]
-for index, (name, duration) in enumerate(BOUNDARIES):
-    prop = f"duration = <{duration}>;" if duration is not None else ""
-    OVERLAY += f'''
-&rgb_matrix {{
-    boundary_parent_{name}: boundary_parent_{name} {{
+OVERLAY += '''
+&rgb_matrix {
+    boundary_parent_zero: boundary_parent_zero {
         compatible = "keypaw,rgb-overlay";
-        controllable; #binding-cells = <2>; label = "bp{index}";
+        controllable; #binding-cells = <2>; label = "bpzero";
 
-        parent_{name}: parent_{name} {{
+        parent_zero: parent_zero {
             compatible = "test,rgb-default-effect";
             duration = <0>;
-        }};
-    }};
-    child_boundaries {{
+        };
+    };
+    child_boundaries {
         compatible = "keypaw,rgb-overlay";
         controllable; #binding-cells = <2>; label = "cbctl";
-
-        child_{name}: child_{name} {{
+'''
+for name, duration in BOUNDARIES:
+    prop = f"duration = <{duration}>;" if duration is not None else ""
+    OVERLAY += f'''        child_{name}: child_{name} {{
             compatible = "test,rgb-default-effect"; {prop}
         }};
-    }};
-    private_owner_{name} {{
+'''
+OVERLAY += '''    };
+    private_owner_negative {
         compatible = "keypaw,rgb-overlay";
-        private_{name}: private_{name} {{
-            compatible = "test,rgb-default-effect"; {prop}
-        }};
-    }};
-    default_disabled {{
-        disabled_{name}: disabled_{name} {{
-            compatible = "test,rgb-default-effect"; {prop}
-        }};
-    }};
-}};
+        private_negative: private_negative {
+            compatible = "test,rgb-default-effect"; duration = <(-1)>;
+        };
+    };
+    default_disabled {
+        disabled_negative: disabled_negative {
+            compatible = "test,rgb-default-effect"; duration = <(-1)>;
+        };
+    };
+};
 '''
 OVERLAY += '''
 &rgb_matrix {

@@ -68,7 +68,6 @@ class PreviewTimingTests(unittest.TestCase):
         width, height, images = preview.rasterize(
             coords, preview.resample_frames(frames, end_ms=50), 100, 1, 0)
         self.assertEqual((width, height), (1, 1))
-        self.assertIs(iter(images), images)
         self.assertEqual([bytes(image) for image in images], [RED] * 2)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),

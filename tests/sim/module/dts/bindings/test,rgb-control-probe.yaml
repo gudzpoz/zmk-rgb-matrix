@@ -6,9 +6,5 @@ properties:
     type: string
     default: "none"
     enum: ["none", "vertical", "horizontal"]
-  mode:
-    type: string
-    default: "pulse"
-    enum: ["idle", "pulse", "sweep"]
   zephyr,deferred-init:
     type: boolean

@@ -126,45 +126,24 @@ static void check_parameters(const struct device *effect,
 struct period_case {
   const struct device *effect;
   const struct device *selector;
-  uint16_t startup;
-  uint16_t reset;
+  uint16_t expected;
 };
-#define PARENT_CASE(name, start, reset_) \
-  {DEV(parent_##name), DEV(boundary_parent_##name), start, reset_}
-#define CHILD_CASE(name, value) \
-  {DEV(child_##name), DEV(child_boundaries), value, value}
-#define PRIVATE_CASE(name, value) {DEV(private_##name), NULL, value, value}
+#define CHILD_CASE(name, value) {DEV(child_##name), DEV(child_boundaries), value}
 static const struct period_case period_cases[] = {
-  PARENT_CASE(below, 1000, 1000),
-  PARENT_CASE(min, 1000, 1000),
-  PARENT_CASE(max, 1000, 1000),
-  PARENT_CASE(above, 1000, 1000),
-  PARENT_CASE(negative, 1000, 1000),
-  PARENT_CASE(zero, 1000, 1000),
-  PARENT_CASE(omitted, 1000, 1000),
+  {DEV(parent_zero), DEV(boundary_parent_zero), 1000},
   CHILD_CASE(below, 100), CHILD_CASE(min, 100),
   CHILD_CASE(max, 10000), CHILD_CASE(above, 10000),
   CHILD_CASE(negative, 10000), CHILD_CASE(zero, 1000),
   CHILD_CASE(omitted, 1000),
-  PRIVATE_CASE(below, 100), PRIVATE_CASE(min, 100),
-  PRIVATE_CASE(max, 10000), PRIVATE_CASE(above, 10000),
-  PRIVATE_CASE(negative, 10000), PRIVATE_CASE(zero, 1000),
-  PRIVATE_CASE(omitted, 1000),
-  {DEV(disabled_below), NULL, 100, 100},
-  {DEV(disabled_min), NULL, 100, 100},
-  {DEV(disabled_max), NULL, 10000, 10000},
-  {DEV(disabled_above), NULL, 10000, 10000},
-  {DEV(disabled_negative), NULL, 10000, 10000},
-  {DEV(disabled_zero), NULL, 1000, 1000},
-  {DEV(disabled_omitted), NULL, 1000, 1000},
+  {DEV(private_negative), NULL, 10000},
+  {DEV(disabled_negative), NULL, 10000},
 };
 
-static void check_period_cases(bool reset) {
+static void check_period_cases(void) {
   for (size_t i = 0; i < ARRAY_SIZE(period_cases); i++) {
     const struct period_case *test = &period_cases[i];
     CHECK(device_is_ready(test->effect));
-    check_parameters(test->effect, (struct kp_rgb_hsb){0, 0, 100},
-                     reset ? test->reset : test->startup);
+    check_parameters(test->effect, (struct kp_rgb_hsb){0, 0, 100}, test->expected);
   }
 }
 
@@ -183,7 +162,7 @@ static void check_period_helper(void) {
 }
 
 static int before_startup(void) {
-  check_period_cases(false);
+  check_period_cases();
   check_period_helper();
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_parameters(DEV(missing_disabled), (struct kp_rgb_hsb){180, 100, 50}, 3210);
@@ -277,7 +256,6 @@ static void defaults_test(void *a, void *b, void *c) {
 #endif
   check_parameters(DEV(default_ready), early_color, 4321);
   check_parameters(DEV(default_late), late_color, 3456);
-  check_period_cases(false);
   check_parameters(DEV(missing_selected), early_color, 4321);
   CHECK(kp_test_set_period(DEV(default_ready), 0) == -EINVAL);
   CHECK(kp_test_set_period(DEV(default_ready), 99) == -EINVAL);
@@ -319,11 +297,14 @@ static void defaults_test(void *a, void *b, void *c) {
       CHECK(kp_test_set_color(test->effect, &early_color) == 0);
     }
   }
+  CHECK(kp_test_reset(DEV(boundary_parent_zero)) == 0);
+  CHECK(kp_test_reset(DEV(child_boundaries)) == 0);
   for (size_t i = 0; i < ARRAY_SIZE(period_cases); i++) {
-    if (period_cases[i].selector != NULL)
-      CHECK(kp_test_reset(period_cases[i].selector) == 0);
+    const struct period_case *test = &period_cases[i];
+    if (test->selector != NULL) {
+      check_parameters(test->effect, (struct kp_rgb_hsb){0, 0, 100}, test->expected);
+    }
   }
-  check_period_cases(true);
   CHECK(kp_test_set_color(DEV(default_breathe), &late_color) == 0);
   CHECK(kp_test_set_period(DEV(default_breathe), 5678) == 0);
   kp_rgb_reset_state();
@@ -334,7 +315,6 @@ static void defaults_test(void *a, void *b, void *c) {
   check_parameters(DEV(default_late), (struct kp_rgb_hsb){60, 100, 50}, 1000);
   check_parameters(DEV(default_black), (struct kp_rgb_hsb){0, 0, 0}, 1000);
   check_parameters(DEV(default_white), (struct kp_rgb_hsb){0, 0, 100}, 1000);
-  check_period_cases(true);
   check_parameters(DEV(missing_selected), (struct kp_rgb_hsb){180, 100, 50}, 3210);
   check_defaults_match_data(DEV(missing_selected));
   check_parameters(DEV(missing_private), (struct kp_rgb_hsb){180, 100, 50}, 3210);

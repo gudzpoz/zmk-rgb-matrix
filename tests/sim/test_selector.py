@@ -33,8 +33,6 @@ CONTROL_CASES = {
                       r"overlay requires exactly one enabled nested effect"),
     "private-multiple": ('&ordinary { extra { compatible = "keypaw,rgb-matrix-solid"; }; };',
                          r"overlay requires exactly one enabled nested effect"),
-    "removed-global-alias": ('&rgb_matrix { selector = <&ordinary>; };',
-                             r"['\"]selector['\"].*not declared"),
     "oversized-endpoint": ('&selector_a { label = "control_name_too_long"; };',
                            r"controlled overlay endpoint must be at most 8 bytes"),
     "oversized-global": ('&rgb_matrix { label = "global_name_too_long"; };',

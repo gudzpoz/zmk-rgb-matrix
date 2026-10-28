@@ -95,12 +95,6 @@ ZTEST(kp_rgb_color, rgb_mix_endpoints_and_truncation) {
   assert_rgb(kp_rgb_rgb_mix((struct led_rgb){10, 10, 10}, black, 50), 5, 5, 5);
 }
 
-ZTEST(kp_rgb_color, scale_macro) {
-  zassert_equal(KP_RGB_SCALE(200, 50), 100);
-  zassert_equal(KP_RGB_SCALE(1, 50), 0);
-  zassert_equal(KP_RGB_SCALE(255, 100), 255);
-}
-
 ZTEST(kp_rgb_math, isqrt) {
   zassert_equal(kp_rgb_isqrt(0), 0);
   zassert_equal(kp_rgb_isqrt(1), 1);

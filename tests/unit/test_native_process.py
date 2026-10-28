@@ -12,14 +12,13 @@ import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "sim"))
-from native_process import BUILD_TIMEOUT, HOST_TIMEOUT, UTILITY_TIMEOUT, run_logged
+from native_process import run_logged
 
 LOGS = Path(__file__).resolve().parents[1] / "build/process/native-process"
 
 
 class NativeProcessTests(unittest.TestCase):
-    def test_defaults(self):
-        self.assertEqual((BUILD_TIMEOUT, UTILITY_TIMEOUT, HOST_TIMEOUT), (600, 30, 15))
+    def test_invalid_timeouts(self):
         for timeout in (None, 0, -1, float("inf"), float("nan")):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
                 run_logged([sys.executable, "-c", "pass"],

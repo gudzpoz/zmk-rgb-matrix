@@ -18,7 +18,3 @@
         };
     };
 };
-
-/ {
-    control_enum: control_enum { compatible = "test,rgb-control-enum"; mode = "sweep"; };
-};

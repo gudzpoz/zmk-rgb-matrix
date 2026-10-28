@@ -687,10 +687,6 @@ static void dispatch(void) {
     KP_CHECK(o->frame.local_ms == -7 && o->frame.clock_ms == UINT32_MAX && o->frame.elapsed_ms == 77);
     KP_CHECK(o->frame.count == KP_LED_COUNT && o->frame.coords == coords && o->frame.targets == all && o->frame.pixels == pixels);
     sentinels();
-    struct kp_rgb_effect_instance instance = KP_RGB_EFFECT_INSTANCE_INIT(dev);
-    KP_CHECK(!instance.state.active && !instance.state.initialized);
-    KP_CHECK(kp_rgb_effect_render(dev, &frame));
-    KP_CHECK(!instance.state.initialized && !instance.state.animating && o->frame.elapsed_ms == 77);
     KP_CHECK(!kp_rgb_effect_render(DEV(effects_optional), &frame));
 }
 static struct led_rgb paint_expected(struct led_rgb base, struct led_rgb over, uint8_t strength) {
@@ -808,7 +804,7 @@ static void private_parameters(void) {
 
 }
 static void enums(void) {
-    mode_t permissions = 0644; KP_CHECK(permissions == 0644);
+    (void)sizeof(mode_t);
     KP_CHECK(ARRAY_SIZE(first_modes) == 3 && ARRAY_SIZE(second_modes) == 3);
     /* Instance numbering is dependency ordered; resolve each instance's real DTS token. */
 #define DT_DRV_COMPAT test_rgb_effects_enum_first

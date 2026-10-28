@@ -258,10 +258,6 @@ int __wrap_k_work_reschedule_for_queue(struct k_work_q *q, struct k_work_delayab
     }
     return __real_k_work_reschedule_for_queue(q, work, delay);
 }
-int __real_k_work_submit_to_queue(struct k_work_q *, struct k_work *);
-int __wrap_k_work_submit_to_queue(struct k_work_q *q, struct k_work *work) {
-    return __real_k_work_submit_to_queue(q, work);
-}
 static void wait_writes(unsigned n) {
     int64_t end = k_uptime_get() + 10000;
     while ((unsigned)atomic_get(&writes) < n) {

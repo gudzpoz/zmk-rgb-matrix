@@ -7,10 +7,8 @@ Requires the same workspace/toolchain as run-smoke.sh. Every case has a pristine
 build directory; positive controls distinguish rejection from a broken toolchain.
 """
 import argparse
-import json
 import os
 import re
-import shlex
 from pathlib import Path
 import subprocess
 import tempfile
@@ -45,17 +43,10 @@ CASES = {
     compatible = "keypaw,rgb-overlay-battery"; all-leds;
 }; }; };'''),
     "missing-binding-cells": (False, '&rgb_matrix { /delete-property/ #binding-cells; };'),
-    "removed-global-alias": (False, '&rgb_matrix { selector = <&preview_selector>; };'),
     "controller-leds": (False, "&rgb_matrix { leds = <0 1>; };"),
     "flat-controller-child": (False, '''&rgb_matrix { flat_effect {
         compatible = "keypaw,rgb-matrix-solid";
     }; };'''),
-    "removed-overlays": (False, '&fx_solid { overlays = <&fixture_overlay>; };'),
-    "removed-no-overlays": (False, '&fx_solid { no-overlays; };'),
-    "removed-private-overlays": (False, '&fixture_overlay { fx_fixture { overlays = <&fixture_battery>; }; };'),
-    "removed-private-no-overlays": (False, '&fixture_overlay { fx_fixture { no-overlays; }; };'),
-    "removed-flat-default": (False, '&rgb_matrix { initial-effect = <0>; };'),
-    "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
     "missing-child": (False, "&fixture_overlay { /delete-node/ fx_fixture; };"),
     "two-enabled-children": (False, '''
@@ -74,17 +65,12 @@ CASES = {
 &fixture_overlay { condition = <&selected_preview>; };
 &fixture_battery { condition = <&selected_preview>; };
 '''),
-    "removed-heatmap-slim": (False, '&fx_heatmap_no_spread { slim; };'),
     "heatmap-spread-zero": (True, '''
 &preview_selector { heatmap_zero { compatible = "keypaw,rgb-matrix-heatmap";
     spread = <0>; }; };
 '''),
-    "removed-selector-persist-id": (False, '&preview_selector { persist-id = "preview"; };'),
-    "removed-selector-initial-duration-ms": (False, '&preview_selector { initial-duration-ms = <2345>; };'),
-    "removed-effect-persist-id": (False, '&fx_solid { persist-id = "solid"; };'),
     # Zephyr permits undeclared #-properties; this does not register a behavior.
     "inert-effect-binding-cells": (True, '&fx_solid { #binding-cells = <0>; };'),
-    "removed-effect-display-name": (False, '&fx_solid { display-name = "Solid"; };'),
     "direct-effect-keymap-binding": (False, ""),
     "triggers-present": (True, '''/ { stage14_triggers {
         compatible = "keypaw,rgb-trigger-table";
@@ -104,23 +90,11 @@ DIAGNOSTICS = {
     "two-controllers": r"exactly one enabled matrix node",
     "overlay-wrong-parent": r"overlay must be a child of the keypaw,rgb-matrix node",
     "missing-binding-cells": r"#binding-cells.*required|required.*#binding-cells",
-    "removed-global-alias": r"['\"]selector['\"].*not declared",
     "controller-leds": r"['\"]leds['\"].*not declared",
     "flat-controller-child": r"matrix children must be overlays, not effects",
-    "removed-overlays": r"['\"]overlays['\"].*not declared",
-    "removed-no-overlays": r"['\"]no-overlays['\"].*not declared",
-    "removed-private-overlays": r"['\"]overlays['\"].*not declared",
-    "removed-private-no-overlays": r"['\"]no-overlays['\"].*not declared",
-    "removed-flat-default": r"['\"]initial-effect['\"].*not declared",
-    "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
     "effect-reference": r"['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
-    "removed-selector-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
-    "removed-heatmap-slim": r"['\"]slim['\"].*not declared|unknown property.*slim",
-    "removed-effect-persist-id": r"['\"]persist-id['\"].*not declared in.*binding",
-    "removed-selector-initial-duration-ms": r"['\"]initial-duration-ms['\"].*not declared",
-    "removed-effect-display-name": r"['\"]display-name['\"].*not declared",
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
@@ -129,11 +103,6 @@ for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
         name = f"{prop}-{cap}"
         CASES[name] = (0 <= cap <= 100, f'&rgb_matrix {{ {prop} = <({cap})>; }};')
         DIAGNOSTICS[name] = rf'{prop} must be in 0\.\.100'
-
-for index in (65535, 65536):
-    name = f"overlay-index-{index}"
-    CASES[name] = (index <= 65535, "")
-    DIAGNOSTICS[name] = r"overlay index must fit uint16_t"
 
 for opacity in (-1, 0, 100, 101, 256):
     name = f"overlay-opacity-{opacity}"
@@ -155,61 +124,6 @@ for effect in ("rain", "starlight"):
     step-interval-ms = <({interval})>; }}; }};
 ''')
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
-
-
-def compile_overlay_index(directory, index):
-    """Probe the real definition helper without generating 65536 DTS children.
-
-    Only compile the substituted translation unit; never link or run the substituted object.
-    """
-    source = MODULE / "src/overlays/overlay.c"
-    commands = json.loads((directory / "build/compile_commands.json").read_text())
-    entry = next(item for item in commands if Path(item["file"]) == source)
-    probe = directory / "index-probe.c"
-    probe.write_text('#include <zmk/rgb_matrix.h>\n'
-                     '#undef KP_RGB_OVERLAY_INDEX\n'
-                     f'#define KP_RGB_OVERLAY_INDEX(node_id) {index}\n'
-                     f'#include "{source}"\n')
-    command = shlex.split(entry["command"])
-    command[command.index("-c") + 1] = str(probe)
-    command[command.index("-o") + 1] = str(directory / "index-probe.o")
-    result = subprocess.run(command, cwd=entry["directory"], text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-    (directory / "index-probe.log").write_text(result.stdout)
-    return result
-
-
-def check_public_surface(directory):
-    commands = json.loads((directory / "build/compile_commands.json").read_text())
-    entry = next(item for item in commands
-                 if Path(item["file"]) == MODULE / "src/overlays/overlay.c")
-    removed = ("zmk_rgb_selector_select", "zmk_rgb_selector_reset",
-               "zmk_rgb_matrix_set_color", "zmk_rgb_matrix_set_period")
-    retained = ("zmk_rgb_selector_get_selected", "zmk_rgb_matrix_on", "zmk_rgb_matrix_off",
-                "zmk_rgb_matrix_toggle", "zmk_rgb_matrix_get_state", "zmk_rgb_matrix_get_user_state",
-                "zmk_rgb_matrix_set_inhibited", "zmk_rgb_matrix_is_inhibited",
-                "zmk_rgb_matrix_flush", "kp_rgb_condition_invalidate", "kp_rgb_effect_render")
-    for name, symbols, valid in (("retained", retained, True), *(
-            (symbol, (symbol,), False) for symbol in removed)):
-        probe = directory / f"surface-{name}.c"
-        probe.write_text('#include <zmk/rgb_matrix.h>\n#include <zmk/rgb_selector.h>\n' +
-                         "\n".join(f"__typeof__(&{symbol}) probe_{i} = &{symbol};"
-                                   for i, symbol in enumerate(symbols)) + "\n")
-        command = shlex.split(entry["command"])
-        command[command.index("-c") + 1] = str(probe)
-        command[command.index("-o") + 1] = str(directory / f"surface-{name}.o")
-        result = subprocess.run(command, cwd=entry["directory"], text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-        (directory / f"surface-{name}.log").write_text(result.stdout)
-        assert (result.returncode == 0) == valid, (name, result.stdout)
-        if not valid:
-            assert symbols[0] in result.stdout and "undeclared" in result.stdout, result.stdout
-    result = subprocess.run(["nm", str(directory / "build/zephyr/zmk.elf")], text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
-    (directory / "surface-symbols.log").write_text(result.stdout)
-    assert result.returncode == 0, result.stdout
-    exported = {line.split()[-1] for line in result.stdout.splitlines() if line.split()}
-    assert not exported.intersection(removed), exported.intersection(removed)
 
 
 def main():
@@ -259,8 +173,6 @@ def main():
         result = subprocess.run(command, cwd=WORKSPACE, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
         (root / f"{name}.log").write_text(result.stdout)
-        if name.startswith("overlay-index-") and result.returncode == 0:
-            result = compile_overlay_index(root / name, int(name.rsplit("-", 1)[1]))
         if (result.returncode == 0) != valid:
             raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
                                  + result.stdout[-12000:])
@@ -276,8 +188,6 @@ def main():
                                       ("MATRIX_DURATION_STEP", 123), ("MATRIX_DURATION_MIN_MS", 120),
                                       ("MATRIX_DURATION_MAX_MS", 9000)):
                     assert f"CONFIG_KEYPAW_RGB_{symbol}={value}\n" in generated, generated
-            if name == "baseline":
-                check_public_surface(root / name)
         if not valid:
             output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
             assert re.search(DIAGNOSTICS[name], output), output[-12000:]

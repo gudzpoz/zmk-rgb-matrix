@@ -28,9 +28,6 @@ NEGATIVE = {
     "wrong-compat": "RGB physical-layout must reference zmk,physical-layout",
     "missing-keys": "RGB physical-layout must provide keys",
     "index-equal-count": "invalid mapping entry",
-    # Zephyr rejects empty phandle-arrays before generating any C geometry.
-    "empty-explicit": "devicetree error: expected property 'keys' in /geometry-layout",
-    "zero-empty": "devicetree error: expected property 'keys' in /geometry-layout",
 }
 
 

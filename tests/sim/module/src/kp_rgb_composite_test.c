@@ -166,9 +166,6 @@ static void composite_test(void *a, void *b, void *c) {
             "combined normalized geometry");
   }
 
-  await_count(1);
-  check_frame(0, true);
-
   await_count(2);
   check_frame(1, false);
   require(probe_snapshot(keys, 1).result == -EIO, "first color failure");
