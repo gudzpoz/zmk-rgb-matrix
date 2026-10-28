@@ -13,8 +13,7 @@ project(keypaw_rgb_unit)
 
 target_sources(app PRIVATE
     src/main.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rgb_color.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rgb_persist.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/rgb_color.c)
 
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include)

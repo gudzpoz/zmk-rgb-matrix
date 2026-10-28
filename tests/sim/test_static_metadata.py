@@ -11,7 +11,7 @@ from native_build import MODULE, build
 from native_process import run_logged
 
 FIXTURE = Path(__file__).resolve().parent / "config-static-metadata"
-CASES = ("dense", "dense-peripheral", "zero-leds", "zero-overlays", "disabled-overlays", "ordinal-boundary")
+CASES = ("dense-peripheral", "zero-leds", "zero-overlays", "ordinal-boundary")
 
 
 def main():

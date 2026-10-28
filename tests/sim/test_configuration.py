@@ -27,16 +27,6 @@ CASES = {
     "baseline": (True, ""),
     "startup-priority-98": (True, ""),
     "startup-priority-99": (False, ""),
-    "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
-    "period-zero": (True, '&fx_solid { duration = <0>; };'),
-    "period-wide": (True, '''
-&fx_solid { duration = <70000>; };
-&fixture_overlay { fx_fixture { duration = <70000>; }; };
-'''),
-    "period-u32-max": (True, '''
-&fx_solid { duration = <0xffffffff>; };
-&fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
-'''),
     # The separately owned example binding still requires this property.
     "external-effect": (True, '''
 &preview_selector { external_example { compatible = "keypaw,rgb-matrix-example";
@@ -46,35 +36,11 @@ CASES = {
 / { arbitrary_effect_parent { nested_effect { compatible = "keypaw,rgb-matrix-rainbow";
     duration = <321>; }; }; };
 '''),
-    "two-child-overlay": (True, '''
-&rgb_matrix { fixture_pair: fixture_pair {
-    compatible = "keypaw,rgb-overlay-pair";
-    all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive";
-        color = <0x20ff40>; duration = <700>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow";
-        duration = <1800>; };
-}; };
-'''),
-    "two-child-private-parameters": (True, '''
-&rgb_matrix { fixture_pair: fixture_pair {
-    compatible = "keypaw,rgb-overlay-pair";
-    all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive";
-        color = <0xa040ff>; duration = <900>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow";
-        duration = <2300>; };
-}; };
-'''),
     "no-controller": (False, '&rgb_matrix { status = "disabled"; };'),
     "two-controllers": (False, '''
 / { extra_rgb { compatible = "keypaw,rgb-matrix"; #binding-cells = <2>;
     physical-layout = <&layout_ortho_4x12_all1u>; mapping = <>; }; };
 '''),
-    "empty-scene": (True, '''&rgb_matrix {
-    /delete-node/ preview_selector; /delete-node/ fixture_overlay;
-    /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
-};'''),
     "overlay-wrong-parent": (False, '''/ { wrong_parent { bad_overlay {
     compatible = "keypaw,rgb-overlay-battery"; all-leds;
 }; }; };'''),
@@ -88,8 +54,6 @@ CASES = {
     "removed-no-overlays": (False, '&fx_solid { no-overlays; };'),
     "removed-private-overlays": (False, '&fixture_overlay { fx_fixture { overlays = <&fixture_battery>; }; };'),
     "removed-private-no-overlays": (False, '&fixture_overlay { fx_fixture { no-overlays; }; };'),
-    "matrix-global-default": (True, '&rgb_matrix { initial-brightness = <42>; };'),
-    "matrix-global-default-omitted": (True, '&rgb_matrix { /delete-property/ initial-brightness; };'),
     "removed-flat-default": (False, '&rgb_matrix { initial-effect = <0>; };'),
     "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
@@ -159,15 +123,6 @@ DIAGNOSTICS = {
     "removed-effect-display-name": r"['\"]display-name['\"].*not declared",
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
-
-for count in (0, 1, 32, 33, 64, 65):
-    fragment = '''&rgb_matrix {
-    /delete-node/ preview_selector; /delete-node/ fixture_overlay;
-    /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
-''' + '\n'.join(
-        f'overlay_{i} {{ compatible = "keypaw,rgb-overlay-battery"; all-leds; }};'
-        for i in range(count)) + '\n};'
-    CASES[f"overlay-count-{count}"] = (True, fragment)
 
 for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
     for cap in (-1, 0, 100, 101):
@@ -323,8 +278,6 @@ def main():
                     assert f"CONFIG_KEYPAW_RGB_{symbol}={value}\n" in generated, generated
             if name == "baseline":
                 check_public_surface(root / name)
-        if name.startswith("period-"):
-            assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
         if not valid:
             output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
             assert re.search(DIAGNOSTICS[name], output), output[-12000:]

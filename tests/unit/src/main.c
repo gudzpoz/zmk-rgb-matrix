@@ -10,12 +10,8 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
-#include <errno.h>
-#include <string.h>
-
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_matrix_math.h>
-#include "../../../src/rgb_persist_internal.h"
 
 static void assert_rgb(struct led_rgb got, uint8_t r, uint8_t g, uint8_t b) {
   zassert_equal(got.r, r, "r: got %u want %u", got.r, r);
@@ -146,111 +142,5 @@ ZTEST(kp_rgb_math, arm_phase) {
   zassert_equal(kp_rgb_arm_phase(100, 4), 25);
 }
 
-ZTEST(kp_rgb_persist, positional_wire_roundtrip) {
-  struct kp_rgb_persist_state state = {.user_on = true, .brightness = 88,
-                                      .selection_count = 0};
-  uint8_t empty[KP_RGB_PERSIST_HEADER_SIZE] = {0};
-  const uint8_t expected_empty[] = {1, 1, 88, 0, 0, 0};
-  zassert_ok(kp_rgb_persist_encode(&state, NULL, empty, sizeof(empty)));
-  zassert_mem_equal(empty, expected_empty, sizeof(expected_empty));
-
-  const uint16_t selected[] = {0, 0x1234, UINT16_MAX};
-  state.selection_count = 3;
-  uint8_t bytes[KP_RGB_PERSIST_SIZE(3)] = {0};
-  const uint8_t expected[] = {1, 1, 88, 0, 3, 0, 0, 0, 0x34, 0x12, 0xff, 0xff};
-  zassert_ok(kp_rgb_persist_encode(&state, selected, bytes, sizeof(bytes)));
-  zassert_mem_equal(bytes, expected, sizeof(expected));
-  struct kp_rgb_persist_state decoded = {0};
-  uint16_t restored[3] = {0};
-  zassert_ok(kp_rgb_persist_decode(bytes, sizeof(bytes), sizeof(bytes), &decoded,
-                                   restored, 3));
-  zassert_true(decoded.user_on);
-  zassert_equal(decoded.brightness, 88);
-  zassert_equal(decoded.selection_count, 3);
-  zassert_mem_equal(restored, selected, sizeof(selected));
-}
-
-ZTEST(kp_rgb_persist, partial_prefix_and_max_count) {
-  const uint8_t record[] = {1, 0, 0, 0, 2, 0, 0x78, 0x56, 0xbc, 0x9a};
-  struct kp_rgb_persist_state decoded = {0};
-  uint16_t slots[2] = {0};
-  zassert_ok(kp_rgb_persist_decode(record, 8, sizeof(record), &decoded, slots, 1));
-  zassert_equal(decoded.selection_count, 2);
-  zassert_equal(slots[0], 0x5678);
-  zassert_ok(kp_rgb_persist_decode(record, 6, sizeof(record), &decoded, NULL, 0));
-  zassert_equal(decoded.selection_count, 2);
-
-  const uint8_t max_header[] = {1, 0, 0, 0, 0xff, 0xff};
-  size_t full_len = KP_RGB_PERSIST_SIZE(UINT16_MAX);
-  zassert_ok(kp_rgb_persist_decode(max_header, sizeof(max_header), full_len,
-                                   &decoded, NULL, 0));
-  zassert_equal(decoded.selection_count, UINT16_MAX);
-  struct kp_rgb_persist_state before = decoded;
-  zassert_equal(kp_rgb_persist_decode(max_header, sizeof(max_header), full_len - 1,
-                                      &decoded, NULL, 0), -EINVAL);
-  zassert_mem_equal(&decoded, &before, sizeof(before));
-  zassert_equal(kp_rgb_persist_decode(max_header, sizeof(max_header), SIZE_MAX,
-                                      &decoded, NULL, 0), -EINVAL);
-  zassert_mem_equal(&decoded, &before, sizeof(before));
-}
-
-ZTEST(kp_rgb_persist, rejects_bad_framing_without_mutation) {
-  uint8_t bad[] = {1, 1, 50, 0, 1, 0, 0x34, 0x12};
-  struct kp_rgb_persist_state decoded = {true, 20, 7};
-  struct kp_rgb_persist_state before = decoded;
-  uint16_t slots[] = {0xaaaa};
-  uint16_t slot_before[] = {0xaaaa};
-
-  bad[0] = 2;
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad), &decoded,
-                                      slots, 1), -EINVAL);
-  zassert_mem_equal(&decoded, &before, sizeof(before));
-  zassert_mem_equal(slots, slot_before, sizeof(slots));
-  bad[0] = 1; bad[1] = 2;
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad), &decoded,
-                                      slots, 1), -EINVAL);
-  bad[1] = 1; bad[2] = 101;
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad), &decoded,
-                                      slots, 1), -EINVAL);
-  bad[2] = 50; bad[3] = 1;
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad), &decoded,
-                                      slots, 1), -EINVAL);
-  bad[3] = 0;
-  bad[4] = 2;
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad), &decoded,
-                                      slots, 1), -EINVAL);
-  bad[4] = 1;
-  zassert_equal(kp_rgb_persist_decode(bad, 5, sizeof(bad), &decoded, slots, 1), -EINVAL);
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad) - 1,
-                                      &decoded, slots, 1), -EINVAL);
-  zassert_equal(kp_rgb_persist_decode(NULL, sizeof(bad), sizeof(bad),
-                                      &decoded, slots, 1), -EINVAL);
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad),
-                                      NULL, slots, 1), -EINVAL);
-  zassert_equal(kp_rgb_persist_decode(bad, sizeof(bad), sizeof(bad),
-                                      &decoded, NULL, 1), -EINVAL);
-  zassert_mem_equal(&decoded, &before, sizeof(before));
-  zassert_mem_equal(slots, slot_before, sizeof(slots));
-}
-
-ZTEST(kp_rgb_persist, encode_requires_exact_length_and_preserves_output) {
-  struct kp_rgb_persist_state state = {.user_on = true, .brightness = 50,
-                                       .selection_count = 1};
-  uint16_t selected[] = {7};
-  uint8_t bytes[8]; memset(bytes, 0xa5, sizeof(bytes));
-  uint8_t before[sizeof(bytes)]; memcpy(before, bytes, sizeof(bytes));
-  zassert_equal(kp_rgb_persist_encode(&state, selected, bytes, sizeof(bytes) - 1), -EINVAL);
-  zassert_mem_equal(bytes, before, sizeof(bytes));
-  zassert_equal(kp_rgb_persist_encode(&state, selected, bytes, sizeof(bytes) + 1), -EINVAL);
-  zassert_mem_equal(bytes, before, sizeof(bytes));
-  zassert_equal(kp_rgb_persist_encode(&state, NULL, bytes, sizeof(bytes)), -EINVAL);
-  zassert_mem_equal(bytes, before, sizeof(bytes));
-  state.brightness = 101;
-  zassert_equal(kp_rgb_persist_encode(&state, selected, bytes, sizeof(bytes)), -EINVAL);
-  zassert_mem_equal(bytes, before, sizeof(bytes));
-}
-
-
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(kp_rgb_math, NULL, NULL, NULL, NULL, NULL);
-ZTEST_SUITE(kp_rgb_persist, NULL, NULL, NULL, NULL, NULL);

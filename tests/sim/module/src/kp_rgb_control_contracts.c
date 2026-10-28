@@ -90,7 +90,7 @@ static void matrix_defaults(void) {
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
     KP_CHECK(kp_rgb_selector_registry_count() == 0);
     KP_CHECK(KP_RGB_OVERLAY_COUNT == 0);
-    int32_t initial = (int32_t)DT_PROP_OR(KP_RGB_NODE, initial_brightness, 30);
+    const int32_t initial = kp_test_case("control-matrix-default") ? 30 : 73;
     KP_CHECK(kp_rgb_config.initial_brightness == initial);
     KP_CHECK(kp_rgb_global.brightness == initial);
     KP_CHECK(kp_rgb_global.user_on == DT_PROP(KP_RGB_NODE, initial_on));

@@ -11,7 +11,9 @@ from native_process import run_logged
 from native_build import SELECTORS, build
 
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
-             .replace(' animate;', ''))
+             .replace(' animate;', '')
+             .replace('selector_a: selector_a {', 'selector_a: selector+' + 's' * 64 + ' {')
+             .replace('probe_a: a_static {', 'probe_a: effect+' + 'e' * 64 + ' { label = "longfx";'))
 REORDERED = '''
 &rgb_matrix {
     /delete-node/ fixture_overlay; /delete-node/ fixture_battery; /delete-node/ fixture_batt_sub;
@@ -74,6 +76,8 @@ SCENARIOS = ("existing", "validation",
              "selector-reset-second-failure", "selector-failed-reset-second-failure",
              "global-reset", "global-failed-reset",
              "global-reset-second-failure", "global-failed-reset-second-failure",
+             "selector-dirty-expired", "selector-failed-dirty-expired",
+             "global-reset-expired", "global-failed-reset-expired",
              "reordering")
 CONFIGS = ("auto", "original", "reordered")
 
@@ -106,6 +110,8 @@ def run_case(root, name, scenario, storage=None):
     errors = [line for line in result.stdout.splitlines() if "<err>" in line]
     assert all("set-value failure. key: keypaw/rgb_matrix/" in line
                for line in errors), result.stdout
+    if scenario == "global-failure" or "failed" in scenario or "second-failure" in scenario:
+        assert "RGB settings save failed" in result.stdout, result.stdout
     print(f"PASS scoped settings native {name}/{scenario}", flush=True)
 
 

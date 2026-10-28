@@ -43,7 +43,7 @@ NATIVE_TASK(settings_options, PRE_BOOT_1, 11);
 #else
 #define CAPACITY 128
 struct record { uint8_t bytes[CAPACITY]; size_t len; };
-struct attempt { struct record record; int64_t time; int result; };
+struct attempt { struct record record; int64_t time, returned_at; int result; };
 static struct record durable;
 static struct record boot_record;
 static struct attempt journal[16];
@@ -158,6 +158,7 @@ static int save(struct settings_store *store, const char *name, const char *byte
     CHECK(!memcmp(bytes, a->record.bytes, len));
   }
   if (!a->result) durable = a->record;
+  a->returned_at = k_uptime_get();
   k_sem_give(&write_finished);
   return a->result;
 }
@@ -227,11 +228,8 @@ static void legacy(void) {
   struct record r = record(3, false, 19);
   unsigned before = reads, writes = saves;
   for (size_t i = 0; i < ARRAY_SIZE(paths); i++) {
-    for (int mode = -1; mode <= 1; mode++) {
-      read_mode = mode; stage_path(paths[i], &r);
-    }
+    stage_path(paths[i], &r);
   }
-  read_mode = 0;
   CHECK(reads == before && saves == writes);
   commit();
   CHECK(reads == before && saves == writes);
@@ -337,19 +335,23 @@ static void parameters_and_reload(void) {
   no_retry(1);
 }
 static void debounce(void) {
-  select_member(DEV(selector_a), DEV(probe_c));
+  select_member(DEV(selector_a), DEV(probe_a));
   k_sleep(K_MSEC(12)); CHECK(saves == 0);
+  CHECK(zmk_rgb_matrix_off() == 0);
+  kp_rgb_matrix_lock(); kp_rgb_global.brightness = 77; kp_rgb_matrix_unlock();
   select_member(DEV(selector_a), DEV(probe_c));
   int64_t last = k_uptime_get();
   k_sleep(K_MSEC(12)); CHECK(saves == 0); /* Past the first request's wake. */
   settle(1);
   CHECK(journal[0].time >= last + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
-  check_snapshot(&durable, true, 61, DEV(probe_c), DEV(probe_d));
+  check_snapshot(&durable, false, 77, DEV(probe_c), DEV(probe_d));
   no_retry(1);
 }
 static void failure(void) {
   struct record old = durable;
   failure_mask = BIT(0);
+  CHECK(zmk_rgb_matrix_off() == 0);
+  kp_rgb_matrix_lock(); kp_rgb_global.brightness = 22; kp_rgb_matrix_unlock();
   struct kp_rgb_hsb color = {.h = 279, .s = 39, .b = 17};
   CHECK(kp_test_set_color(DEV(probe_a), &color) == 0);
   CHECK(kp_test_set_period(DEV(probe_a), 2789) == 0);
@@ -357,6 +359,9 @@ static void failure(void) {
   select_member(DEV(selector_a), DEV(probe_a));
   settle(1); CHECK(journal[0].result == -EIO);
   CHECK(durable.len == old.len && !memcmp(durable.bytes, old.bytes, old.len));
+  bool on;
+  CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
+  CHECK(kp_rgb_global.brightness == 22);
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
   CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_b));
   CHECK(kp_rgb_effect_data(DEV(probe_a))->color.h == 279);
@@ -366,7 +371,7 @@ static void failure(void) {
   no_retry(1);
   select_member(DEV(selector_a), DEV(probe_a));
   settle(2);
-  check_snapshot(&durable, true, 61, DEV(probe_a), DEV(probe_b));
+  check_snapshot(&durable, false, 22, DEV(probe_a), DEV(probe_b));
   no_retry(2);
 }
 static void storage_hook(void *a, void *b, void *c) {
@@ -384,7 +389,8 @@ static void storage_hook(void *a, void *b, void *c) {
     else if (action == 2) CHECK(kp_rgb_selector_binding_apply(DEV(selector_a), RGB_RESET_CMD, 0) == 0);
     else if (action == 3) kp_rgb_reset_state();
     else CHECK(false);
-    /* Release before the new debounce deadline; completion must preserve it. */
+    if (strstr(settings_case, "expired"))
+      k_sleep(K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE + 10));
     k_sem_give(&write_release);
     k_sem_give(&hook_finished);
   }
@@ -395,6 +401,7 @@ static void concurrent_save(void) {
   bool global = strstr(settings_case, "global") != NULL;
   bool fail_first = strstr(settings_case, "failed") != NULL;
   bool fail_second = strstr(settings_case, "second-failure") != NULL;
+  bool expired = strstr(settings_case, "expired") != NULL;
   struct record old = durable;
   failure_mask = (fail_first ? BIT(0) : 0) | (fail_second ? BIT(1) : 0);
   CHECK(kp_test_select(DEV(selector_b), DEV(probe_b)) == 0);
@@ -411,7 +418,12 @@ static void concurrent_save(void) {
   check_snapshot(&journal[1].record, true, global ? 100 : 61,
                  reset ? DEV(probe_a) : DEV(probe_c), DEV(probe_b));
   if (!global) CHECK(journal[1].time >= hook_requested_at + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
-  else CHECK(journal[1].time - hook_requested_at < CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
+  else if (!expired) CHECK(journal[1].time - hook_requested_at < CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
+  if (expired) {
+    CHECK(journal[0].returned_at >= hook_requested_at + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
+    CHECK(journal[1].time >= journal[0].returned_at);
+    CHECK(journal[1].time < hook_requested_at + 200);
+  }
   const struct record *expected = fail_second ? (fail_first ? &old : &journal[0].record) : &journal[1].record;
   CHECK(durable.len == expected->len && !memcmp(durable.bytes, expected->bytes, expected->len));
   check_runtime(&journal[1].record);

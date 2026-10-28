@@ -11,7 +11,7 @@ export ZEPHYR_TOOLCHAIN_VARIANT=host
 ARTIFACT_ROOT="$MODULE_ROOT/build/native-artifacts"
 
 all_suites=(
-    selector selector_defaults persist_ids scoped_settings scoped_split fixed_scene documented_setup
+    selector selector_defaults scoped_settings scoped_split fixed_scene documented_setup
     contracts condition_contracts control_contracts effect_contracts singleton_settings_split
     static_metadata geometry configuration composite overlay_pair ztest led_strip_composite smoke
 )
@@ -48,7 +48,7 @@ for suite in "${suites[@]}"; do
     fi
     if ((${#forward_args[@]})); then
         case "$suite" in
-            selector_defaults|persist_ids|fixed_scene|documented_setup|configuration|composite|overlay_pair)
+            selector_defaults|fixed_scene|documented_setup|configuration|composite|overlay_pair)
                 printf 'error: native suite %s does not accept forwarded arguments\n' "$suite" >&2
                 exit 2
                 ;;

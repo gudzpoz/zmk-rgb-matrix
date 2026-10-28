@@ -166,7 +166,7 @@ def main():
                 raise RuntimeError(f"runtime tests failed: {log}\n" + result.stdout[-5000:])
             print(f"PASS runtime ztests scratch={scratch}", flush=True)
 
-        if args.only != "runtime":
+        if not scratch and args.only != "runtime":
             for name, (mutation, diagnostic) in CASES.items():
                 result, rejected_build, log = build(name, mutation)
                 if result.returncode == 0:

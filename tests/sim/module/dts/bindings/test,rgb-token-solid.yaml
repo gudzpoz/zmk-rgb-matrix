@@ -1,9 +1,0 @@
-# Copyright (c) 2026 The ZMK Contributors
-# SPDX-License-Identifier: MIT
-
-description: Solid effect with a unit address for persistence-token tests
-compatible: "test,rgb-token-solid"
-include: "keypaw,rgb-matrix-solid.yaml"
-properties:
-  reg:
-    type: array

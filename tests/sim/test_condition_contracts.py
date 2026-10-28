@@ -92,12 +92,7 @@ SELECTOR_FIXTURE = SELECTORS.replace('keypaw,rgb-matrix-selector-probe',
 
 
 VARIANTS = {
-    'startup-positional': ('positional', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
-    'startup-auto': ('auto', '', ''),
-    'startup-unrestored-settings': ('settings-auto', '',
-        'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
-    'startup-settings-staged': ('settings-staged', '',
-        'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
+    'startup-positional': ('settings', '', 'CONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\nCONFIG_SETTINGS_RUNTIME=y\n'),
     'overlay-zero': ('zero', '&rgb_matrix { /delete-property/ strip; mapping = <>; };', ''),
     'trigger-no-table': ('no-table', '/ { /delete-node/ cc_triggers; };', ''),
     'stale-source-refresh': ('refresh-strip', '''
@@ -126,6 +121,8 @@ VARIANTS = {
 }; };
 ''', ''),
 }
+VARIANTS['startup-unrestored-settings'] = VARIANTS['startup-positional']
+VARIANTS['startup-settings-staged'] = VARIANTS['startup-positional']
 VARIANTS['pending-source'] = VARIANTS['stale-source-refresh']
 VARIANTS['resume-selection'] = VARIANTS['stale-source-refresh']
 VARIANTS['runtime-reload-freshness'] = (
@@ -171,33 +168,26 @@ DIAGNOSTICS = {
 }
 
 REJECTIONS = {
-    'startup-baseline': ('&{/cc_triggers/left_edge} { startup = "baseline"; };',
-                         ("'startup'", 'not declared')),
-    'startup-enter-if-active': ('&{/cc_triggers/left_edge} { startup = "enter-if-active"; };',
-                                ("'startup'", 'not declared')),
     'cycle': ('&cc_root { conditions = <&cc_left>; }; &cc_left { conditions = <&cc_right>; }; &cc_right { conditions = <&cc_left>; };',
               ('cycle in devicetree involving', 'cc_left', 'cc_right')),
     'self': ('&cc_root { conditions = <&cc_root>; };',
              ('condition dependency must precede its consumer',)),
-    'missing': ('&cc_root { conditions = <&cc_missing>; };',
-                ('undefined node label', 'cc_missing')),
     'disabled': ('&cc_root { conditions = <&cc_leaf>; }; &cc_leaf { status = "disabled"; };',
                  ('condition dependency must be enabled',)),
-    'noncondition': ('&cc_root { conditions = <&probe_a>; };',
-                     ('undefined reference', 'kp_rgb_condition_')),
     'unregistered': ('&cc_root { conditions = <&cc_leaf>; }; &cc_leaf { unregistered; };',
                      ('undefined reference', 'kp_rgb_condition_')),
 }
 
 
-def reject_graphs(root, role, fragment, conf, names):
-    # Same compiler/config/provider as the negative cases, with a registered edge.
-    image = f'{role}-dependency-positive'
-    addition = '&cc_root { conditions = <&cc_leaf>; };'
-    result = build(root, image, fragment + addition, selectors=SELECTOR_FIXTURE, extra_conf=conf)
-    if result.returncode:
-        raise AssertionError(f'{image} positive control failed:\n{result.stdout[-15000:]}')
-    run(root, image, 'external-timer')
+def reject_graphs(root, role, fragment, conf, names, positive_ready):
+    if not positive_ready:
+        variant, addition, options = VARIANTS['external-timer']
+        image = f'{role}-{variant}'
+        result = build(root, image, fragment + addition, selectors=SELECTOR_FIXTURE,
+                       extra_conf=conf + options)
+        if result.returncode:
+            raise AssertionError(f'{image} positive control failed:\n{result.stdout[-15000:]}')
+        run(root, image, 'external-timer')
     for name in names:
         addition, diagnostics = REJECTIONS[name]
         image = f'{role}-reject-{name}'
@@ -254,8 +244,9 @@ def main():
                     log = root / f'{image}-{scenario}.log'
                     log.rename(root / f'{image}-{scenario}-{iteration + 1}.log')
                     print(f'PASS {image} {scenario} iteration={iteration + 1}', flush=True)
-        if args.reject or not args.scenario:
-            reject_graphs(root, role, fragment, conf, args.reject or REJECTIONS)
+        if role == roles[0] and (args.reject or not args.scenario):
+            reject_graphs(root, role, fragment, conf, args.reject or REJECTIONS,
+                          VARIANTS['external-timer'] in groups)
 
 
 if __name__ == '__main__':

@@ -119,22 +119,37 @@ static void test_invalid_framing_and_arguments(void) {
 static void test_maximum_count_framing(void) {
     const uint8_t header[] = {1, 0, 0, 0, 0xff, 0xff};
     struct kp_rgb_persist_state state = {true, 20, 3};
-    uint16_t slots[2] = {0xaaaa, 0xbbbb};
     size_t full_len = KP_RGB_PERSIST_SIZE(UINT16_MAX);
-    assert(full_len == KP_RGB_PERSIST_HEADER_SIZE + (size_t)UINT16_MAX * 2);
     assert(kp_rgb_persist_decode(header, sizeof(header), full_len, &state, NULL, 0) == 0);
     assert(state.selection_count == UINT16_MAX && state.brightness == 0 && !state.user_on);
-    assert(kp_rgb_persist_decode(header, sizeof(header), full_len - 1, &state, NULL, 0) == -EINVAL);
     struct kp_rgb_persist_state max_before = state;
+    assert(kp_rgb_persist_decode(header, sizeof(header), full_len - 1, &state, NULL, 0) == -EINVAL);
+    assert(memcmp(&state, &max_before, sizeof(state)) == 0);
     assert(kp_rgb_persist_decode(header, sizeof(header), SIZE_MAX, &state, NULL, 0) == -EINVAL);
     assert(memcmp(&state, &max_before, sizeof(state)) == 0);
-    assert(slots[0] == 0xaaaa && slots[1] == 0xbbbb);
+}
+
+static void test_upper_byte_count(void) {
+    const uint8_t expected_header[] = {1, 1, 77, 0, 0, 1};
+    struct kp_rgb_persist_state state = {.user_on = true, .brightness = 77,
+                                         .selection_count = 256};
+    uint16_t selections[256] = {0};
+    uint8_t record[6 + 2 * 256] = {0};
+    assert(kp_rgb_persist_encode(&state, selections, record, sizeof(record)) == 0);
+    assert(memcmp(record, expected_header, sizeof(expected_header)) == 0);
+
+    struct kp_rgb_persist_state decoded = {0};
+    assert(kp_rgb_persist_decode(expected_header, sizeof(expected_header),
+                                 sizeof(record), &decoded, NULL, 0) == 0);
+    assert(decoded.user_on && decoded.brightness == 77 &&
+           decoded.selection_count == 256);
 }
 
 int main(void) {
     test_zero_and_many_roundtrip();
     test_prefix_and_capacity();
     test_invalid_framing_and_arguments();
+    test_upper_byte_count();
     test_maximum_count_framing();
     puts("positional persistence codec passed");
     return 0;

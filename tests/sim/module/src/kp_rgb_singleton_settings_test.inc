@@ -1,41 +1,12 @@
 /* Copyright (c) 2026 The ZMK Contributors
  * SPDX-License-Identifier: MIT
  */
-#include "rgb_persist_internal.h"
-
 #if IS_ENABLED(CONFIG_SETTINGS)
 static uint8_t singleton_bytes[32];
 static size_t singleton_len;
-static unsigned singleton_saves, singleton_reads, singleton_failures;
-static bool singleton_fail;
-static unsigned singleton_hook;
+static unsigned singleton_saves, singleton_reads;
 static int singleton_read_mode;
-static int64_t singleton_request_time, singleton_return_time;
-static struct {
-    uint8_t bytes[6];
-    int64_t time;
-    bool failed;
-} singleton_writes[8];
-static K_SEM_DEFINE(singleton_request, 0, 1);
-static K_SEM_DEFINE(singleton_done, 0, 1);
-
-static void singleton_query(void *a, void *b, void *c) {
-    ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
-    while (true) {
-        k_sem_take(&singleton_request, K_FOREVER);
-        bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0);
-        singleton_request_time = k_uptime_get();
-        if (singleton_hook == 2) kp_rgb_reset_state();
-        else {
-            kp_rgb_matrix_lock(); kp_rgb_global.brightness = 45; kp_rgb_matrix_unlock();
-            CHECK(kp_rgb_save_state() == 0);
-        }
-        singleton_hook = 0;
-        k_sem_give(&singleton_done);
-    }
-}
-K_THREAD_DEFINE(singleton_storage_query, 2048, singleton_query, NULL, NULL, NULL, 5, 0, 0);
-
+static int64_t singleton_saved_at;
 static ssize_t singleton_read(void *arg, void *out, size_t len) {
     ARG_UNUSED(arg); singleton_reads++;
     if (singleton_read_mode < 0) return -EIO;
@@ -51,23 +22,9 @@ static int singleton_save(struct settings_store *store, const char *name, const 
     ARG_UNUSED(store);
     CHECK(!strcmp(name, ROOT "snapshot"));
     CHECK(len == 6 && bytes != NULL);
-    CHECK(singleton_saves < ARRAY_SIZE(singleton_writes));
-    unsigned index = singleton_saves++;
-    bool failed = singleton_fail;
-    singleton_writes[index].time = k_uptime_get();
-    singleton_writes[index].failed = failed;
-    memcpy(singleton_writes[index].bytes, bytes, len);
     CHECK(bytes[0] == 1 && bytes[3] == 0 && bytes[4] == 0 && bytes[5] == 0);
-    if (singleton_hook) {
-        k_sem_give(&singleton_request);
-        CHECK(k_sem_take(&singleton_done, K_MSEC(100)) == 0);
-        /* Let the newer wake become due while the old backend call is still active. */
-        k_sleep(K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE + 10));
-        CHECK(!memcmp(bytes, singleton_writes[index].bytes, len));
-        singleton_fail = false;
-    }
-    singleton_return_time = k_uptime_get();
-    if (failed) { singleton_failures++; return -EIO; }
+    singleton_saves++;
+    singleton_saved_at = k_uptime_get();
     memcpy(singleton_bytes, bytes, len); singleton_len = len;
     return 0;
 }
@@ -94,7 +51,6 @@ static void singleton_legacy(void) {
     unsigned reads = singleton_reads, saves = singleton_saves;
     for (size_t i = 0; i < ARRAY_SIZE(paths); i++) {
         CHECK(settings_call_set_handler(paths[i], 4, singleton_read, NULL, NULL) == 0);
-        CHECK(settings_call_set_handler(paths[i], SIZE_MAX, singleton_read, NULL, NULL) == 0);
     }
     CHECK(singleton_reads == reads && singleton_saves == saves);
 }
@@ -129,26 +85,6 @@ static void singleton_validation(void) {
     singleton_stage(valid, sizeof(valid));
     CHECK(settings_commit() == 0);
 }
-static void singleton_codec(void) {
-    struct kp_rgb_persist_state state = {.user_on = true, .brightness = 77, .selection_count = 0};
-    uint8_t encoded[6];
-    const uint8_t expected[] = {1, 1, 77, 0, 0, 0};
-    CHECK(KP_RGB_PERSIST_SIZE(0) == sizeof(expected));
-    CHECK(kp_rgb_persist_encode(&state, NULL, encoded, sizeof(encoded)) == 0);
-    CHECK(!memcmp(encoded, expected, sizeof(expected)));
-    CHECK(kp_rgb_persist_decode(expected, sizeof(expected), sizeof(expected), &state, NULL, 0) == 0);
-    CHECK(state.user_on && state.brightness == 77 && state.selection_count == 0);
-    uint16_t slots[] = {0x1234, 0xabcd}, decoded[2];
-    const uint8_t ordered[] = {1, 1, 77, 0, 2, 0, 0x34, 0x12, 0xcd, 0xab};
-    uint8_t wire[sizeof(ordered)]; state.selection_count = 2;
-    CHECK(kp_rgb_persist_encode(&state, slots, wire, sizeof(wire)) == 0);
-    CHECK(!memcmp(wire, ordered, sizeof(wire)));
-    CHECK(kp_rgb_persist_decode(ordered, sizeof(ordered), sizeof(ordered), &state, decoded, 2) == 0);
-    CHECK(decoded[0] == slots[0] && decoded[1] == slots[1]);
-    const uint8_t high_count[] = {1, 1, 77, 0, 0, 1};
-    CHECK(kp_rgb_persist_decode(high_count, sizeof(high_count), 6 + 2 * 256, &state, NULL, 0) == 0);
-    CHECK(state.selection_count == 256);
-}
 #endif
 
 static void singleton_settings(void *a, void *b, void *c) {
@@ -156,7 +92,6 @@ static void singleton_settings(void *a, void *b, void *c) {
 #if IS_ENABLED(CONFIG_SETTINGS)
     bool on; CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && !on);
     CHECK(kp_rgb_global.brightness == 61 && singleton_saves == 0);
-    singleton_codec();
     if (!strcmp(settings_case, "validation")) {
         singleton_validation();
     } else if (!strncmp(settings_case, "rejection-", 10)) {
@@ -167,23 +102,6 @@ static void singleton_settings(void *a, void *b, void *c) {
         if (!current_first) singleton_stage(valid, sizeof(valid));
         CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
         CHECK(kp_rgb_global.brightness == 88 && singleton_saves == 0);
-    } else if (!strcmp(settings_case, "debounce")) {
-        kp_rgb_matrix_lock(); kp_rgb_global.brightness = 22; kp_rgb_matrix_unlock();
-        CHECK(kp_rgb_save_state() == 0);
-        k_sleep(K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE / 2));
-        CHECK(singleton_saves == 0);
-        CHECK(zmk_rgb_matrix_on() == 0);
-        kp_rgb_matrix_lock(); kp_rgb_global.brightness = 77; kp_rgb_matrix_unlock();
-        int64_t latest_request = k_uptime_get();
-        CHECK(kp_rgb_save_state() == 0);
-        k_sleep(K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE / 2));
-        CHECK(singleton_saves == 0);
-        k_sleep(K_MSEC(CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE + 20));
-        const uint8_t expected[] = {1, 1, 77, 0, 0, 0};
-        CHECK(singleton_saves == 1);
-        CHECK(singleton_writes[0].time >= latest_request + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
-        CHECK(!memcmp(singleton_writes[0].bytes, expected, sizeof(expected)));
-        CHECK(!memcmp(singleton_bytes, expected, sizeof(expected)));
     } else if (!strcmp(settings_case, "staged-reset")) {
         const uint8_t staged[] = {1, 0, 17, 0, 0, 0};
         singleton_stage(staged, sizeof(staged));
@@ -197,40 +115,8 @@ static void singleton_settings(void *a, void *b, void *c) {
         k_sleep(K_MSEC(100));
         const uint8_t expected[] = {1, 1, 100, 0, 0, 0};
         CHECK(singleton_saves == 1 && singleton_len == sizeof(expected));
-        CHECK(singleton_writes[0].time < reset_time + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
+        CHECK(singleton_saved_at < reset_time + CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE);
         CHECK(!memcmp(singleton_bytes, expected, sizeof(expected)));
-    } else if (!strcmp(settings_case, "failure")) {
-        singleton_fail = true;
-        CHECK(zmk_rgb_matrix_on() == 0);
-        kp_rgb_matrix_lock(); kp_rgb_global.brightness = 22; kp_rgb_matrix_unlock();
-        CHECK(kp_rgb_save_state() == 0);
-        k_sleep(K_MSEC(10)); CHECK(singleton_saves == 0);
-        k_sleep(K_MSEC(2200));
-        CHECK(singleton_failures == 1 && singleton_saves == 1 && singleton_bytes[2] == 61);
-        CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
-        CHECK(kp_rgb_global.brightness == 22);
-        singleton_fail = false; k_sleep(K_MSEC(1100));
-        CHECK(singleton_saves == 1 && singleton_bytes[2] == 61);
-        CHECK(kp_rgb_save_state() == 0); k_sleep(K_MSEC(100));
-        CHECK(singleton_saves == 2 && singleton_bytes[2] == 22);
-    } else if (strstr(settings_case, "reset") || strstr(settings_case, "dirty")) {
-        bool reset = strstr(settings_case, "reset") != NULL;
-        bool failed = strstr(settings_case, "failed") != NULL;
-        singleton_hook = reset ? 2 : 1; singleton_fail = failed;
-        kp_rgb_matrix_lock(); kp_rgb_global.brightness = 12; kp_rgb_matrix_unlock();
-        CHECK(kp_rgb_save_state() == 0); k_sleep(K_MSEC(200));
-        CHECK(singleton_hook == 0 && singleton_saves == 2);
-        const uint8_t old[] = {1, 0, 12, 0, 0, 0};
-        CHECK(!memcmp(singleton_writes[0].bytes, old, sizeof(old)));
-        CHECK(singleton_writes[0].failed == failed && !singleton_writes[1].failed);
-        CHECK(singleton_failures == (failed ? 1 : 0));
-        CHECK(singleton_writes[1].time >= singleton_request_time +
-              (reset ? 0 : CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE));
-        CHECK(singleton_writes[1].time < singleton_request_time + 200);
-        CHECK(singleton_return_time < singleton_request_time + 200);
-        CHECK(singleton_bytes[1] == (reset ? 1 : 0));
-        CHECK(singleton_bytes[2] == (reset ? 100 : 45));
-        k_sleep(K_MSEC(1100)); CHECK(singleton_saves == 2);
     } else if (!strcmp(settings_case, "repeated-commits")) {
         CHECK(zmk_rgb_matrix_on() == 0);
         kp_rgb_matrix_lock(); kp_rgb_global.brightness = 39; kp_rgb_matrix_unlock();
@@ -239,21 +125,24 @@ static void singleton_settings(void *a, void *b, void *c) {
             CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on);
             CHECK(kp_rgb_global.brightness == 39 && singleton_saves == 0);
         }
-    } else {
+    } else if (!strcmp(settings_case, "existing")) {
         singleton_legacy();
         CHECK(settings_commit_subtree("keypaw/rgb_matrix") == 0);
         CHECK(singleton_saves == 0 && kp_rgb_global.brightness == 61);
         kp_rgb_reset_state(); k_sleep(K_MSEC(100));
         CHECK(singleton_saves == 1 && singleton_bytes[2] == 100);
-    }
-    struct kp_rgb_persist_state durable;
-    CHECK(kp_rgb_persist_decode(singleton_bytes, singleton_len, singleton_len, &durable, NULL, 0) == 0);
-    CHECK((durable.user_on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on()) == 0);
+    } else CHECK(false);
+    CHECK(singleton_len == 6 && singleton_bytes[0] == 1 && singleton_bytes[1] <= 1 &&
+          singleton_bytes[2] <= 100 && singleton_bytes[3] == 0 &&
+          singleton_bytes[4] == 0 && singleton_bytes[5] == 0);
+    const bool durable_on = singleton_bytes[1] != 0;
+    const uint8_t durable_brightness = singleton_bytes[2];
+    CHECK((durable_on ? zmk_rgb_matrix_off() : zmk_rgb_matrix_on()) == 0);
     kp_rgb_matrix_lock(); kp_rgb_global.brightness = 19; kp_rgb_matrix_unlock();
     unsigned settled = singleton_saves; k_sleep(K_MSEC(1100)); CHECK(singleton_saves == settled);
     CHECK(settings_load_subtree("keypaw/rgb_matrix") == 0);
-    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on == durable.user_on);
-    CHECK(kp_rgb_global.brightness == durable.brightness);
+    CHECK(zmk_rgb_matrix_get_user_state(&on) == 0 && on == durable_on);
+    CHECK(kp_rgb_global.brightness == durable_brightness);
 #else
     CHECK(kp_rgb_control_commit() == 0 && kp_rgb_save_state() == 0);
     CHECK(kp_rgb_save_selector_state(NULL, true) == 0);

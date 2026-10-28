@@ -224,17 +224,8 @@ def main(root=None):
     assert "Multiple behaviors have the same name 'rgbs_a'" in collision.stdout, collision.stdout
     print("PASS duplicate behavior endpoint is diagnosed at runtime", flush=True)
     long_selectors = SELECTORS.replace("selector_a: selector_a {",
-                                      'selector_a: ' + 's' * 30 + ' {')
-    result = build(root, "long-overlay", "", runtime=True, selectors=long_selectors)
-    assert result.returncode == 0, result.stdout[-12000:]
-    command = [str(root / "long-overlay/build/zephyr/zmk.exe"), "--stop_at=6", "-no-rt"]
-    print("COMMAND", " ".join(command), flush=True)
-    run = run_logged(command, cwd=root, text=True, stdout=subprocess.PIPE,
-                     stderr=subprocess.STDOUT, log_path=root / "long-overlay.log")
-    assert run.returncode == 0 and "PASS selector runtime" in run.stdout, run.stdout
-    assert "<err>" not in run.stdout, run.stdout
-    print("PASS long overlay with short canonical control", flush=True)
-    result = build(root, "runtime", "", runtime=True)
+                                      'selector_a: selector+' + 's' * 64 + ' {')
+    result = build(root, "runtime", "", runtime=True, selectors=long_selectors)
     assert result.returncode == 0, result.stdout[-12000:]
     capture = root / "selector.bin"
     command = [str(root / "runtime/build/zephyr/zmk.exe"), f"--capture={capture}",

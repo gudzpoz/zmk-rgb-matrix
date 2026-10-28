@@ -4,6 +4,7 @@
 """Native effect initialization, public setters, deferred readiness and reset."""
 from pathlib import Path
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -186,6 +187,7 @@ def run_variant(root, settings):
                         env={**os.environ, "ZEPHYR_TOOLCHAIN_VARIANT": "host"},
                         stderr=subprocess.STDOUT, timeout=600, log_path=root / "build.log")
     assert result.returncode == 0, result.stdout[-16000:]
+    assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-16000:]
     result = run_logged([str(root / "build/zephyr/zmk.exe"), "--stop_at=2", "-no-rt"],
                             cwd=root, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, timeout=30, log_path=root / "runtime.log")
