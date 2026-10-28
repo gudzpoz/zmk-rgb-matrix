@@ -51,6 +51,9 @@ First, please follow the official ZMK guide to define for your keyboard:
 - [a `zmk,physical-layout`, describing key positions with its `keys`
   property](https://zmk.dev/docs/hardware-integration/physical-layouts#optional-keys-property)
 
+  The referenced `zmk,physical-layout` must provide `keys`, which supplies the
+  required RGB geometry. Currently, we don't support runtime layout changes.
+
 - and [your LED strip
   hardware](https://zmk.dev/docs/hardware-integration/lighting/underglow), but
   make sure to leave out the `zmk,underglow = &led_strip;` step: we'll be using
@@ -67,8 +70,9 @@ strip, you now need to define that exact order for the RGB matrix with the
 #include <dt-bindings/keypaw/rgb_matrix.h>
 
 / {
-    rgb_matrix: rgb-matrix {
+    kprgb: kprgb {
         compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
         strip = <&led_strip>;
         physical-layout = <&default_layout>;
         mapping = <0 1 2 KP_RGB_NO_KEY(350, 50)>;
@@ -84,11 +88,19 @@ strip, you now need to define that exact order for the RGB matrix with the
 >     physical_layout0: physical_layout_0 {
 >         compatible = "zmk,physical-layout";
 >         display-name = "Default Layout";
+>         keys = <...>;
 >     };
 > };
 > ```
 >
 > Then you should be using `&physical_layout0` instead of `&default_layout`.
+>
+> If you are not that familiar with devicetree syntax, the two `kprgb` in
+> `kprgb: kprgb { ... };` mean different things. The first one is a [node
+> label](https://docs.zephyrproject.org/latest/build/dts/intro-syntax-structure.html#dt-node-labels),
+> while the second is a node name. ZMK uses node names to sync behaviors between
+> split halves, so you will have to keep the node name within eight characters
+> if you ever change the second `kprgb` into something else.
 
 Each entry in this `mapping = <0 1 2 KP_RGB_NO_KEY(350, 50)>;` thing specifies
 the position of an LED: an integer `N` means a per-key LED under the `N`-th key
@@ -128,8 +140,9 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 > Here is the full mapping for the example:
 > ```
 > / {
->     rgb_matrix: rgb-matrix {
+>     kprgb: kprgb {
 >         compatible = "keypaw,rgb-matrix";
+>         #binding-cells = <2>;
 >         strip = <&led_strip>;
 >         physical-layout = <&default_layout>;
 >
@@ -153,10 +166,10 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 > ```
 >
 > A split keyboard normally declares one matrix node and one local mapping on
-> each half. See my ZMK config for a rather complex example: [`rgb_matrix` for
-> the left
+> each half. See my ZMK config for a rather complex example: [`kprgb` for the
+> left
 > half](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48_left.overlay),
-> [`rgb_matrix` for the right
+> [`kprgb` for the right
 > half](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48_right.overlay)
 > and [the `physical_layout` they map
 > to](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48-layouts.dtsi).
@@ -168,53 +181,42 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 
 ### Effect configurations
 
-With the LEDs specified, you can now configure your RGB effects. Basically, you
-need a `keypaw,behavior-rgb-matrix` devicetree node, with the effects you want
-as its children:
+With the LED geometry specified, you can now configure your RGB effects. All
+effects and overlays should go under the same `keypaw,rgb-matrix` devicetree
+node, with the effects you want as its children:
 
+<!-- documented-setup-scene -->
 ```dts
-/ {
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            initial-effect = <0>;
-
-            fx_breathe: fx_breathe {
-                compatible = "keypaw,rgb-matrix-breathe";
-                #binding-cells = <0>;
-                color = <0x0000FF>;
-                duration = <2400>;
-            };
-            fx_rainbow: fx_rainbow {
-                compatible = "keypaw,rgb-matrix-rainbow";
-                #binding-cells = <0>;
-                color = <0xFFFFFF>;
-                duration = <4000>;
-                basis = "x";
-                direction = "out";
-                palette = "rainbow";
-            };
-            fx_heatmap: fx_heatmap {
-                compatible = "keypaw,rgb-matrix-heatmap";
-                #binding-cells = <0>;
-                color = <0xFFFFFF>;
-                decrease-delay-ms = <25>;
-                spread = <150>;
-                area-limit = <16>;
-                increase-step = <32>;
-            };
+&kprgb {
+    initial-on;
+    initial-brightness = <30>;
+    zone: zone {
+        compatible = "keypaw,rgb-overlay";
+        controllable;
+        #binding-cells = <2>;
+        all-leds;
+        initial-effect = <0>;
+        fx_breathe: fx_breathe {
+            compatible = "keypaw,rgb-matrix-breathe";
+            color = <0x0000FF>;
+            duration = <2400>;
         };
+        fx_rainbow: fx_rainbow {
+            compatible = "keypaw,rgb-matrix-rainbow";
+            duration = <4000>;
+            basis = "x";
+            direction = "out";
+            palette = "rainbow";
+        };
+        // More effects go here...
     };
 };
 ```
 
-> For split builds, you need to make sure that boards get the same effect
-> definitions: an effect is identified by its position in the registry, so a
-> different set or order desyncs the halves. The same applies to overlays: both
-> the split state bit and the paint order come from an overlay's position under
-> `rgb_overlays`, so both halves must declare the same overlays in the same
-> order.
+> For split builds, you need to make sure that boards get the same
+> effect/overlay definitions in the same order: an effect is identified by its
+> position in the registry, so a different set or order desyncs the halves. The
+> same applies to overlays.
 
 ### Optional overlay configurations
 
@@ -245,60 +247,55 @@ targets.
             };
         };
     };
+};
 
-    rgb_overlays: rgb_overlays {
-        compatible = "keypaw,rgb-overlays";
-        // Light up Key No. 41 when CapsLock is active
-        caps: caps {
-            compatible = "keypaw,rgb-overlay";
-            condition = <&cond_caps>;
-            keys = <41>;
-            fx_caps {
-                compatible = "keypaw,rgb-matrix-solid";
-                #binding-cells = <0>;
-                color = <0x00FFFF>;
-            };
+&kprgb {
+    // Light up Key No. 41 when CapsLock is active
+    caps: caps {
+        compatible = "keypaw,rgb-overlay";
+        condition = <&cond_caps>;
+        keys = <41>;
+        fx_caps {
+            compatible = "keypaw,rgb-matrix-solid";
+            color = <0x00FFFF>;
         };
-        // Light up keys when Layer 1 is active
-        layer_fn1: layer_fn1 {
-            compatible = "keypaw,rgb-overlay";
-            condition = <&cond_layer1>;
-            keys = <13 14 15 16 17 18 19 20 21 22>;
-            fx_fn1 {
-                compatible = "keypaw,rgb-matrix-solid";
-                #binding-cells = <0>;
-                color = <0xFF8000>;
-            };
+    };
+    // Light up keys when Layer 1 is active
+    layer_fn1: layer_fn1 {
+        compatible = "keypaw,rgb-overlay";
+        condition = <&cond_layer1>;
+        keys = <13 14 15 16 17 18 19 20 21 22>;
+        fx_fn1 {
+            compatible = "keypaw,rgb-matrix-solid";
+            color = <0xFF8000>;
         };
-        // A built-in battery indicator overlay
-        batt: batt {
-            compatible = "keypaw,rgb-overlay-battery";
-            condition = <&cond_batt>;
-            all-leds;
-            color = <0x00FF00>;
-        };
+    };
+    // A built-in battery indicator overlay
+    batt: batt {
+        compatible = "keypaw,rgb-overlay-battery";
+        condition = <&cond_batt>;
+        all-leds;
+        color = <0x00FF00>;
     };
 };
 ```
 
-A generic overlay must contain exactly one enabled effect child (as above).
-Unlike "public" effects listed under the `&kprgb` node, these "private" child
-effects are owned by the overlay and can only be activated by an active overlay
-condition.
+These `keypaw,rgb-overlay` overlays should contain exactly one enabled effect
+child (as above), whose contents will be rendered onto the selected LEDs.
+`all-leds;` targets every LED; `keys` or `leds` select a subset. For subsets,
+resolved targets must be unique: do not repeat keys/raw LEDs or address the same
+LED through both lists. There is no automatic deduplication or uniqueness check.
+`opacity = <...>;` adjusts how much output is mixed into earlier layers.
 
-There are some more attributes for the overlay: `opacity = <...>;` adjusts how
-much of the output is mixed into the layers below; `all-leds;` is a convenient
-way to express that the effect renders over all LEDs (and, alternatively, you
-can limit the overlay effect to a few LEDs, specified with `keys` or `leds`).
+Overlays compose on top of each other in declaration order.
 
-`keypaw,rgb-conditions` and `keypaw,rgb-overlays` are plain container nodes,
-serving as registries. An overlay's declaration order under `rgb_overlays` is
-its paint order: a later child composites on top. Every registered overlay is
-composited by default; a controller-selectable effect may narrow that list with its
-own `overlays`/`no-overlays`.
+> We've also used `keypaw,rgb-overlay` in our `zone` definition above. The
+> difference is that the `zone` node has a `controllable` property, making it an
+> effect selector. And you may use `&zone` as a behavior to control this
+> zone/selector. See the "Controlling the RGB matrix" section below.
 
-> An explicit `overlays = <&a &b>;` list also sets its own paint order;
-> duplicate placements in that list are rejected.
+Conditions control when an overlay is displayed. They should be declared under a
+`keypaw,rgb-conditions` container node.
 
 > The `cond_batt` latch condition is a bit different from other conditions
 > above: it allows the user to toggle the condition via key bindings. Just bind
@@ -306,29 +303,47 @@ own `overlays`/`no-overlays`.
 
 ### Controlling the RGB matrix
 
-The `keypaw,behavior-rgb-matrix` (`&kprgb`) behavior defined above can be used
-to control the RGB engine, allowing you to adjust the current color, switch
-between effects and turn the LEDs on and off. See [RGB Underglow
-Behavior](https://zmk.dev/docs/keymaps/behaviors/underglow) in ZMK documentation
-for details: just replace their `&rgb_ug` with your `&kprgb`.
+Currently, we provide two kinds of behaviors to control the RGB matrix:e
 
+- `&kprgb`: the `keypaw,rgb-matrix` node, controlling power, global brightness
+  and reset.
+- `&zone`: where `zone` is a `keypaw,rgb-overlay` with an explicit
+  `controllable` property, controlling its children's selection, colors and
+  duration.
+
+See [RGB Underglow behavior](https://zmk.dev/docs/keymaps/behaviors/underglow)
+for a list of usable constants.
+
+<!-- documented-setup-bindings -->
 ```dts
 bindings = <
-    &kprgb RGB_TOG &fx_solid &fx_reactive
-    &kprgb RGB_BRI &kprgb RGB_BRD
+    // Toggles the RGB matrix on and off
+    &kprgb RGB_TOG
+    // Increase the brightness
+    &kprgb RGB_BRI
+    // Decrease the brightness
+    &kprgb RGB_BRD
+
+    // Cycles to the next effect in this zone
+    &zone RGB_EFF
+    // Cycles to the previous effect in this zone
+    &zone RGB_EFR
+    // Switches to the N-th effect (0 means the first, and 1 the second, etc.)
+    &zone RGB_EFS_CMD 0
+    &zone RGB_EFS_CMD 1
+    // Increases the hue of the current effect
+    &zone RGB_HUI
+    // Increases the speed of the current effect
+    &zone RGB_SPI
+
+    // Resets settings
     &kprgb RGB_RESET
+    &zone RGB_RESET
 >;
 ```
 
-Effect state is persisted when `CONFIG_SETTINGS=y`; otherwise the configured
-initial state is used at boot. The matrix turns off on idle by default;
-`CONFIG_KEYPAW_RGB_MATRIX_AUTO_OFF_IDLE=n` keeps it lit and applies
-`idle-brightness` while idle.
-
-> In addition to ZMK commands, we offer a new `RGB_RESET` command. Because we
-> persist per-effect states, so when you change your devicetree RGB effect
-> definitions, things can go out of sync, when you might want to run this
-> `&kprgb RGB_RESET` command manually.
+Power/brightness and selection are persisted if `CONFIG_SETTINGS` is set.
+Saves are debounced, similar to ZMK underglow.
 
 ## Built-in components
 
@@ -500,17 +515,15 @@ to a copy-and-pastable devicetree snippet that produced it.
 </tbody>
 </table>
 
-Every effect accepts `color` and `duration`. Selectable effects also accept
-`overlays` and `no-overlays`. `RGB_EFF`/`RGB_EFR` cycle through all enabled
-selectable effects; private overlay effects are not part of that list.
+Every effect accepts `color` and `duration` properties.
 
 ### Built-in conditions and overlays
 
 | Component | Compatible | Notes |
 |---|---|---|
-| Always-on condition | `keypaw,rgb-condition-always` | / |
 | Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
 | Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
+| Selected-effect condition | `keypaw,rgb-condition-effect-selected` | Matches retained selection; `selector` and enabled child `effect` phandles; local source on either half |
 | BLE condition | `keypaw,rgb-condition-ble` | Central-only; matches the active BLE profile index and connection state |
 | Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
 | And condition | `keypaw,rgb-condition-and` | All listed conditions active |
@@ -519,7 +532,8 @@ selectable effects; private overlay effects are not part of that list.
 | Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
 
 The generic `keypaw,rgb-overlay` compositor is the other overlay kind: it
-renders one effect while its condition holds.
+renders one effect while its condition holds. Omit `condition` on an overlay or
+trigger to make it unconditional.
 
 ## Custom effects and conditions
 
@@ -527,18 +541,29 @@ Third-party modules can add effects, conditions and overlays without editing
 this module; overlays and triggers are then configured in devicetree from them.
 The full authoring guide is [`docs/extending.md`](./docs/extending.md).
 
-As a quick taste, a third-party effect module includes the public API as
-`<zmk/rgb_matrix.h>`, provides a binding that includes
-`keypaw,rgb-matrix-effect-common.yaml`, embeds
-`struct kp_rgb_effect_common_config` and `struct kp_rgb_effect_common_data` as
-the first member of the effect's config and data structures, and instantiates
-each enabled devicetree node with `KP_RGB_EFFECT_DEFINE()`.
+As a quick taste, a third-party effect module may:
+- include the public API as `<zmk/rgb_matrix.h>`,
+- provide a new effect by:
+  1. adding a binding that includes `keypaw,rgb-matrix-effect-common.yaml`,
+  2. embedding `struct kp_rgb_effect_common_config` and `struct
+     kp_rgb_effect_common_data` as the first member of the effect's config and
+     data structures,
+  3. defining `const struct kp_rgb_effect_callbacks *`,
+  4. and instantiating each enabled devicetree node with
+     `KP_RGB_EFFECT_DEFINE()`.
 
 `modules/zmk-rgb-effect-example` in the parent
 [`keypaw48-zmk`](https://github.com/gudzpoz/keypaw48-zmk/tree/main/modules/zmk-rgb-effect-example)
 repository is a complete separate-module example. It demonstrates the required
-binding, data layout, renderer, and `&kprgb` child node without using internal
-matrix headers.
+binding, data layout and renderer.
+
+## Testing
+
+Run `bash tests/unit_run.sh` for SDK-free helper checks and `bash
+tests/sim/run-native.sh` for the complete native contract and configuration
+matrix. Set `ZMK_WS` to an existing ZMK west workspace when the module is
+checked out separately. Stateful tests compile real production sources, headers
+and devicetree rather than extracting source fragments.
 
 ## License
 
