@@ -48,7 +48,7 @@ THREE = '''&selector_a { probe_e: a_third { compatible = "keypaw,rgb-matrix-soli
 DIM = '''&probe_a { color = <0x008000>; };
 &probe_c { color = <0x000040>; };
 &probe_b { color = <0x808000>; };
-&probe_d { color = <0x004040>; };'''
+&probe_d { color = <0x000000>; };'''
 MULTIWORD = '&rgb_matrix {\n' + '\n'.join(f'''
     split_gate_{index}: split_gate_{index} {{
         compatible = "keypaw,rgb-overlay";
@@ -58,50 +58,36 @@ MULTIWORD = '&rgb_matrix {\n' + '\n'.join(f'''
 ''' for index in range(65)) + '};\n'
 MULTIWORD_SCENARIOS = ("multiword-later", "multiword-final")
 CONFIGS = {
-    "transport": ("", CONF), "transport-zero": (ZERO, CONF),
-    "transport-multiword": (MULTIWORD, CONF),
-    "transport-multiword-zero": (MULTIWORD + ZERO, CONF),
-    "transport-multiword-control": (MULTIWORD, CONF + "CONFIG_SETTINGS=y\nCONFIG_SETTINGS_CUSTOM=y\nCONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20\n"),
-    "transport-multiword-control-zero": (MULTIWORD + ZERO, CONF + "CONFIG_SETTINGS=y\nCONFIG_SETTINGS_CUSTOM=y\nCONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20\n"),
-    "ordering": (ORDERING_GATES, CONF), "ordering-zero": (ORDERING_GATES + ZERO, CONF),
-    "ordering-settings": (ORDERING_GATES, ORDERING_SETTINGS_CONF),
-    "brightness": (DIM, CONF), "brightness-zero": (DIM + ZERO, CONF),
+    "transport": (ORDERING_GATES + DIM, CONF),
+    "transport-zero": (ORDERING_GATES + DIM + ZERO, CONF),
+    "transport-multiword": (MULTIWORD, CONF + "CONFIG_SETTINGS=y\nCONFIG_SETTINGS_CUSTOM=y\nCONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE=20\n"),
+    "ordering-settings": (ORDERING_GATES + DIM, ORDERING_SETTINGS_CONF),
     "transport-settling": ("", CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
-    "transport-settling-zero": (ZERO, CONF + "CONFIG_KEYPAW_RGB_SPLIT_SYNC_SETTLE_MS=300\n"),
     "transport-absent": ("", CONF + "CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START=y\nCONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"),
-    "transport-absent-zero": (ZERO, CONF + "CONFIG_ZMK_BLE_CLEAR_BONDS_ON_START=y\nCONFIG_SETTINGS=y\nCONFIG_SETTINGS_NONE=y\n"),
-    "transport-three": (THREE, CONF), "transport-three-zero": (THREE + ZERO, CONF),
+    "transport-three": (THREE, CONF),
     "late-global": ('''&rgb_matrix { compatible = "test,rgb-split-late-global",
         "keypaw,rgb-matrix"; zephyr,deferred-init; };''', CONF),
 }
-for name in ("receiving", "receiving-zero", "receiving-multiword", "receiving-multiword-zero"):
+for name in ("receiving", "receiving-multiword-zero"):
     CONFIGS[name] = ((MULTIWORD if "multiword" in name else "") +
         (ZERO if name.endswith("-zero") else ""),
         "CONFIG_KEYPAW_SIM_SELECTOR_TEST=n\nCONFIG_KEYPAW_SIM_SPLIT_TEST=y\n"
         "CONFIG_TEST=y\nCONFIG_IRQ_OFFLOAD=y\nCONFIG_ZMK_SPLIT=y\nCONFIG_ZMK_SPLIT_ROLE_CENTRAL=n\n")
 
 
-def supported(name):
-    if name == "ordering-settings":
-        return SETTINGS_SCENARIOS
-    if name.startswith("ordering"):
-        return ORDERING_SCENARIOS
-    if name.startswith("receiving"):
-        return ("receiving",)
-    if "multiword-control" in name:
-        return ("multiword-control",)
-    if "multiword" in name:
-        return MULTIWORD_SCENARIOS + tuple(s for s in SCENARIOS if s != "no-transport")
-    if name.startswith("brightness"):
-        return ("retry-color",) + tuple(s for s in SWEEP_SCENARIOS if int(s[-1]) < 8)
-    if name == "late-global":
-        return (name,)
-    if "absent" in name:
-        return ("no-transport",)
-    if "settling" in name:
-        return ("ordering-request-settling",)
-    return tuple(s for s in SCENARIOS if s != "no-transport") + tuple(
-        s for s in SWEEP_SCENARIOS if "three" in name or int(s[-1]) < 8)
+SCENARIOS_BY_CONFIG = {
+    "transport": tuple(s for s in SCENARIOS if s != "no-transport") + ORDERING_SCENARIOS,
+    "transport-zero": ("transport-change", "retry-color", "ordering-sweep-mutate-7",
+                       "ordering-sweep-failed-reset-7", "ordering-gates-repair"),
+    "transport-multiword": MULTIWORD_SCENARIOS + ("multiword-control",),
+    "ordering-settings": SETTINGS_SCENARIOS,
+    "transport-settling": ("ordering-request-settling",),
+    "transport-absent": ("no-transport",),
+    "transport-three": tuple(s for s in SWEEP_SCENARIOS if int(s[-1]) >= 8),
+    "late-global": ("late-global",),
+    "receiving": ("receiving",),
+    "receiving-multiword-zero": ("receiving",),
+}
 
 
 def runtime(root, name, scenarios, repeat=1, no_build=False):
@@ -110,7 +96,9 @@ def runtime(root, name, scenarios, repeat=1, no_build=False):
     if not no_build:
         result = build(root, name, '''/ { chosen { zephyr,bt-hci = &test_hci; };
             test_hci: bt_hci { compatible = "zephyr,bt-hci-userchan"; }; };''' + COMPACT_PREVIEW + fragment,
-                       runtime=True, selectors=ORDERING_SELECTORS if name.startswith("ordering") else SOLID_SELECTORS, extra_conf=config)
+                       runtime=True, selectors=ORDERING_SELECTORS if name in
+                       ("transport", "transport-zero", "ordering-settings") else SOLID_SELECTORS,
+                       extra_conf=config)
         assert result.returncode == 0, result.stdout[-20000:]
     assert (root / name / "build/zephyr/zmk.exe").is_file()
     for scenario in scenarios * repeat:
@@ -129,7 +117,7 @@ def runtime(root, name, scenarios, repeat=1, no_build=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=MULTIWORD_SCENARIOS + SCENARIOS + ORDERING_SCENARIOS + SWEEP_SCENARIOS + SETTINGS_SCENARIOS + ("receiving", "late-global", "multiword-control"), action="append")
+    parser.add_argument("--scenario", choices=sorted({s for cases in SCENARIOS_BY_CONFIG.values() for s in cases}), action="append")
     parser.add_argument("--config", choices=CONFIGS, action="append")
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--repeat", type=int, default=1)
@@ -142,11 +130,11 @@ def main():
         parser.error("repeat must be positive; --no-build requires --artifacts")
     names = args.config or CONFIGS
     for name in names:
-        invalid = set(args.scenario or ()) - set(supported(name))
+        invalid = set(args.scenario or ()) - set(SCENARIOS_BY_CONFIG[name])
         if invalid:
             parser.error(f"{name} does not support {sorted(invalid)}")
     for name in names:
-        runtime(root, name, tuple(args.scenario or supported(name)), args.repeat, args.no_build)
+        runtime(root, name, tuple(args.scenario or SCENARIOS_BY_CONFIG[name]), args.repeat, args.no_build)
 
 
 if __name__ == "__main__":

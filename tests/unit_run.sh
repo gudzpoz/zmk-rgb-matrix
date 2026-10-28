@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 #
 # Runs the host-side Python tests in tests/unit/test_*.py: codec, subprocess,
-# preview timing, and fixture structure. They do not require a ZMK workspace or
-# Zephyr SDK. Native_sim integration and ztest coverage run separately through
+# and preview timing. They do not require a ZMK workspace or Zephyr SDK.
+# Native_sim integration and ztest coverage run separately through
 # tests/sim/run-native.sh.
 
 set -u

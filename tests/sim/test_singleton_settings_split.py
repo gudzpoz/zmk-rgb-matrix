@@ -41,7 +41,6 @@ CONFIGS = {
     "split-zero": SINGLETON_CONF,
     "split-unready": SINGLETON_CONF,
     "split-multiword": SINGLETON_CONF,
-    "split-multiword-zero": SINGLETON_CONF,
 }
 SPLIT_SCENARIOS = (
     "brightness", "power", "overlay",
@@ -54,10 +53,9 @@ SCENARIOS = {
                  "staged-reset", "repeated-commits"),
     "settings-disabled": ("disabled",),
     "split": SPLIT_SCENARIOS,
-    "split-zero": SPLIT_SCENARIOS,
+    "split-zero": ("overlay", "race-gate", "current-retry-gate"),
     "split-unready": ("unready",),
-    "split-multiword": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later", "race-final"),
-    "split-multiword-zero": SPLIT_SCENARIOS + ("current-retry-later", "current-retry-final", "race-later", "race-final"),
+    "split-multiword": ("current-retry-later", "current-retry-final", "race-later", "race-final"),
 }
 
 

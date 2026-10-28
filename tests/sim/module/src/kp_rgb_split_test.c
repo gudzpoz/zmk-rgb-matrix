@@ -376,18 +376,17 @@ static uint32_t gate_refresh_original[2];
 static K_SEM_DEFINE(gate_refresh_done, 0, 1);
 static void gate_refresh_work(struct k_work *work) {
     ARG_UNUSED(work);
-    kp_rgb_matrix_lock();
-    struct kp_rgb_replication_status before = kp_rgb_replication_status_locked();
-    CHECK(kp_rgb_overlay_refresh());
-    CHECK(kp_rgb_replication_status_locked().generation == before.generation + 1);
+    struct kp_rgb_replication_status before = ordering_status();
+    unsigned start = attempt_count;
+    kp_rgb_conditions_run();
+    CHECK(ordering_status().generation == before.generation + 3); /* refresh + two word invocations */
     CHECK(kp_rgb_overlay_get_word(1) == gate_refresh_original[0] &&
           kp_rgb_overlay_get_word(2) == gate_refresh_original[1]);
-    CHECK(!kp_rgb_overlay_refresh());
-    CHECK(kp_rgb_replication_status_locked().generation == before.generation + 1);
-    kp_rgb_matrix_unlock();
-    unsigned start = attempt_count;
-    kp_rgb_overlay_dispatch();
     check_gate_dispatch(start, gate_refresh_original[0], gate_refresh_original[1]);
+    start = attempt_count;
+    kp_rgb_conditions_run();
+    CHECK(ordering_status().generation == before.generation + 3);
+    CHECK(attempt_count == start);
     k_sem_give(&gate_refresh_done);
 }
 static K_WORK_DEFINE(gate_refresh_item, gate_refresh_work);

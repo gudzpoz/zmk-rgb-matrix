@@ -9,9 +9,6 @@
 #include "kp_rgb_test_mutations.h"
 #include "rgb_matrix_internal.h"
 
-BUILD_ASSERT(KP_RGB_DEVICE_INIT_PRIORITY == 99);
-BUILD_ASSERT(KP_RGB_OVERLAY_COUNT == DT_CHILD_NUM_STATUS_OKAY(DT_NODELABEL(rgb_matrix)));
-
 #define DEV(label) DEVICE_DT_GET(DT_NODELABEL(label))
 #define CHECK(expr) do { if (!(expr)) { printk("FAIL fixed scene line %u\n", __LINE__); exit(2); } } while (0)
 

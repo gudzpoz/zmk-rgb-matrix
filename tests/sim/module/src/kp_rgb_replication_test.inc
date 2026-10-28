@@ -306,6 +306,9 @@ static void ordering_publications(void) {
     ORDERING_PUBLICATION(CHECK(kp_test_select(DEV(selector_a), DEV(probe_c)) == 0), false);
     ORDERING_PUBLICATION(global_apply(RGB_RESET_CMD, 0), true);
     CHECK(kp_rgb_effect_data(DEV(probe_c))->color.h == 240);
+    CHECK(kp_rgb_effect_data(DEV(probe_a))->color.b == 50);
+    CHECK(kp_rgb_effect_data(DEV(probe_c))->color.b == 25);
+    CHECK(kp_rgb_effect_data(DEV(probe_d))->color.b == 0);
     ORDERING_PUBLICATION(global_apply(RGB_CLOCK_CMD, 123456), false);
     ORDERING_PUBLICATION(CHECK(zmk_rgb_matrix_set_inhibited(false) == 0), false);
     struct kp_rgb_hsb private_color = {.h = 89, .s = 50, .b = 60};
