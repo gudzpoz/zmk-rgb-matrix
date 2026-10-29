@@ -167,7 +167,7 @@ for i in "${!indices[@]}"; do
 
     # solid/static are static by design; every other effect must animate.
     case "$slug" in
-        solid|solid-horizontal|solid-vertical|static) min=0 ;;
+        solid|solid-horizontal|solid-vertical|static|fx-solid|fx-solid-v|fx-solid-h|fx-static) min=0 ;;
         *) min=$MIN_DISTINCT ;;
     esac
     python3 "$SIM_DIR/render_gif.py" "$work_dir/capture.bin" \

@@ -70,7 +70,7 @@ strip, you now need to define that exact order for the RGB matrix with the
 #include <dt-bindings/keypaw/rgb_matrix.h>
 
 / {
-    kprgb: kprgb {
+    rgb_matrix: rgb {
         compatible = "keypaw,rgb-matrix";
         #binding-cells = <2>;
         strip = <&led_strip>;
@@ -95,12 +95,12 @@ strip, you now need to define that exact order for the RGB matrix with the
 >
 > Then you should be using `&physical_layout0` instead of `&default_layout`.
 >
-> If you are not that familiar with devicetree syntax, the two `kprgb` in
-> `kprgb: kprgb { ... };` mean different things. The first one is a [node
-> label](https://docs.zephyrproject.org/latest/build/dts/intro-syntax-structure.html#dt-node-labels),
-> while the second is a node name. ZMK uses node names to sync behaviors between
-> split halves, so you will have to keep the node name within eight characters
-> if you ever change the second `kprgb` into something else.
+> In `rgb_matrix: rgb { ... };`, `rgb_matrix` is a [node
+> label](https://docs.zephyrproject.org/latest/build/dts/intro-syntax-structure.html#dt-node-labels)
+> used by references such as `&rgb_matrix`, while `rgb` is the node name. ZMK
+> uses node names to sync behaviors between split halves, so keep the node name
+> within eight characters if you rename `rgb`. This limit does not apply to the
+> node label.
 
 Each entry in this `mapping = <0 1 2 KP_RGB_NO_KEY(350, 50)>;` thing specifies
 the position of an LED: an integer `N` means a per-key LED under the `N`-th key
@@ -140,7 +140,7 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 > Here is the full mapping for the example:
 > ```
 > / {
->     kprgb: kprgb {
+>     rgb_matrix: rgb {
 >         compatible = "keypaw,rgb-matrix";
 >         #binding-cells = <2>;
 >         strip = <&led_strip>;
@@ -166,10 +166,10 @@ layout give <code>mapping = &lt;6 7 8 9 10 11 &nbsp;&nbsp; 23 22 21 20 19 18
 > ```
 >
 > A split keyboard normally declares one matrix node and one local mapping on
-> each half. See my ZMK config for a rather complex example: [`kprgb` for the
-> left
+> each half. See my ZMK config for a rather complex example: [`rgb_matrix` for
+> the left
 > half](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48_left.overlay),
-> [`kprgb` for the right
+> [`rgb_matrix` for the right
 > half](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48_right.overlay)
 > and [the `physical_layout` they map
 > to](https://github.com/gudzpoz/keypaw48-zmk/blob/main/boards/shields/keypaw48/keypaw48-layouts.dtsi).
@@ -187,7 +187,7 @@ node, with the effects you want as its children:
 
 <!-- documented-setup-scene -->
 ```dts
-&kprgb {
+&rgb_matrix {
     initial-on;
     initial-brightness = <30>;
     zone: zone {
@@ -249,7 +249,7 @@ targets.
     };
 };
 
-&kprgb {
+&rgb_matrix {
     // Light up Key No. 41 when CapsLock is active
     caps: caps {
         compatible = "keypaw,rgb-overlay";
@@ -305,7 +305,7 @@ Conditions control when an overlay is displayed. They should be declared under a
 
 Currently, we provide two kinds of behaviors to control the RGB matrix:e
 
-- `&kprgb`: the `keypaw,rgb-matrix` node, controlling power, global brightness
+- `&rgb_matrix`: the `keypaw,rgb-matrix` node, controlling power, global brightness
   and reset.
 - `&zone`: where `zone` is a `keypaw,rgb-overlay` with an explicit
   `controllable` property, controlling its children's selection, colors and
@@ -318,11 +318,11 @@ for a list of usable constants.
 ```dts
 bindings = <
     // Toggles the RGB matrix on and off
-    &kprgb RGB_TOG
+    &rgb_matrix RGB_TOG
     // Increase the brightness
-    &kprgb RGB_BRI
+    &rgb_matrix RGB_BRI
     // Decrease the brightness
-    &kprgb RGB_BRD
+    &rgb_matrix RGB_BRD
 
     // Cycles to the next effect in this zone
     &zone RGB_EFF
@@ -337,7 +337,7 @@ bindings = <
     &zone RGB_SPI
 
     // Resets settings
-    &kprgb RGB_RESET
+    &rgb_matrix RGB_RESET
     &zone RGB_RESET
 >;
 ```

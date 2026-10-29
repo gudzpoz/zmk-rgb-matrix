@@ -367,7 +367,7 @@ matrix:
     };
 };
 
-&kprgb {
+&rgb_matrix {
     rec: rec {
         compatible = "keypaw,rgb-overlay";
         condition = <&cond_rec>;
@@ -663,8 +663,8 @@ Controller-selectable effects and registered overlays are identified by their
 child index, and on a split build that index travels the link. **Both halves
 must build the same set of registry effects and overlays, in the same order.**
 The same applies across a flash: an effect's state is addressed by its slot, so
-reordering `&kprgb`'s children while `CONFIG_SETTINGS=y` re-points persisted
-state. Also, overlay declaration order is the paint order.
+reordering `&rgb_matrix`'s children while `CONFIG_SETTINGS=y` re-points
+persisted state. Also, overlay declaration order is the paint order.
 
 Settings address selectors and selected members by enabled DTS declaration
 position, not name. Reordering members can redirect saved selections; overlay order
@@ -717,7 +717,7 @@ Before shipping a third-party extension, confirm:
 And if you are also drafting devicetree definitions:
 
 - [ ] A `GLOBAL` behavior's effective device name is 8 characters or fewer. This
-      includes the matrix: use `kprgb: kprgb` with `#binding-cells = <2>`.
+      includes the matrix: use `rgb_matrix: rgb` with `#binding-cells = <2>`.
 - [ ] Exactly one enabled matrix owns geometry/global defaults and direct overlay
       children; there is no separate global behavior/container or compatibility bridge.
 - [ ] Overlay/effect members and their ordering are identical on both halves;

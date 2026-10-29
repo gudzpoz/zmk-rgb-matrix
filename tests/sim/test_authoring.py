@@ -48,23 +48,28 @@ def snippet(text, heading, index=0):
     return re.findall(r"```dts\n(.*?)```", section, re.S)[index]
 
 
+def guide_overlay(text):
+    section = snippet(text, "## Configuring an overlay")
+    # The custom condition provider is supplied by the README's latch example.
+    body = section.split("&rgb_matrix {", 1)[1]
+    return "&rgb_matrix {" + body.replace("condition = <&cond_rec>;", "condition = <&cond_batt>;")
+
+
 def build_documented(root):
     readme = (MODULE / "README.md").read_text()
     guide = (MODULE / "docs/extending.md").read_text()
     scene = snippet(readme, "<!-- documented-setup-scene -->")
     indicators = snippet(readme, "### Optional overlay configurations")
     bindings = snippet(readme, "<!-- documented-setup-bindings -->")
-    selectors = snippet(guide, "### Effect selectors")
-    guide_bindings = snippet(guide, "### Effect selectors", 1)
-    condition = snippet(guide, "#### Selected-effect condition")
+    guide_scene = guide_overlay(guide)
     assert re.search(r"zone:\s*zone\s*\{[^}]*\bcontrollable;", scene, re.S)
     assert "&zone " in bindings and "&rgbs " not in bindings
-    assert "&zone_a " in guide_bindings and "&zone_b " in guide_bindings
+    assert 'compatible = "keypaw,rgb-overlay"' in guide_scene
+    assert "condition = <&cond_batt>;" in guide_scene
 
     variants = (
         ("documented-readme", scene + indicators, bindings),
-        ("documented-guide", scene + indicators + selectors + condition
-         + '&caps { condition = <&selected_a>; };\n', guide_bindings),
+        ("documented-guide", scene + indicators + guide_scene, bindings),
     )
     for name, overlay, keys in variants:
         config = root / name / "config"
