@@ -34,14 +34,23 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   host:
     name: Host tests
     runs-on: ubuntu-latest
-    container:
-      image: docker.io/zmkfirmware/zmk-build-arm:4.1
     steps:
       - uses: actions/checkout@v7
+      - name: Host dependencies
+        run: |
+          if ! command -v python3 >/dev/null || ! command -v gcc >/dev/null || \
+             ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends python3 gcc ffmpeg
+          fi
       - name: Host tests
         run: bash tests/unit_run.sh
 
@@ -54,8 +63,25 @@ jobs:
     env:
       ZMK_WS: ${{ github.workspace }}/zmk-ws
       ZEPHYR_TOOLCHAIN_VARIANT: host
+      RGB_NATIVE_BUILD_ROOT: ${{ github.workspace }}/build/native-artifacts/ci
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
     steps:
       - uses: actions/checkout@v7
+      - name: Start setup timing
+        run: echo "NATIVE_SETUP_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Prepare compiler cache
+        id: compiler
+        shell: bash
+        run: |
+          if ! command -v ccache >/dev/null; then
+            apt-get update -qq
+            apt-get install -y --no-install-recommends ccache
+          fi
+          identity=$({ gcc --version; gcc -dumpmachine; sha256sum "$(readlink -f "$(command -v gcc)")"; ccache --version; } | sha256sum | cut -d' ' -f1)
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
 
       # No config/west.yml dependency: the harnesses only need a ZMK checkout
       # to build against.
@@ -81,14 +107,88 @@ jobs:
           restore-keys: |
             zmk-${{ github.event.inputs.zmk_ref || 'main' }}-
 
+      - name: Restore compiler cache
+        id: ccache
+        uses: actions/cache/restore@v6
+        continue-on-error: true
+        with:
+          path: .cache/ccache
+          key: rgb-ccache-v1-${{ runner.os }}-${{ runner.arch }}-zmk-arm-4.1-${{ steps.compiler.outputs.identity }}-${{ hashFiles('zmk-ws/app/west.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            rgb-ccache-v1-${{ runner.os }}-${{ runner.arch }}-zmk-arm-4.1-${{ steps.compiler.outputs.identity }}-${{ hashFiles('zmk-ws/app/west.yml') }}-
+
       - name: Initialise the west workspace
         working-directory: zmk-ws
         run: |
           west init -l app
           west update --fetch-opt=--filter=tree:0
 
+      - name: Finish setup timing
+        run: |
+          ccache --zero-stats
+          mkdir -p build/native-artifacts
+          echo "Native setup seconds (including cache restore): $(($(date +%s) - NATIVE_SETUP_START))" > build/native-artifacts/ci-summary.txt
+
       - name: Native integration suite inventory
         run: bash tests/sim/run-native.sh
+
+      - name: Verify compiler cache integration
+        run: |
+          if ! grep -rl --include='*.ninja' 'ccache' build > build/native-artifacts/ccache-builds.txt; then
+            echo 'No native Ninja build invokes ccache' >&2
+            exit 1
+          fi
+
+      - name: Save compiler cache
+        if: success() && steps.ccache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@v6
+        continue-on-error: true
+        with:
+          path: .cache/ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
+
+      - name: Publish native timings and cache statistics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p build/native-artifacts
+          if command -v ccache >/dev/null; then
+            ccache --show-stats > build/native-artifacts/ccache-stats.txt
+          fi
+          {
+            echo '## Native test costs'
+            echo 'Compare total job durations as well as these timings; cache save and artifact transfer are additional costs.'
+            echo '```text'
+            cat build/native-artifacts/ci-summary.txt 2>/dev/null || true
+            cat build/native-artifacts/suite-timings.tsv 2>/dev/null || true
+            cat build/native-artifacts/ccache-stats.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain cost reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-cost-reports
+          if-no-files-found: warn
+          path: |
+            build/native-artifacts/ci-summary.txt
+            build/native-artifacts/suite-timings.tsv
+            build/native-artifacts/ccache-stats.txt
+            build/native-artifacts/ccache-builds.txt
+
+      - name: Package native artifacts on failure
+        if: failure()
+        run: |
+          set --
+          for path in build tests/sim/out* tests/sim/build* tests/led_strip_composite/build; do
+            if [ -d "$path" ]; then
+              set -- "$@" "$path"
+            fi
+          done
+          if [ "$#" -gt 0 ]; then
+            tar -czf native-test-artifacts.tar.gz "$@"
+          fi
 
       - name: Retain native artifacts on failure
         if: failure()
@@ -96,8 +196,5 @@ jobs:
         with:
           name: native-test-artifacts
           if-no-files-found: warn
-          path: |
-            build/**
-            tests/sim/out*/**
-            tests/sim/build*/**
-            tests/led_strip_composite/build/**
+          compression-level: 0
+          path: native-test-artifacts.tar.gz

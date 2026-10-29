@@ -62,10 +62,31 @@ fi
 mkdir -p "$ARTIFACT_ROOT"
 export TMPDIR="$ARTIFACT_ROOT"
 
+report_path="$ARTIFACT_ROOT/suite-timings.tsv"
+declare -a suite_statuses suite_exit_codes suite_elapsed_seconds
+for ((report_index = 0; report_index < ${#suites[@]}; report_index++)); do
+    suite_statuses[report_index]=not_run
+    suite_exit_codes[report_index]=
+    suite_elapsed_seconds[report_index]=
+done
+write_report() {
+    local report_index
+    {
+        printf 'suite\tstatus\texit_code\telapsed_seconds\n'
+        for ((report_index = 0; report_index < ${#suites[@]}; report_index++)); do
+            printf '%s\t%s\t%s\t%s\n' "${suites[report_index]}" "${suite_statuses[report_index]}" "${suite_exit_codes[report_index]}" "${suite_elapsed_seconds[report_index]}"
+        done
+    } > "$report_path"
+}
+write_report
+
 run_with_log() {
     local suite=$1
     shift
-    local stamp log
+    local stamp log elapsed
+    suite_statuses[current_suite_index]=running
+    write_report
+    local started=$SECONDS
     stamp=$(date -u +%Y%m%dT%H%M%S.%N)
     log="$ARTIFACT_ROOT/${stamp}-$$-${suite}.log"
     while [[ -e "$log" ]]; do
@@ -74,15 +95,25 @@ run_with_log() {
     done
     echo "=== Native integration: $suite (log: $log) ==="
     if timeout --kill-after=10s 30m "$@" 2>&1 | tee "$log"; then
-        :
+        elapsed=$((SECONDS - started))
+        suite_statuses[current_suite_index]=passed
+        suite_exit_codes[current_suite_index]=0
+        suite_elapsed_seconds[current_suite_index]=$elapsed
+        write_report
     else
         status=$?
+        elapsed=$((SECONDS - started))
+        suite_statuses[current_suite_index]=failed
+        suite_exit_codes[current_suite_index]=$status
+        suite_elapsed_seconds[current_suite_index]=$elapsed
+        write_report
         printf 'FAIL: %s (exit %s; log: %s)\n' "$suite" "$status" "$log" >&2
         return "$status"
     fi
 }
 
-for suite in "${suites[@]}"; do
+for ((current_suite_index = 0; current_suite_index < ${#suites[@]}; current_suite_index++)); do
+    suite=${suites[current_suite_index]}
     case "$suite" in
         led_strip_composite)
             run_with_log "$suite" python3 -u tests/run-led-strip-composite.py \

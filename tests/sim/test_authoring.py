@@ -2,14 +2,12 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 """Compile documented setup snippets and exercise fixed-scene runtime behavior."""
-from pathlib import Path
 import re
 import struct
 import subprocess
-import tempfile
 
 from native_process import run_logged
-from native_build import MODULE, SIM, WEST, WORKSPACE, build
+from native_build import MODULE, SIM, WEST, WORKSPACE, build, native_build_root
 
 SCENE = '''
 &rgb_matrix {
@@ -152,7 +150,7 @@ def check_fixed_scene(root):
 
 
 def main():
-    root = Path(tempfile.mkdtemp(prefix="rgb-authoring-"))
+    root = native_build_root(None, "authoring", prefix="rgb-authoring-")
     print(f"ARTIFACTS {root}", flush=True)
     build_documented(root)
     check_fixed_scene(root)

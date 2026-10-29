@@ -4,9 +4,8 @@
 """Real Zephyr control contracts; each scenario starts a fresh firmware process."""
 import argparse
 from pathlib import Path
-import tempfile
 
-from native_build import build, run, SIM, SELECTORS, COMPACT_PREVIEW
+from native_build import build, run, SIM, SELECTORS, COMPACT_PREVIEW, native_build_root
 
 SCENARIOS = {
     "control-early": "controls",
@@ -47,7 +46,7 @@ def main():
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
-    root = (args.build_dir or Path(tempfile.mkdtemp(prefix="rgb-control-contracts-"))).resolve()
+    root = native_build_root(args.build_dir, "control-contracts", prefix="rgb-control-contracts-")
     print(f"ARTIFACTS {root}", flush=True)
     selected = args.scenario or list(SCENARIOS)
     fixture = (SIM / "config/control_contracts.overlay").read_text()

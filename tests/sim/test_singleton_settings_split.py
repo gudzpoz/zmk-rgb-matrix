@@ -4,9 +4,8 @@
 """Selector-free native settings and whole-mask global split regressions."""
 import argparse
 from pathlib import Path
-import tempfile
 
-from native_build import build, run
+from native_build import build, run, native_build_root
 from native_protocol import SOLID_SELECTORS, CONF
 
 SINGLETON = SOLID_SELECTORS + '''
@@ -76,7 +75,7 @@ def main():
         unsupported = set(args.scenario) - {s for c in configurations for s in SCENARIOS[c]}
         if unsupported:
             parser.error(f"No selected configuration supports scenarios: {sorted(unsupported)}")
-    root = (args.artifacts or Path(tempfile.mkdtemp(prefix="rgb-singleton-settings-split-"))).resolve()
+    root = native_build_root(args.artifacts, "singleton-settings-split", prefix="rgb-singleton-settings-split-")
     print(f"ARTIFACTS {root}", flush=True)
     for name in configurations:
         scenarios = tuple(s for s in SCENARIOS[name] if not args.scenario or s in args.scenario)

@@ -17,6 +17,7 @@ APP = MODULE / "tests" / "led_strip_composite"
 REPO = MODULE.parents[1]
 sys.path.insert(0, str(MODULE / "tests/sim"))
 from native_process import BUILD_TIMEOUT, run_logged
+from native_build import native_build_root
 CONTROL = '''/ {
     spec_child: spec-child {
         compatible = "test,composite-mock-strip";
@@ -105,7 +106,7 @@ def config_has(text, name, value):
 def main():
     parser = argparse.ArgumentParser(description="Pristine standalone composite LED strip tests")
     parser.add_argument("--only", choices=("all", "runtime", "negative"), default="all")
-    parser.add_argument("--build-dir", type=Path, default=APP / "build")
+    parser.add_argument("--build-dir", type=Path)
     args = parser.parse_args()
     workspace = Path(os.environ.get("ZMK_WS", REPO / "zmk")).resolve()
     zephyr = workspace / "zephyr"
@@ -117,7 +118,7 @@ def main():
         raise RuntimeError("Production src/drivers/led_strip_composite.c is missing")
     if not west or shutil.which(west[0]) is None:
         raise RuntimeError(f"WEST command is unavailable: {west}")
-    root = args.build_dir.resolve()
+    root = native_build_root(args.build_dir, "led-strip-composite", default=APP / "build")
     root.mkdir(parents=True, exist_ok=True)
 
     for scratch in (False, True):

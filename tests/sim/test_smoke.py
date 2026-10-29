@@ -8,22 +8,22 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
-import tempfile
 
-from native_build import MODULE, SIM, WEST, WORKSPACE
+from native_build import MODULE, SIM, WEST, WORKSPACE, native_build_root
 from native_process import BUILD_TIMEOUT, run_logged
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--build-dir', type=Path, default=Path(os.environ.get('BUILD_DIR', MODULE / 'build/native-smoke')))
+    parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--artifacts', type=Path)
     parser.add_argument('--duration', type=float, default=float(os.environ.get('DURATION', '7')))
     args = parser.parse_args()
-    requested = args.artifacts or os.environ.get('OUT_DIR')
-    root = Path(requested or tempfile.mkdtemp(prefix='rgb-smoke-')).resolve()
+    root = native_build_root(args.artifacts, "smoke", prefix='rgb-smoke-',
+                             default=os.environ.get('OUT_DIR'))
     root.mkdir(parents=True, exist_ok=True)
-    build_dir = args.build_dir.resolve()
+    build_dir = native_build_root(args.build_dir, "smoke-build",
+                                  default=os.environ.get('BUILD_DIR', MODULE / 'build/native-smoke'))
     print(f'Smoke artifacts: {root}', flush=True)
 
     def execute(name, command, timeout=30):

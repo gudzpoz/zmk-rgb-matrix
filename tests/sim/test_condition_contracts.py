@@ -3,9 +3,8 @@
 """Real native coordinator contracts. Each scenario boots an isolated process."""
 import argparse
 from pathlib import Path
-import tempfile
 
-from native_build import SELECTORS, build, run
+from native_build import SELECTORS, build, run, native_build_root
 
 SCENARIOS = (
     'startup', 'dag', 'same-value', 'isr', 'external-timer', 'no-poll',
@@ -207,7 +206,7 @@ def main():
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error('--repeat must be >= 1')
-    root = (args.build_dir or Path(tempfile.mkdtemp(prefix='rgb-condition-contracts-'))).resolve()
+    root = native_build_root(args.build_dir, "condition-contracts", prefix="rgb-condition-contracts-")
     root.mkdir(parents=True, exist_ok=True)
     print(f'ARTIFACTS {root}', flush=True)
     roles = ('standalone', 'central', 'peripheral') if args.role == 'all' else (args.role,)

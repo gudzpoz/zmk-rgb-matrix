@@ -5,9 +5,8 @@
 import argparse
 from pathlib import Path
 import subprocess
-import tempfile
 
-from native_build import MODULE, build
+from native_build import MODULE, build, native_build_root
 from native_process import run_logged
 
 FIXTURE = Path(__file__).resolve().parent / "config-static-metadata"
@@ -19,10 +18,8 @@ def main():
     parser.add_argument("--case", action="append", choices=CASES)
     parser.add_argument("--build-dir", type=Path)
     args = parser.parse_args()
-    artifacts = MODULE / "build/native-artifacts"
-    artifacts.mkdir(parents=True, exist_ok=True)
-    root = (args.build_dir.resolve() if args.build_dir else
-            Path(tempfile.mkdtemp(prefix="static-metadata-", dir=artifacts)))
+    root = native_build_root(args.build_dir, "static-metadata", prefix="static-metadata-",
+                             parent=MODULE / "build/native-artifacts")
     print(f"Static metadata artifacts: {root}", flush=True)
     cases = list(dict.fromkeys(args.case or CASES))
     for name in cases:

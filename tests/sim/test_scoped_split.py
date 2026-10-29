@@ -4,9 +4,8 @@
 """Real split worker/receiving contracts with external transport mocks only."""
 import argparse
 from pathlib import Path
-import tempfile
 
-from native_build import SELECTORS, COMPACT_PREVIEW, build, run
+from native_build import SELECTORS, COMPACT_PREVIEW, build, run, native_build_root
 from native_protocol import SOLID_SELECTORS, CONF
 
 ZERO = '''
@@ -123,7 +122,7 @@ def main():
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
-    root = (args.artifacts or Path(tempfile.mkdtemp(prefix="rgb-scoped-split-"))).resolve()
+    root = native_build_root(args.artifacts, "scoped-split", prefix="rgb-scoped-split-")
     root.mkdir(parents=True, exist_ok=True)
     print(f"ARTIFACTS {root}", flush=True)
     if args.repeat < 1 or (args.no_build and args.artifacts is None):

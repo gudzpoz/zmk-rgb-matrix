@@ -7,10 +7,9 @@ from pathlib import Path
 import re
 import struct
 import subprocess
-import tempfile
 
 from native_process import run_logged
-from native_build import SELECTORS, build
+from native_build import SELECTORS, build, native_build_root
 
 CASES = {
     "empty": ('/delete-node/ disabled; /delete-node/ a_static; /delete-node/ a_motion;',
@@ -196,8 +195,8 @@ def check_capture(path, log):
 
 
 def main(root=None):
-    # Keep logs/captures for inspection; all west directories are unique per invocation.
-    root = root or Path(tempfile.mkdtemp(prefix="rgb-selector-"))
+    # Keep logs and captures for inspection.
+    root = native_build_root(root, "selector", prefix="rgb-selector-")
     root.mkdir(parents=True, exist_ok=True)
     print(f"ARTIFACTS {root}", flush=True)
     for name, (fragment, diagnostic) in CASES.items():
@@ -296,7 +295,7 @@ if __name__ == "__main__":
     parser.add_argument("--artifacts", type=Path)
     args = parser.parse_args()
     if args.stage42_only:
-        root = Path(tempfile.mkdtemp(prefix="rgb-selector-stage42-"))
+        root = native_build_root(args.artifacts, "selector-stage42", prefix="rgb-selector-stage42-")
         print(f"ARTIFACTS {root}", flush=True)
         stage42(root)
     else:

@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import sys
 
-from native_build import MODULE, WEST, WORKSPACE
+from native_build import MODULE, WEST, WORKSPACE, native_build_root
 from native_process import BUILD_TIMEOUT, UTILITY_TIMEOUT, run_logged
 
 APP = MODULE / "tests" / "unit"
@@ -30,13 +30,14 @@ def unique_log(directory, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build-dir", type=Path, default=MODULE / "build/ztest")
-    parser.add_argument("--artifact-dir", type=Path,
-                        default=MODULE / "build/native-artifacts/ztest")
+    parser.add_argument("--build-dir", type=Path)
+    parser.add_argument("--artifact-dir", type=Path)
     args = parser.parse_args()
 
-    build_dir = args.build_dir.resolve()
-    artifact_dir = args.artifact_dir.resolve()
+    build_dir = native_build_root(args.build_dir, "ztest-build",
+                                  default=MODULE / "build/ztest")
+    artifact_dir = native_build_root(args.artifact_dir, "ztest-artifacts",
+                                     default=MODULE / "build/native-artifacts/ztest")
     build_dir.mkdir(parents=True, exist_ok=True)
     if not (WORKSPACE / "app" / "CMakeLists.txt").is_file():
         parser.error(f"ZMK workspace is missing app/CMakeLists.txt: {WORKSPACE}")

@@ -8,9 +8,8 @@ import os
 import shlex
 import shutil
 import subprocess
-import tempfile
 
-from native_build import MODULE, SIM, WEST, WORKSPACE
+from native_build import MODULE, SIM, WEST, WORKSPACE, native_build_root
 from native_process import run_logged
 
 FIXTURE = SIM / "config-geometry"
@@ -84,12 +83,8 @@ def main():
     parser.add_argument("--build-dir", type=Path,
                         help="Retained artifact root (default: unique native-artifacts directory)")
     args = parser.parse_args()
-    if args.build_dir is None:
-        artifacts = MODULE / "build/native-artifacts"
-        artifacts.mkdir(parents=True, exist_ok=True)
-        root = Path(tempfile.mkdtemp(prefix="geometry-", dir=artifacts))
-    else:
-        root = args.build_dir.resolve()
+    root = native_build_root(args.build_dir, "geometry", prefix="geometry-",
+                             parent=MODULE / "build/native-artifacts")
     print(f"Geometry artifacts: {root}", flush=True)
     cases = list(dict.fromkeys(args.case or [*POSITIVE, *NEGATIVE]))
     for name in cases:

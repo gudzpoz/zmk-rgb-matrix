@@ -5,10 +5,9 @@
 import argparse
 from pathlib import Path
 import subprocess
-import tempfile
 
 from native_process import run_logged
-from native_build import SELECTORS, build
+from native_build import SELECTORS, build, native_build_root
 
 SELECTORS = (SELECTORS.replace('keypaw,rgb-matrix-selector-probe', 'keypaw,rgb-matrix-solid')
              .replace(' animate;', '')
@@ -125,7 +124,7 @@ def main():
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be positive")
-    root = (args.artifacts or Path(tempfile.mkdtemp(prefix="rgb-scoped-settings-"))).resolve()
+    root = native_build_root(args.artifacts, "scoped-settings", prefix="rgb-scoped-settings-")
     root.mkdir(parents=True, exist_ok=True)
     print(f"ARTIFACTS {root}", flush=True)
     configs = args.config or CONFIGS

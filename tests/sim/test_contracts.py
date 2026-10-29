@@ -4,7 +4,7 @@
 """Production engine/scene contracts, one native process per scenario."""
 import argparse
 from pathlib import Path
-from native_build import MODULE, build, run
+from native_build import MODULE, build, run, native_build_root
 
 SCENARIOS = (
     'periodic', 'inhibited', 'off', 'coalesce', 'starved', 'reentrant',
@@ -113,13 +113,14 @@ composition_filter {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--build-dir', type=Path, default=MODULE / 'build/native-contracts')
+    parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--variant', choices=VARIANTS)
     parser.add_argument('--scenario', choices=SCENARIOS)
     parser.add_argument('--repeat', type=int, default=1)
     parser.add_argument('--no-build', action='store_true')
     args = parser.parse_args()
     if args.repeat < 1: parser.error('--repeat must be positive')
+    build_dir = native_build_root(args.build_dir, "contracts", default=MODULE / 'build/native-contracts')
     for variant in ((args.variant,) if args.variant else VARIANTS):
         fragment, conf = FRAGMENT, CONF
         if variant == 'normal':
@@ -168,11 +169,11 @@ def main():
             scenarios = (args.scenario,)
         name = 'engine-' + variant
         if not args.no_build:
-            result = build(args.build_dir, name, fragment, selectors='', extra_conf=conf)
+            result = build(build_dir, name, fragment, selectors='', extra_conf=conf)
             if result.returncode: raise AssertionError(result.stdout)
         for scenario in scenarios:
             for _ in range(args.repeat):
-                result = run(args.build_dir, name, scenario)
+                result = run(build_dir, name, scenario)
                 if scenario in ('submit-failure', 'finish-failure'):
                     assert result.stdout.count('RGB coordinator queue invariant violated (-5)') == 1, result.stdout
     print('Native engine contracts passed.')

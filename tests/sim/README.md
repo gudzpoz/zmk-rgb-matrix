@@ -53,6 +53,27 @@ Entry points below are in `tests/sim/`. Consult their `--help` for complete opti
 - Compare cadence/retries using simulated kernel time and completion timestamps.
   Native runs use `-no-rt`.
 
+## Native artifact roots
+
+Native Python harnesses that retain builds, logs, or captures accept the optional
+`RGB_NATIVE_BUILD_ROOT` environment variable. With no explicit CLI root, each
+suite writes beneath `<RGB_NATIVE_BUILD_ROOT>/<suite>`. Suite paths distinguish
+different test families, but concurrent invocations need separate root values.
+An explicit `--build-dir`, `--artifacts`, or
+other root option takes precedence. Without either setting, each harness keeps
+its existing default (including unique temporary directories and their existing
+prefix/parent). These roots are retained and are never cleaned up by the root
+selector. The setting does not change `--no-build` requirements or runtime
+process isolation.
+
+Example:
+
+```sh
+RGB_NATIVE_BUILD_ROOT=/tmp/rgb-native python3 tests/sim/test_contracts.py --variant normal
+# Reuse a particular build/artifact root explicitly:
+python3 tests/sim/test_contracts.py --build-dir /tmp/rgb-native/contracts
+```
+
 ## Results and artifacts
 
 `native_process.py` bounds subprocesses. Timeouts terminate the process group and
@@ -69,3 +90,13 @@ The top-level runner retains logs and temporary builds/captures under
 `build/native-artifacts`. Explicit build directories remain on failure; repeated
 scenarios have separate logs. CI retains generated configurations, logs and captures
 on failure.
+
+## CI cost reporting
+
+The native job remains serialized. Its 2 GiB ccache is separate from the west
+cache, and pristine builds remain enabled. Only superseded pull-request runs are
+cancelled. The `native-cost-reports` artifact and job summary contain per-suite
+TSV timings and ccache statistics. A valid
+cost benchmark must use the same module and ZMK revisions on comparable runners
+and compare disabled-cache, cold-cache, and warm-cache full-inventory runs,
+including cache transfer and job overhead.

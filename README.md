@@ -62,9 +62,17 @@ First, please follow the official ZMK guide to define for your keyboard:
 
 Now, as you probably know, your addressable LEDs are chained together, and the
 order that they're chained are not always the same as that of your physical
-keys. And that is why, in addition to specifying your physical layout and LED
-strip, you now need to define that exact order for the RGB matrix with the
-`mapping` attribute:
+keys.
+
+> If you're using dedicated matrix driver ICs instead of addressable LEDs,
+> things can be a bit different: the LEDs probably are not wired in sequence.
+> However, Zephyr's `led-strip` drivers still require proper ordering for the
+> controlled LEDs, so you will need to refer to the driver (and the chip) you
+> use for how your LEDs are numbered.
+
+And that is why, in addition to specifying your physical layout and LED strip,
+you now need to define that exact order for the RGB matrix with the `mapping`
+attribute:
 
 ```dts
 #include <dt-bindings/keypaw/rgb_matrix.h>

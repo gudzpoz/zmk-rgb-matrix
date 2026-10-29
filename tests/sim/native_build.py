@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import tempfile
 
 from native_process import run_logged
 
@@ -14,6 +15,27 @@ REPO = MODULE.parent.parent
 WORKSPACE = Path(os.environ.get("ZMK_WS", REPO / "zmk"))
 LOCAL_WEST = REPO / ".venv/bin/west"
 WEST = os.environ.get("WEST", str(LOCAL_WEST) if LOCAL_WEST.is_file() else "west")
+
+
+def native_build_root(explicit, suite, *, prefix=None, parent=None, default=None):
+    """Select a retained native root: CLI path, env suite path, then legacy default."""
+    if explicit is not None:
+        return Path(explicit).expanduser().resolve()
+    configured = os.environ.get("RGB_NATIVE_BUILD_ROOT")
+    if configured:
+        root = (Path(configured).expanduser() / suite).resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    if default is not None:
+        return Path(default).expanduser().resolve()
+    if prefix is not None:
+        if parent is not None:
+            parent = Path(parent)
+            parent.mkdir(parents=True, exist_ok=True)
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=parent)).resolve()
+    raise ValueError("a temporary prefix or default native root is required")
+
+
 SELECTORS = '''
 &rgb_matrix {
     /delete-node/ fixture_overlay;

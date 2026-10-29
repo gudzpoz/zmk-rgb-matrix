@@ -5,9 +5,8 @@
 import argparse
 import os
 from pathlib import Path
-import tempfile
 
-from native_build import MODULE, SIM, WORKSPACE, build, run
+from native_build import MODULE, SIM, WORKSPACE, build, run, native_build_root
 
 SCENARIOS = CASES = (
     "effects-variants", "effects-targets", "effects-phase", "effects-random",
@@ -130,7 +129,7 @@ def main():
         parser.error("--example-module and --no-example are mutually exclusive")
     if args.repeat < 1:
         parser.error("--repeat must be positive")
-    root = (args.build_dir or Path(tempfile.mkdtemp(prefix="rgb-effects-native-"))).resolve()
+    root = native_build_root(args.build_dir, "effect-contracts", prefix="rgb-effects-native-")
     print(f"Artifacts: {root}", flush=True)
     example = args.example_module or MODULE.parent / "zmk-rgb-effect-example"
     if args.example_module and not (example / "zephyr/module.yml").is_file():

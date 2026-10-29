@@ -4,17 +4,15 @@
 """Run the real RGB engine against nested, destructive, failing strip probes."""
 
 import os
-from pathlib import Path
 import shlex
 import subprocess
-import tempfile
 
-from native_build import MODULE, SIM, WEST, WORKSPACE
+from native_build import MODULE, SIM, WEST, WORKSPACE, native_build_root
 from native_process import run_logged
 
 
 def main():
-    root = Path(tempfile.mkdtemp(prefix="rgb-composite-engine-")).resolve()
+    root = native_build_root(None, "composite-engine", prefix="rgb-composite-engine-")
     print(f"ARTIFACTS {root}", flush=True)
     build = root / "build"
     command = shlex.split(WEST) + [

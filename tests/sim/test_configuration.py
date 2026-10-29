@@ -11,7 +11,8 @@ import os
 import re
 from pathlib import Path
 import subprocess
-import tempfile
+
+from native_build import native_build_root
 
 SIM = Path(__file__).resolve().parent
 MODULE = SIM.parent.parent
@@ -138,7 +139,7 @@ def main():
     parser.add_argument("--case", choices=CASES, action="append")
     parser.add_argument("--build-dir", type=Path)
     args = parser.parse_args()
-    root = (args.build_dir or Path(tempfile.mkdtemp(prefix="rgb-config-"))).resolve()
+    root = native_build_root(args.build_dir, "configuration", prefix="rgb-config-")
     print(f"ARTIFACTS {root}", flush=True)
     for name in args.case or CASES:
         valid, fragment = CASES[name]
