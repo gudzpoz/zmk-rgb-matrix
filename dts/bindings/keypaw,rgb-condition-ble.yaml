@@ -12,6 +12,14 @@ compatible: "keypaw,rgb-condition-ble"
 include: keypaw,rgb-condition-common.yaml
 
 properties:
+  ignore-usb:
+    type: boolean
+    description: |
+      Ignore USB connection state when testing the active BLE profile. Defaults
+      to false: a USB HID host connection, including a suspended host, forces
+      this condition false regardless of profile or state. USB power alone does
+      not suppress the condition. When enabled, only profile and state apply.
+
   profile:
     type: int
     required: false
@@ -29,4 +37,4 @@ properties:
       Connection test applied to the active profile. `connected` is a bonded
       profile that is currently linked; `disconnected` is any profile that is
       not linked, bonded or not; `open` is a profile with no stored bond, i.e.
-      still pairing. `any` matches regardless of connection state.
+      still pairing. `any` matches regardless of BLE connection state.

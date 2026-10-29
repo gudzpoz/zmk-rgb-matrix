@@ -16,6 +16,10 @@
 #include <zmk/ble.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/events/usb_conn_state_changed.h>
+#include <zmk/usb.h>
+#endif
 #else
 #define KP_COND_BLE_READABLE 0
 #endif
@@ -27,11 +31,17 @@ DEFINE_DT_ENUM(ble_state_t, state, any, connected, disconnected, open);
 struct ble_cfg {
   int32_t profile; /* -1 = any */
   ble_state_t state;
+  bool ignore_usb;
 };
 
 static bool sample(const struct device *dev) {
 #if KP_COND_BLE_READABLE
   const struct ble_cfg *c = dev->config;
+#if IS_ENABLED(CONFIG_ZMK_USB)
+  if (!c->ignore_usb && zmk_usb_get_conn_state() == ZMK_USB_CONN_HID) {
+    return false;
+  }
+#endif
   if (c->profile >= 0 && zmk_ble_active_profile_index() != c->profile) {
     return false;
   }
@@ -60,6 +70,9 @@ static int listener(const zmk_event_t *eh) {
 }
 ZMK_LISTENER(kp_cond_ble, listener);
 ZMK_SUBSCRIPTION(kp_cond_ble, zmk_ble_active_profile_changed);
+#if IS_ENABLED(CONFIG_ZMK_USB)
+ZMK_SUBSCRIPTION(kp_cond_ble, zmk_usb_conn_state_changed);
+#endif
 #endif
 
 static const struct kp_rgb_condition_api api = {
@@ -67,7 +80,8 @@ static const struct kp_rgb_condition_api api = {
 #define DEFINE(inst)                                                           \
   static const struct ble_cfg cfg_##inst = {                                   \
       .profile = DT_PROP(DT_DRV_INST(inst), profile),                          \
-      .state = CONV_DT_ENUM(inst, state)};                                     \
+      .state = CONV_DT_ENUM(inst, state),                                      \
+      .ignore_usb = DT_PROP(DT_DRV_INST(inst), ignore_usb)};                   \
   KP_RGB_CONDITION_DEFINE(inst, &api, &cfg_##inst, NULL)
 DT_INST_FOREACH_STATUS_OKAY(DEFINE)
 #endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */
