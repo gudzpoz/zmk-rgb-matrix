@@ -565,6 +565,12 @@ matrix. Set `ZMK_WS` to an existing ZMK west workspace when the module is
 checked out separately. Stateful tests compile real production sources, headers
 and devicetree rather than extracting source fragments.
 
+See [native test usage](tests/sim/README.md) and the [fixture coverage
+ledger](tests/fixture-coverage.md) for focused commands, artifact handling and
+case mappings. [Architecture decisions](docs/architecture-decisions.md) record
+the retained design. (Please note that these docs are not actively
+human-maintained.)
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

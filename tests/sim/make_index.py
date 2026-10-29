@@ -100,7 +100,7 @@ ITEM = Template(
     </li>"""
 )
 
-NODE_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s*\{\s*$")
+NODE_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?P<node_name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*$")
 NAME_RE = re.compile(r'display-name\s*=\s*"([^"]+)"')
 COMPAT_RE = re.compile(r'compatible\s*=\s*"([^"]+)"')
 
@@ -127,11 +127,10 @@ def dedent(block):
 
 
 def read_effect_nodes(path):
-    """Map display-name -> (compatible, node text, first line number).
+    """Map preview name -> (compatible, node text, first line number).
 
-    The overlay is our own file in a fixed style, so a brace-matching scan over
-    the preview_selector children is enough; it fails loudly on a node without a
-    display-name rather than publishing an entry with no definition.
+    Names match the simulator: display-name when present, otherwise node name.
+    The fixture's fixed style permits a brace-matching scan of selector children.
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     start = None
@@ -163,13 +162,13 @@ def read_effect_nodes(path):
             text = "\n".join(block)
             name = NAME_RE.search(text)
             compat = COMPAT_RE.search(text)
-            if name is None or compat is None:
+            if compat is None:
                 raise ValueError(
-                    f"{path}:{current + 1}: effect node lacks display-name or compatible"
+                    f"{path}:{current + 1}: effect node lacks compatible"
                 )
-            key = name.group(1)
+            key = name.group(1) if name else NODE_RE.match(block[0]).group("node_name")
             if key in nodes:
-                raise ValueError(f"{path}:{current + 1}: duplicate display-name '{key}'")
+                raise ValueError(f"{path}:{current + 1}: duplicate preview name '{key}'")
             nodes[key] = (compat.group(1), text, current + 1)
             current = None
             block = []
