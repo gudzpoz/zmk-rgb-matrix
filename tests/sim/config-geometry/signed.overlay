@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT */
+&geometry_layout {
+    keys = <&key_physical_attrs 101 103 (-101) (-103) 0 0 0>,
+           <&key_physical_attrs (-101) (-103) 101 103 0 0 0>,
+           <&key_physical_attrs 0x8001 0x7fff 0x8000 0xffff 0 0 0>,
+           <&key_physical_attrs 0x10001 0xffff 0x18000 0x17fff 0 0 0>,
+           <&key_physical_attrs 0x7fff 0x8000 0x7fff 0x8000 0 0 0>,
+           <&key_physical_attrs (-3) 3 0 (-1) 0 0 0>,
+           <&key_physical_attrs 0x10003 0x1fffd 0x10000 0x1ffff 0 0 0>;
+};
+&geometry_strip { chain-length = <8>; };
+&rgb_matrix { mapping = <0 1 2 3 4 5 6 KP_RGB_NO_KEY(7, 9)>; };

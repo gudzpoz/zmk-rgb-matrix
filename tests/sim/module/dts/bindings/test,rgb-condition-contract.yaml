@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+description: Native condition-contract scripted provider
+compatible: "test,rgb-condition-contract"
+include: keypaw,rgb-condition-common.yaml
+properties:
+  central-only:
+    type: boolean
+  unready:
+    type: boolean
+  unregistered:
+    type: boolean
+  invalid-scope:
+    type: boolean
+  selected-selector:
+    type: phandle
+  selected-effect:
+    type: phandle

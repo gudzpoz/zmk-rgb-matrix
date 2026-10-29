@@ -59,11 +59,6 @@ struct led_rgb kp_rgb_hsb_to_rgb(struct kp_rgb_hsb color) {
   return (struct led_rgb){.r = (uint8_t)r, .g = (uint8_t)g, .b = (uint8_t)b};
 }
 
-struct kp_rgb_hsb kp_rgb_hsb_scale(struct kp_rgb_hsb color, uint8_t pct) {
-  color.b = KP_RGB_SCALE(color.b, MIN(pct, KP_RGB_BRT_MAX));
-  return color;
-}
-
 struct led_rgb kp_rgb_rgb_scale(struct led_rgb rgb, uint8_t pct) {
   pct = MIN(pct, 100);
   return (struct led_rgb){

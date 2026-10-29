@@ -34,7 +34,7 @@ struct kp_eff_starlight_data {
 #if KP_LED_COUNT > 0
   uint8_t cur[KP_LED_COUNT];  /* current brightness 0..255 */
   uint8_t target[KP_LED_COUNT]; /* target brightness */
-  uint32_t fade_remainder[KP_LED_COUNT];
+  uint16_t fade_remainder[KP_LED_COUNT];
   int8_t hue_off[KP_LED_COUNT]; /* -30..30 */
   int8_t sat_off[KP_LED_COUNT]; /* -30..30 */
 #endif
@@ -148,20 +148,22 @@ static const struct kp_rgb_effect_callbacks kp_eff_starlight_callbacks = {
     .reset = kp_eff_starlight_reset,
 };
 
+#define KP_EFF_STARLIGHT_DEFAULTS(inst)                                        \
+  KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_STARLIGHT_DEFINE(inst)                                          \
   BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), step_interval_ms) > 0 &&             \
                    DT_PROP(DT_DRV_INST(inst), step_interval_ms) <= UINT16_MAX, \
                "starlight step-interval-ms must be in 1..65535");              \
   static const struct kp_eff_starlight_config kp_eff_starlight_##inst##_cfg =  \
       {                                                                        \
-          KP_RGB_EFFECT_COMMON_CONFIG(inst),                                   \
+          KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_STARLIGHT_DEFAULTS(inst)),  \
           .step_interval_ms = DT_PROP(DT_DRV_INST(inst), step_interval_ms),    \
           .smooth = DT_PROP_OR(DT_DRV_INST(inst), smooth, 0),                  \
           .dual_hue = DT_PROP_OR(DT_DRV_INST(inst), dual_hue, 0),              \
           .dual_sat = DT_PROP_OR(DT_DRV_INST(inst), dual_sat, 0),              \
   };                                                                           \
   static struct kp_eff_starlight_data kp_eff_starlight_##inst##_data = {       \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_STARLIGHT_DEFAULTS(inst))};             \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_starlight_callbacks,         \
                        kp_eff_starlight_##inst)
 

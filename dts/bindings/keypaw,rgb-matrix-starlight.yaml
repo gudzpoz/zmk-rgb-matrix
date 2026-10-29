@@ -6,7 +6,7 @@ description: |
   (with optional hue/sat jitter). Covers QMK's STARLIGHT, STARLIGHT_SMOOTH,
   STARLIGHT_DUAL_HUE and STARLIGHT_DUAL_SAT.
 compatible: "keypaw,rgb-matrix-starlight"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   step-interval-ms:

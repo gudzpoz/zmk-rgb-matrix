@@ -44,8 +44,6 @@ struct kp_eff_digital_rain_config {
 struct kp_eff_digital_rain_data {
   struct kp_rgb_effect_common_data common;
   bool seeded;
-  uint16_t min_x;
-  uint16_t max_x;
   uint16_t min_y;
   uint16_t max_y;
 #if KP_LED_COUNT > 0
@@ -92,11 +90,8 @@ static void kp_eff_digital_rain_seed(const struct device *dev,
       max_y = f->coords[i].y;
     }
   }
-  data->min_x = min_x;
-  data->max_x = max_x;
   data->min_y = min_y;
   data->max_y = max_y;
-
   uint32_t span_x = (uint32_t)max_x - min_x + 1u;
   uint32_t range_y = MAX((uint32_t)max_y - min_y, 1u);
   uint32_t duration = kp_rgb_effect_period(dev);
@@ -119,9 +114,6 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
   ARG_UNUSED(dev);
   ARG_UNUSED(f);
 #else
-  if (f->count == 0) {
-    return true;
-  }
   struct kp_eff_digital_rain_data *data = dev->data;
   struct kp_rgb_hsb base = data->common.color;
   /* Tail length in layout units, capped at the board height so a short board
@@ -142,8 +134,7 @@ static bool kp_eff_digital_rain_render(const struct device *dev,
     int64_t head = data->head_q8[c];
     int32_t speed = data->speed_q8[c];
 
-    for (uint8_t recycles = 0; recycles < 8 && remaining_ms > 0 && speed > 0;
-         recycles++) {
+    for (uint8_t recycles = 0; recycles < 8 && remaining_ms > 0; recycles++) {
       int64_t crossing_ms = ((int64_t)recycle_q8 - head) / speed + 1;
       if (crossing_ms > remaining_ms) {
         break;
@@ -202,13 +193,16 @@ static const struct kp_rgb_effect_callbacks kp_eff_digital_rain_callbacks = {
     .reset = kp_eff_digital_rain_reset,
 };
 
+#define KP_EFF_DIGITAL_RAIN_DEFAULTS(inst)                                     \
+  KP_RGB_EFFECT_DEFAULTS(inst, 0x00FF00, 0)
 #define KP_EFF_DIGITAL_RAIN_DEFINE(inst)                                       \
   static const struct kp_eff_digital_rain_config                               \
       kp_eff_digital_rain_##inst##_cfg = {                                     \
-          KP_RGB_EFFECT_COMMON_CONFIG(inst),                                   \
+          KP_RGB_EFFECT_COMMON_CONFIG(inst,                                    \
+                                      KP_EFF_DIGITAL_RAIN_DEFAULTS(inst)),     \
   };                                                                           \
   static struct kp_eff_digital_rain_data kp_eff_digital_rain_##inst##_data = { \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0x00FF00, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_DIGITAL_RAIN_DEFAULTS(inst))};          \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_digital_rain_callbacks,      \
                        kp_eff_digital_rain_##inst)
 

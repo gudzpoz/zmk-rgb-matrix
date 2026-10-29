@@ -1,8 +1,9 @@
 # Extending the RGB matrix
 
 This guide is for authors of third-party modules that wish to add RGB matrix
-effects, overlays, or conditions. Everything here uses only the public API in
-[`<zmk/rgb_matrix.h>`](../include/zmk/rgb_matrix.h).
+effects, overlays, or conditions. The public headers to be used are
+[`<zmk/rgb_matrix.h>`](../include/zmk/rgb_matrix.h), and
+[`<zmk/rgb_matrix_math.h>`](../include/zmk/rgb_matrix_math.h) for math helpers.
 
 Some example modules are available:
 
@@ -24,8 +25,12 @@ from a devicetree compatible, and a module only needs its binding YAML, its
 source, and a node placed by the user.
 
 > **Never include `src/rgb_matrix_internal.h`.** It is the engine's private
-> header and changes without notice. A third-party module is confined to
-> `<zmk/rgb_matrix.h>` (and, for math helpers, `<zmk/rgb_matrix_math.h>`).
+> header and changes without notice. Use the public headers listed above.
+>
+> **Public API contexts**: Many APIs should not be called within ISR contexts. A
+> rule of thumb is that, unless it's documented like (`zmk_rgb_matrix_flush()`,
+> `kp_rgb_condition_invalidate()`), do not call any API function under ISR
+> context.
 
 ## Module skeleton
 
@@ -57,12 +62,8 @@ Two build details:
 ## Writing an effect
 
 An effect renders a frame of pixels. Most often, it is placed under a
-`keypaw,behavior-rgb-matrix` node, making it selectable, cyclable,
-split-addressed, and optionally persisted. They can also be embedded as children
-of overlays (e.g., a `keypaw,rgb-overlay` node), when it will become "private",
-never user-selectable or persisted.
-
-The same code and binding serve both roles; only the node's position differs.
+`keypaw,rgb-overlay` node or any other overlays that allow the user to customize
+their rendering.
 
 ### 1. Binding
 
@@ -71,7 +72,7 @@ Include the shared fragment and add your own properties:
 ```yaml
 # dts/bindings/keypaw,rgb-matrix-mything.yaml
 compatible: "keypaw,rgb-matrix-mything"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   spread:
@@ -80,8 +81,7 @@ properties:
     default: 40
 ```
 
-`keypaw,rgb-matrix-effect-common.yaml` provides `color`, `duration`, `overlays`,
-and `no-overlays`. The overlay-list properties apply only to selectable effects.
+`keypaw,rgb-matrix-effect-common.yaml` provides `color` and `duration`.
 
 Since each effect implementation is a Zephyr device driver, we expect you to
 structure your code like this, following Zephyr driver conventions:
@@ -175,7 +175,8 @@ struct kp_rgb_effect_callbacks {
 };
 ```
 
-Among those, `render` is required and all others are optional.
+Among those, `render` is required and all others are optional. The callbacks
+table is directly stored in the Zephyr device API field (`dev->api`).
 
 ### 3. Rendering with `render`
 
@@ -230,36 +231,29 @@ Helpers that do some bookkeeping for you:
 - `kp_rgb_effect_period(dev)`: the effect's animation period, never 0.
 - `kp_rgb_effect_data(dev)` / `kp_rgb_effect_cfg(dev)`: typed access to the
   common part.
-- `kp_rgb_hsb_scale()` / `kp_rgb_rgb_scale()` / `kp_rgb_rgb_mix()`: brightness
-  and compositing.
+- `kp_rgb_rgb_scale()` / `kp_rgb_rgb_mix()`: brightness and compositing.
 - `KP_RGB_HSB_FROM_HEX(hex)`: compile-time preset colour from a devicetree
   constant, and `kp_hex_to_rgb(hex)` for an RGB literal.
 - `<zmk/rgb_matrix_math.h>`: `kp_rgb_sin8` (eased oscillation),
   `kp_rgb_atan2_8`, `kp_rgb_isqrt`, `kp_rgb_arm_phase`.
-
-> Note that there's a global brightness enforced by the engine, which means you
-> probably should not explicitly apply board-wide brightness adjustments in your
-> effect implementation.
 
 You must return `true` if your effect is animating, where the engine will try
 its best to call your `render` constantly to keep the animation going. Returning
 `false`, however, means the frame you rendered is temporarily static (when the
 engine can save some CPU power by calling `render` less often), and you take the
 responsibility to notify the engine when re-rendering is need, through
-`kp_rgb_effect_invalidate(dev)` or the return value of the `on_event` callback
-below.
+`zmk_rgb_matrix_flush()` or the return value of the `on_event` callback below.
 
-While an animation is running, the engine caches the composed result of the
-settled layers at the bottom of the scene and re-renders only the layers above
-the first animating one. A settled participant can therefore be skipped on later
-animation frames; it is still rendered on every requested composition (a flush,
-input, or scene change), and it must invalidate whenever its output changes.
+Every painted frame renders all active, unoccluded contributors, including
+settled effects when another participant animates. There is no prefix cache.
+Input requests repaint only when an active participant's `on_event` returns true;
+a settled effect must request repaint when its output changes.
 
 > Here's three examples of typical usages of the different return values:
 >
-> 1. The `keypaw,rgb-matrix-solid` effect: fully static. Its `render` always
->    returns `false`, and the engine will only update the LEDs on boot and when
->    waking up.
+> 1. The `keypaw,rgb-matrix-solid` effect: fully static. Its `render` returns
+>    `false`, but it still paints whenever another participant or an explicit
+>    request causes composition.
 >
 > 2. The `keypaw,rgb-matrix-breathe` effect: always animating. Its LEDs are
 >    always changing in brightness, so its `render` always return `true` so that
@@ -299,23 +293,15 @@ miss some (if your chip is under some super heavy load).
 
 ### 5. Lifecycle callbacks: `set_active` and `reset`
 
-The engine calls `set_active(true)` before input delivery or then the effect
-becomes visible, and, after that, `set_active(false)` whenever the effect
-becomes completely invisible (either the user switches to another effect, or a
-fully opaque overlay is now overlaid upon the effect). `reset` can be called
-pretty much any time (on an explicit RGB reset, or when a half resumes from a
-pause), but a call is guaranteed before the first `set_active(true)` call.
+The engine calls `set_active(true)` before the effect becomes visible, and,
+after that, `set_active(false)` whenever the effect becomes completely invisible
+(either the user switches to another effect, or a fully opaque overlay is now
+overlaid upon the effect). `reset` can be called pretty much any time (on an
+explicit RGB reset, or when a half resumes from a pause).
 
-We don't enforce what you do in these callbacks, but here are some
-recommendations if you want your animations smoother:
-
-- For `reset`: clear transient or event-anchored state (key feedback, random
-  targets).
-- For `set_active(false)`: clear keypress feedbacks, unless you want your user
-  to see their keypresses from an hour ago still linger when they switch back
-  from another effect.
-- Also, please try to keep the callbacks "pure": do not modify the RGB engine
-  state by, for example, switching to another effect when `set_active(false)`.
+Effect/overlay callbacks run under the matrix mutex on the RGB worker. Please
+try not to control the engine from those callbacks, or else the engine might
+misbehave.
 
 ### 6. Instantiate
 
@@ -335,13 +321,14 @@ instance of your effect. Please use the helper macros
 common data the engine requires:
 
 ```c
+#define KP_MYTHING_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0, 0)
 #define KP_EFF_MYTHING_DEFINE(inst)                                            \
   static const struct kp_eff_mything_config kp_eff_mything_##inst##_cfg = {    \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_MYTHING_DEFAULTS(inst)),            \
       .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
   };                                                                           \
   static struct kp_eff_mything_data kp_eff_mything_##inst##_data = {           \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0, 0)                                    \
+      KP_RGB_EFFECT_COMMON_DATA(KP_MYTHING_DEFAULTS(inst))                     \
   };                                                                           \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_mything_callbacks,           \
                        kp_eff_mything_##inst)
@@ -354,25 +341,33 @@ instance with `DT_INST_FOREACH_STATUS_OKAY`:
 DT_INST_FOREACH_STATUS_OKAY(KP_EFF_MYTHING_DEFINE)
 ```
 
+`KP_RGB_EFFECT_DEFAULTS` is a small helper macro to define `default_color_` and
+`default_duration_` arguments for the effect. Those arguments apply only when
+the corresponding property is absent, and are restored upon selector/global
+reset.
+
 ## Configuring an overlay
 
-Overlays are typically used as indicators: layer indicators, CapsLock
-indicators... Under the hood, an overlay is a compositor: while its condition is
-active it renders one effect and blends the result over the LEDs it targets. It
-is not a behavior and cannot be keymap-bound; it is declared as a child of a
-`keypaw,rgb-overlays` container, and its paint order is its declaration order
-there (a later child composites on top).
+Overlays are rendering layers and the main devicetree API to customize the RGB
+matrix. Typically, base effects that cover the whole keyboard are
+`controllable`, `all-leds` unconditional "selector" overlays, while layer
+indicators, CapsLock indicators, etc. are achieved through single-LED overlays.
+
+An overlay composites at its declaration position under `keypaw,rgb-matrix`:
+later enabled children paint on top. The following extends the README's
+matrix:
 
 ```dts
-rgb_conditions: rgb_conditions {
-    compatible = "keypaw,rgb-conditions";
-    cond_rec: cond_rec {
-        compatible = "keypaw,rgb-condition-mything";
+/ {
+    rgb_conditions: rgb_conditions {
+        compatible = "keypaw,rgb-conditions";
+        cond_rec: cond_rec {
+            compatible = "keypaw,rgb-condition-mything";
+        };
     };
 };
 
-rgb_overlays: rgb_overlays {
-    compatible = "keypaw,rgb-overlays";
+&rgb_matrix {
     rec: rec {
         compatible = "keypaw,rgb-overlay";
         condition = <&cond_rec>;
@@ -380,7 +375,6 @@ rgb_overlays: rgb_overlays {
         opacity = <100>;
         fx_rec {
             compatible = "keypaw,rgb-matrix-solid";
-            #binding-cells = <0>;
             color = <0xFF0000>;
         };
     };
@@ -390,16 +384,15 @@ rgb_overlays: rgb_overlays {
 `keypaw,rgb-overlay-common.yaml` provides `keys`, `leds`, `all-leds`, `opacity`,
 and `local`; the generic overlay binding adds `condition`. `all-leds;` targets
 every LED on the half; and `opacity` controls how much the overlay blends into
-the colors below it.
+the colors below it. Targets resolve per half, so a `keys` list works unchanged
+on both halves.
 
-A generic overlay must have exactly one enabled private effect child. The
-private effect has independent state, is not selectable or persisted, and does
-not follow adjustments to a selectable effect's color. Its node must still
-declare `#binding-cells = <0>` to satisfy the effect binding.
-
-Targets resolve per half, so a `keys` list works unchanged on both halves.
-Every registered overlay is used by default; a selectable effect may provide
-`overlays` in an explicit order or `no-overlays`.
+> **More on the built-in `keypaw,rgb-overlay`**: A `keypaw,rgb-overlay` without
+> `controllable` is an single-effect overlay, and must have exactly one enabled
+> private effect child. With `controllable`, then it is an effect-selector
+> overlay with multiple effects as children, which the user can control, select
+> or switch to. The overlay itself can be used as a behavior to control the
+> selector (like `&zone`).
 
 ## Writing a condition
 
@@ -410,6 +403,7 @@ Similar to effects, it is also a Zephyr device.
 
 ```yaml
 compatible: "keypaw,rgb-condition-mything"
+include: keypaw,rgb-condition-common.yaml
 properties:
   threshold:
     type: int
@@ -427,14 +421,8 @@ properties:
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-static bool kp_cond_mything_sample(const struct device *dev, int64_t now_ms,
-                                   int64_t *next_wakeup_ms) {
-  /* You may use `next_wakeup_ms` to schedule a condition update: */
-  *next_wakeup_ms = now_ms + 5000;
-  /* Or, if you can detect conditon changes through events, we recommend: */
-  ARG_UNUSED(next_wakeup_ms); // and then use events to notify the engine
-
-  return /* read synchronized source state */;
+static bool kp_cond_mything_sample(const struct device *dev) {
+  return /* read synchronized current source state */;
 }
 
 /* The condition API */
@@ -450,33 +438,36 @@ DT_INST_FOREACH_STATUS_OKAY(KP_COND_MYTHING_DEFINE)
 #endif
 ```
 
-The RGB engine, and conditions, are reactive, which means a condition must
-either (1) explicitly as the engine to poll it (through `next_wakeup_ms`, see
-above), or (2) notify the engine whenever the condition changes with
-`kp_rgb_condition_invalidate`. Here is an example for a CapsLock condition
-notification:
+Use the `KP_RGB_CONDITION_DEFINE(inst, api, config, data)` helper to initantiate
+your conditions. Required provider state must be ready before automatic control
+startup.
+
+The whole condition pipeline is reactive: there is no timed polling, and the
+condition implementation must call `kp_rgb_condition_invalidate()` when its
+source changes. For example, a CapsLock provider can request a pass when the
+host indicator event arrives:
 
 ```c
-#define INVALIDATE(inst)                                                       \
-  kp_rgb_condition_invalidate(DEVICE_DT_GET(DT_DRV_INST(inst)));
 static int listener(const zmk_event_t *eh) {
-  const struct zmk_hid_indicators_changed *ev =
-      as_zmk_hid_indicators_changed(eh);
-  if (ev) {
-    DT_INST_FOREACH_STATUS_OKAY(INVALIDATE)
-  }
+  ARG_UNUSED(eh);
+  kp_rgb_condition_invalidate();
   return ZMK_EV_EVENT_BUBBLE;
 }
 ZMK_LISTENER(kp_cond_caps_lock, listener);
 ZMK_SUBSCRIPTION(kp_cond_caps_lock, zmk_hid_indicators_changed);
 ```
 
-After changing source state, call `kp_rgb_condition_invalidate(dev)`. It is
-any-context, non-blocking, and coalescing; synchronize source data separately.
-There is no polling fallback or guarantee that every intermediate transition
-will be sampled. Sampling runs on the module's own low-priority control work
-queue (sized by `CONFIG_KEYPAW_RGB_WORKQUEUE_STACK_SIZE`) and must not execute
-behaviors, write LEDs, or recursively sample another provider.
+### Condition dependencies
+
+A condition may depend on other conditions, like `keypaw,rgb-condition-and`,
+with the dependencies listed in the node's `conditions` phandles property:
+
+```dts
+combined: combined {
+    compatible = "keypaw,rgb-condition-and";
+    conditions = <&layer_active &caps_active>;
+};
+```
 
 ### Source scope, split authority and startup
 
@@ -496,16 +487,7 @@ Scope restricts source evaluation; an overlay's `local` flag chooses gate author
   have valid sources. Renderers already run locally, so a battery gauge's local
   charge does not itself require local gate evaluation.
 
-All configured local and central roots remain live during logical OFF, idle
-suppression, inhibition and zero local LEDs. Stage 1 does not prune consumer demand.
-
 Provider sources must be ready before initial sampling and startup actions.
-`CONFIG_KEYPAW_RGB_CONTROL_AUTO_START=y` starts via the settings commit hook at
-`INT_MAX` after full key loading/lower-priority commits, or APPLICATION 99 with
-settings disabled. It does not guarantee readiness after equal-priority commits,
-later asynchronous initialization or subtree loads. Such integrations must disable
-auto-start and call the idempotent, thread-only `zmk_rgb_matrix_start()` after
-defaults, full settings restoration and provider readiness.
 
 ### Repainting on an event
 
@@ -519,11 +501,11 @@ condition as above.
 
 ## Writing a trigger
 
-A trigger maps a condition to a list of `&kprgb` commands. Triggers are the
-children of a `keypaw,rgb-trigger-table` node. Each one fires independently: its
-`on-enter` commands run on the condition's rising edge (false -> true) and its
-optional `on-exit` on the falling edge (true -> false). **Declaration order is
-the firing order** — it matters only when several edges land on the same
+A trigger maps a condition to a list of one-shot behavior commands. Triggers are
+the children of a `keypaw,rgb-trigger-table` node. Each one fires independently:
+its `on-enter` commands run on the condition's rising edge (false -> true) and
+its optional `on-exit` on the falling edge (true -> false). **Declaration order
+is the firing order** — it matters only when several edges land on the same
 evaluation.
 
 ```dts
@@ -545,45 +527,46 @@ evaluation.
     /* Entering layer 1 selects effect 1; leaving it restores effect 0. */
     trig_fn: trig_fn {
         condition = <&cond_layer1>;
-        on-enter = <&kprgb RGB_EFS_CMD 1>;
-        on-exit = <&kprgb RGB_EFS_CMD 0>;
+        on-enter = <&zone_a RGB_EFS_CMD 1>;
+        on-exit = <&zone_a RGB_EFS_CMD 0>;
     };
 };
 ```
 
-A rule with no `condition` is unconditional. With the default `startup =
-"enter-if-active"`, it fires once after startup readiness. `startup =
-"baseline"` records initial state without firing. At least one action list is
-required; legacy trigger `bindings` is rejected.
+A rule with no `condition` is unconditional and fires `on-enter` once after
+startup restoration. Previous condition values start false: initial true runs
+`on-enter`, initial false is silent. At least one action list is required.
 
 Semantics worth knowing:
 
 - The evaluator runs on the split **central only** (conditions read keymap
-  state), but the emitted commands reach both halves because `&kprgb` is
+  state), but the emitted commands reach both halves because `&zone_a` is
   `BEHAVIOR_LOCALITY_GLOBAL`.
-- The independent control worker (run on the module's own low-priority work
-  queue) samples dirty/due conditions and dispatches edges even while RGB is
-  OFF, inhibited, or has no local LEDs. Providers must invalidate their
-  conditions or supply a deadline; render ticks do not poll them. An action is
-  invoked on this queue, so there is a risk of stack overflow; consider tuning
-  `KEYPAW_RGB_WORKQUEUE_STACK_SIZE` up if you are writing an effect that might
-  use up too much stack space.
+- Condition sampling and trigger evaluation are independent of rendering and
+  continue while RGB is OFF, inhibited, or has no local LEDs. Conditions are
+  sampled initially and on source/dependency invalidation or engine refresh;
+  there is no timed polling. Render ticks do not poll conditions. Trigger actions
+  run asynchronously as part of control processing.
 - Rules are **independent and edge-triggered**: one never shadows another, so a
   manual `RGB_EFF`/`RGB_EFS` survives between conditions instead of being
   re-fired on the intervening ticks. `on-exit` is how you undo a change when the
   condition clears; a falling edge with no `on-exit` does nothing.
 - A relative command (`RGB_HUI`, `RGB_BRI`, ...) re-fires on every rising edge of
   its condition, so a condition that flickers will act on each toggle.
-- With `startup = "enter-if-active"`, initial true runs `on-enter`; initial false
-  runs no action. Intermediate source changes may coalesce before sampling.
+- All rules use the same cached condition values for a control pass. Actions run
+  in declaration order without resampling between rules. Changes caused by an
+  action take effect in a subsequent queued pass; earlier actions are not rolled
+  back if another source change interrupts the pass. Intermediate source changes
+  may coalesce before sampling.
+- Rules must not form feedback loops, and condition samples must be side-effect-free
+  and must not synchronously invalidate conditions. There is no runtime feedback
+  detector, pass limit or quarantine. Invalid rules can keep work, radio traffic
+  or settings writes running and prevent painting indefinitely. DTS dependency-cycle
+  checks validate the condition graph, not action-driven feedback.
 - Each action receives one pressed invocation, never a matching release.
   `on-exit` invokes its own actions; it does not release `on-enter` actions.
   You must choose behaviors that complete without a release. Third-party one-shot
   behaviors are allowed; ordinary `&kp`, momentary layers and hold-tap are unsuitable.
-
-> There is deliberately no `triggers = <...>;` phandle list on the table or on
-> `&kprgb`: a parent pointing at its own child is a devicetree cycle, and the
-> failure mode is obscure.
 
 ## Writing an overlayed filter
 
@@ -595,13 +578,12 @@ Well, that was only partly true: you can use our built-in `keypaw,rgb-overlay`,
 which is merely a compositor, but you can also code your own overlay for other
 fancy effects.
 
-Actually, under the hood, an overlay is no more than a processor that is run
-after effect rendering, and before the engine emits the final output to the LED
-strip, and it can do anything to transform the output.
+An overlay runs at its fixed position in the scene, before the engine emits
+final output to the LED strip. It can transform the output of earlier overlays.
 
 Here is an untested example of writing a custom overlay to filter on the output:
-`render()` receives a const frame whose target pixels contain the effect and
-earlier overlays' output. Transform only those target pixels.
+`render()` receives a const frame whose target pixels contain earlier overlays'
+output (black if none have painted). Transform only those target pixels.
 
 > For an actual example, see [our battery overlay
 > implementation](../src/overlays/battery.c);
@@ -644,20 +626,27 @@ static const struct kp_rgb_effect_callbacks kp_ovl_myfilter_callbacks = {
 #define KP_OVL_MYFILTER_DEFINE(inst)                                           \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_ovl_myfilter_##inst);                  \
   static const struct kp_ovl_myfilter_config kp_ovl_myfilter_##inst##_cfg = {  \
-      .common =                                                                \
-          KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_myfilter_##inst),    \
+      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst),                       \
+                                     &kp_ovl_myfilter_callbacks, false),       \
   };                                                                           \
-  static struct kp_ovl_myfilter_data kp_ovl_myfilter_##inst##_data;            \
-  KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_myfilter_callbacks, false,               \
-                        kp_ovl_myfilter_##inst)
+  static struct kp_ovl_myfilter_data kp_ovl_myfilter_##inst##_data = {         \
+      KP_RGB_OVERLAY_COMMON_DATA(inst, kp_ovl_myfilter_##inst),                \
+  };                                                                           \
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_myfilter_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_MYFILTER_DEFINE)
 
 #endif
 ```
 
+`KP_RGB_OVERLAY_TARGET_ARRAYS(inst, cfg)` must precede the config and data
+objects. It declares const `uint32_t` raw key and LED arrays plus a mutable
+buffer for resolved index storage, populated by one internal registry pass
+immediately after layout geometry at `POST_KERNEL OBJECTS`, before overlay
+device initialization.
+
 A filter is gated, ordered, and split-pushed exactly like a compositor overlay,
-so it goes in the same `keypaw,rgb-overlays` container, and its declaration
+so it goes directly under the same `keypaw,rgb-matrix` node, and its declaration
 order there is its paint order. Read
 [`keypaw,rgb-overlay-common.yaml`](../dts/bindings/keypaw,rgb-overlay-common.yaml)
 for more.
@@ -674,58 +663,62 @@ Controller-selectable effects and registered overlays are identified by their
 child index, and on a split build that index travels the link. **Both halves
 must build the same set of registry effects and overlays, in the same order.**
 The same applies across a flash: an effect's state is addressed by its slot, so
-reordering `&kprgb`'s children while `CONFIG_SETTINGS=y` re-points persisted
-state.
+reordering `&rgb_matrix`'s children while `CONFIG_SETTINGS=y` re-points
+persisted state. Also, overlay declaration order is the paint order.
 
-Overlay declaration order is the default paint order. A selectable effect can
-supply `overlays = <&a &b>;` to select and order its overlays, or `no-overlays`
-to disable them. A list must not contain duplicates. Several base-effect lists
-may name the same overlay because those bases are mutually exclusive. Each
-generic overlay still owns its own private child, never a selectable effect.
+Settings address selectors and selected members by enabled DTS declaration
+position, not name. Reordering members can redirect saved selections; overlay order
+is not persisted.
 
-Unlike effect slots, overlay order is not persisted, so reordering overlays is
-safe across a flash as long as both halves use the same devicetree.
-
-## External output inhibition
+## External output inhibition and activity
 
 > This might only be useful if you're hoping to implement a battery-saving mode
 > for your keyboard.
 
-A single external policy aggregator can call
-`zmk_rgb_matrix_set_inhibited(bool)` from `<zmk/rgb_matrix.h>` to gate the
-local strip. The gate defaults to `false`, is runtime-only, and may be set from
-thread context before matrix initialization (for example, in `POST_KERNEL`).
-It does not change logical ON/user intent, saved settings, or normal split
-commands; each split half needs its own local gate owner.
+A single external policy owner can call `zmk_rgb_matrix_set_inhibited(bool)`
+from `<zmk/rgb_matrix.h>` to gate local output permission. The gate defaults to
+`false`, is runtime-only and does not change logical ON/user intent, saved
+settings, or normal split commands.
 
-The setter returns `0` when accepted, or `-EWOULDBLOCK` from ISR context. A
-completed inhibit call prevents further colored submissions, but does not
-promise that the hardware is already black.
+Activity state is handled separately from external inhibition. `idle-brightness`
+defaults to 0 and is constrained to 0..100. ACTIVE output uses the
+`max-brightness` cap; IDLE uses `min(idle-brightness, max-brightness)` and then
+master-brightness scaling. At IDLE brightness 0, output is logically OFF while
+retained user intent remains set. A nonzero idle brightness dims without resetting
+effects or restarting the shared clock. `zmk_rgb_matrix_get_state()` reports
+retained intent after activity suppression, independent of inhibition and output
+scale; `zmk_rgb_matrix_get_user_state()` reports retained intent directly.
 
-While inhibited, effects, overlays, and key feedback do not render or advance;
-queued key feedback is discarded. Condition evaluation, triggers, and overlay
-synchronization continue independently on invalidations/deadlines even while
-logically OFF, including on a stripless central.
+SLEEP is always logically OFF. Each newly observed SLEEP transition causes one
+synchronous black-strip call before the activity listener returns if the matrix
+is initialized and has LEDs, even when already off or inhibited. A failed call
+is logged without automatic retry and can leave the strip lit indefinitely.
+A later output-blocking transition or newly observed SLEEP transition can attempt
+black again. There is no guarantee of darkness after failure or of driver-call
+duration; validate actual electrical behavior on hardware.
 
 ## Split checklist
 
 Before shipping a third-party extension, confirm:
 
-- [ ] The module includes only `<zmk/rgb_matrix.h>` / `<zmk/rgb_matrix_math.h>`,
-      never `src/rgb_matrix_internal.h`.
+- [ ] The module uses public RGB headers like `<zmk/rgb_matrix.h>` and
+      `<zmk/rgb_matrix_math.h>`, never `src/rgb_matrix_internal.h`.
 - [ ] An effect's or overlay kind's config and data structs embed the common
       struct as the first member (a condition needs no such struct).
-- [ ] The device is declared with the provided macro (`KP_RGB_EFFECT_DEFINE` /
-      `KP_RGB_CONDITION_DEFINE` / `KP_RGB_OVERLAY_DEFINE`), not
-      `DEVICE_DT_DEFINE` directly.
+- [ ] RGB kinds use the provided helpers (`KP_RGB_EFFECT_DEFINE` /
+      `KP_RGB_CONDITION_DEFINE` / `KP_RGB_OVERLAY_DEFINE`).
+  - [ ] If you really need to manually declare your Zephyr devices, use
+        `POST_KERNEL`, `KP_RGB_DEVICE_INIT_PRIORITY`.
 - [ ] Any central-only state read is gated with `IS_ENABLED(...)` and returns a
       safe default on the peripheral, without gating the device out.
 - [ ] Custom overlays should declare `replaces_target=false` if their image
       depends on incoming pixels, or, otherwise, `replaces_target=true`.
-- [ ] A `GLOBAL` behavior's node name is 8 characters or fewer (the split link
-      serialises it into a 9-byte field).
 
 And if you are also drafting devicetree definitions:
 
-- [ ] A custom overlay kind's node is a child of `keypaw,rgb-overlays`.
-- [ ] Controller-effect slots and overlay ordinals are identical on both halves.
+- [ ] A `GLOBAL` behavior's effective device name is 8 characters or fewer. This
+      includes the matrix: use `rgb_matrix: rgb` with `#binding-cells = <2>`.
+- [ ] Exactly one enabled matrix owns geometry/global defaults and direct overlay
+      children; there is no separate global behavior/container or compatibility bridge.
+- [ ] Overlay/effect members and their ordering are identical on both halves;
+      both firmware sides are rebuilt whenever addressing shifts.

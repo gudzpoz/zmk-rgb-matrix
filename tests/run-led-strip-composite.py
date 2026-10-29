@@ -15,6 +15,8 @@ import sys
 MODULE = Path(__file__).resolve().parents[1]
 APP = MODULE / "tests" / "led_strip_composite"
 REPO = MODULE.parents[1]
+sys.path.insert(0, str(MODULE / "tests/sim"))
+from native_process import BUILD_TIMEOUT, run_logged
 CONTROL = '''/ {
     spec_child: spec-child {
         compatible = "test,composite-mock-strip";
@@ -96,20 +98,6 @@ CASES = {
 }
 
 
-def execute(command, cwd, log, timeout=180):
-    try:
-        result = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=timeout)
-    except subprocess.TimeoutExpired as error:
-        output = error.stdout or b""
-        if isinstance(output, bytes):
-            output = output.decode(errors="replace")
-        log.write_text(output)
-        raise RuntimeError(f"timeout (not an expected rejection): {log}") from error
-    log.write_text(result.stdout)
-    return result
-
-
 def config_has(text, name, value):
     return f"CONFIG_{name}={value}\n" in text
 
@@ -149,7 +137,9 @@ def main():
                               f"-DDTC_OVERLAY_FILE={APP / 'app.overlay'};{overlay}",
                               f"-DEXTRA_CONF_FILE={conf}"]
             log = variant / f"{name}.build.log"
-            result = execute(command, workspace, log)
+            result = run_logged(command, cwd=workspace, log_path=log,
+                                timeout=BUILD_TIMEOUT, text=True,
+                                stderr=subprocess.STDOUT)
             return result, build_dir, log
 
         result, build_dir, log = build("positive-control")
@@ -169,12 +159,14 @@ def main():
 
         if args.only != "negative":
             log = variant / "runtime.log"
-            result = execute([str(build_dir / "zephyr/zephyr.exe")], workspace, log, 30)
+            result = run_logged([str(build_dir / "zephyr/zephyr.exe")],
+                                cwd=workspace, log_path=log, text=True,
+                                stderr=subprocess.STDOUT)
             if result.returncode or "PROJECT EXECUTION SUCCESSFUL" not in result.stdout:
                 raise RuntimeError(f"runtime tests failed: {log}\n" + result.stdout[-5000:])
             print(f"PASS runtime ztests scratch={scratch}", flush=True)
 
-        if args.only != "runtime":
+        if not scratch and args.only != "runtime":
             for name, (mutation, diagnostic) in CASES.items():
                 result, rejected_build, log = build(name, mutation)
                 if result.returncode == 0:
@@ -195,6 +187,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (RuntimeError, OSError) as error:
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         sys.exit(1)

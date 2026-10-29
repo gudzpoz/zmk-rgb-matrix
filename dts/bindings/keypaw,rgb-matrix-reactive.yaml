@@ -5,7 +5,7 @@ description: Reactive keypress-fade RGB matrix effect, extended with spread shap
   a gradient palette and a complement palette (SOLID_REACTIVE_* / *_CROSS /
   *_NEXUS / SPLASH / COMPLEMENT families).
 compatible: "keypaw,rgb-matrix-reactive"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   background-brightness:
@@ -35,7 +35,8 @@ properties:
     default: 250
     description: |
       Falloff radius for "disc" and "nexus", in the same physical-layout units
-      as the LEDs (100 = one key width).
+      as the LEDs (100 = one key width). Valid range: 0..65535; zero contributes
+      no keypress brightness in these modes.
 
       "disc" measures the radius from the pressed key. "nexus" measures it
       outward from the excluded row/column cross instead, so the value is the

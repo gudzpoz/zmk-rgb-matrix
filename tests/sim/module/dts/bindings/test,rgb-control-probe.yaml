@@ -1,0 +1,10 @@
+description: Native control contract effect
+compatible: "test,rgb-control-probe"
+include: "keypaw,rgb-matrix-effect-common.yaml"
+properties:
+  axis:
+    type: string
+    default: "none"
+    enum: ["none", "vertical", "horizontal"]
+  zephyr,deferred-init:
+    type: boolean

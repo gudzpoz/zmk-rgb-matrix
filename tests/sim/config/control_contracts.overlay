@@ -1,0 +1,20 @@
+&probe_a { compatible = "test,rgb-control-probe"; };
+&probe_b { compatible = "test,rgb-control-probe"; axis = "vertical"; };
+&probe_c { compatible = "test,rgb-control-probe"; axis = "horizontal"; /delete-property/ animate; };
+&probe_d { compatible = "test,rgb-control-probe"; };
+&rgb_matrix {
+    control_private: control_private {
+        compatible = "keypaw,rgb-overlay"; leds = <4>;
+        control_late: control_late {
+            compatible = "test,rgb-control-probe";
+        };
+    };
+    control_disabled: control_disabled {
+        compatible = "keypaw,rgb-overlay"; status = "disabled";
+
+        control_unowned: control_unowned {
+            compatible = "test,rgb-control-probe";
+            duration = <0>;
+        };
+    };
+};

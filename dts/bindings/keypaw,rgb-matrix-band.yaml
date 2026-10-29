@@ -6,7 +6,7 @@ description: |
   covering QMK's BAND_SAT / BAND_VAL and their pinwheel / spiral variants
   (BAND_PINWHEEL_SAT/VAL, BAND_SPIRAL_SAT/VAL).
 compatible: "keypaw,rgb-matrix-band"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   channel:

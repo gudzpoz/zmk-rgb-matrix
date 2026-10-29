@@ -11,13 +11,14 @@ description: |
   on both halves (a `local` overlay would call it there).
 
 compatible: "keypaw,rgb-condition-layer"
+include: keypaw,rgb-condition-common.yaml
 
 properties:
   layer:
     type: int
     required: true
     description: |
-      Layer id this condition watches.
+      Layer id this condition watches (0..255).
 
   only-topmost:
     type: boolean

@@ -6,6 +6,7 @@
 Requires the same workspace/toolchain as run-smoke.sh. Every case has a pristine
 build directory; positive controls distinguish rejection from a broken toolchain.
 """
+import argparse
 import os
 import re
 from pathlib import Path
@@ -22,147 +23,182 @@ EXAMPLE = Path(os.environ.get("RGB_EXAMPLE_MODULE", MODULE.parent / "zmk-rgb-eff
 
 CASES = {
     "baseline": (True, ""),
-    "zero-local-leds": (True, '&rgb_matrix { /delete-property/ strip; mapping = <>; };'),
-    "period-zero": (True, '&kprgb { initial-duration-ms = <0>; }; &fx_solid { duration = <0>; };'),
-    "period-wide": (True, '''
-&kprgb { initial-duration-ms = <70000>; };
-&fx_solid { duration = <70000>; };
-&fixture_overlay { fx_fixture { duration = <70000>; }; };
-'''),
-    "period-u32-max": (True, '''
-&kprgb { initial-duration-ms = <0xffffffff>; };
-&fx_solid { duration = <0xffffffff>; };
-&fixture_overlay { fx_fixture { duration = <0xffffffff>; }; };
-'''),
+    "startup-priority-98": (True, ""),
+    "startup-priority-99": (False, ""),
+    # The separately owned example binding still requires this property.
     "external-effect": (True, '''
-&kprgb { external_example { compatible = "keypaw,rgb-matrix-example";
+&preview_selector { external_example { compatible = "keypaw,rgb-matrix-example";
     #binding-cells = <0>; }; };
 '''),
     "arbitrary-effect-parent": (True, '''
 / { arbitrary_effect_parent { nested_effect { compatible = "keypaw,rgb-matrix-rainbow";
-    #binding-cells = <0>; duration = <321>; }; }; };
+    duration = <321>; }; }; };
 '''),
-    "two-child-overlay": (True, '''
-&rgb_overlays { fixture_pair: fixture_pair {
-    compatible = "keypaw,rgb-overlay-pair";
-    condition = <&fixture_always>;
-    all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
-        color = <0x20ff40>; duration = <700>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
-        duration = <1800>; };
-}; };
-'''),
-    "two-child-private-parameters": (True, '''
-&rgb_overlays { fixture_pair: fixture_pair {
-    compatible = "keypaw,rgb-overlay-pair";
-    all-leds;
-    first { compatible = "keypaw,rgb-matrix-reactive"; #binding-cells = <0>;
-        color = <0xa040ff>; duration = <900>; };
-    second { compatible = "keypaw,rgb-matrix-rainbow"; #binding-cells = <0>;
-        duration = <2300>; };
-}; };
-'''),
-    "no-controller": (False, '&kprgb { status = "disabled"; };'),
+    "no-controller": (False, '&rgb_matrix { status = "disabled"; };'),
     "two-controllers": (False, '''
-/ { behaviors { extra_rgb { compatible = "keypaw,behavior-rgb-matrix";
-    #binding-cells = <2>;
-    fx { compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; };
-}; }; };
+/ { extra_rgb { compatible = "keypaw,rgb-matrix"; #binding-cells = <2>;
+    physical-layout = <&layout_ortho_4x12_all1u>; mapping = <>; }; };
 '''),
-    "controller-leds": (False, "&kprgb { leds = <0 1>; };"),
-    "removed-no-cycle": (False, "&fx_solid { no-cycle; };"),
+    "overlay-wrong-parent": (False, '''/ { wrong_parent { bad_overlay {
+    compatible = "keypaw,rgb-overlay-battery"; all-leds;
+}; }; };'''),
+    "missing-binding-cells": (False, '&rgb_matrix { /delete-property/ #binding-cells; };'),
+    "controller-leds": (False, "&rgb_matrix { leds = <0 1>; };"),
+    "flat-controller-child": (False, '''&rgb_matrix { flat_effect {
+        compatible = "keypaw,rgb-matrix-solid";
+    }; };'''),
     "effect-reference": (False, "&fixture_overlay { effect = <&fx_solid>; };"),
     "missing-child": (False, "&fixture_overlay { /delete-node/ fx_fixture; };"),
     "two-enabled-children": (False, '''
 &fixture_overlay { second { compatible = "keypaw,rgb-matrix-solid";
-    #binding-cells = <0>; }; };
-'''),
-    "duplicate-overlay": (False, '''
-&fx_solid { overlays = <&fixture_overlay &fixture_overlay>; };
+    }; };
 '''),
     "disabled-sibling": (True, '''
 &fixture_overlay { disabled { compatible = "keypaw,rgb-matrix-solid";
-    #binding-cells = <0>; status = "disabled"; }; };
+    status = "disabled"; }; };
 '''),
-    "mutually-exclusive-lists": (True, '''
-&fx_solid { overlays = <&fixture_overlay>; };
-&fx_solid_v { overlays = <&fixture_overlay>; };
+    "shared-selection-gate": (True, '''
+&rgb_conditions { selected_preview: selected_preview {
+    compatible = "keypaw,rgb-condition-effect-selected";
+    selector = <&preview_selector>; effect = <&fx_solid>;
+}; };
+&fixture_overlay { condition = <&selected_preview>; };
+&fixture_battery { condition = <&selected_preview>; };
 '''),
-    "persist-id": (True, '''
-&fx_solid { persist-id = "solid_main"; };
-&fx_solid_v { persist-id = "solid_vertical"; };
+    "heatmap-spread-zero": (True, '''
+&preview_selector { heatmap_zero { compatible = "keypaw,rgb-matrix-heatmap";
+    spread = <0>; }; };
 '''),
-    "persist-id-duplicate": (False, '''
-&fx_solid { persist-id = "duplicate"; };
-&fx_solid_v { persist-id = "duplicate"; };
-'''),
-    "persist-id-too-long": (False, '''
-&fx_solid { persist-id = "persist_id_that_is_far_beyond_the_storage_limit"; };
-'''),
-    "node-name-too-long": (False, '''
-&kprgb { fx_this_node_name_is_far_beyond_the_storage_limit {
-    compatible = "keypaw,rgb-matrix-solid"; #binding-cells = <0>; }; };
-'''),
+    # Zephyr permits undeclared #-properties; this does not register a behavior.
+    "inert-effect-binding-cells": (True, '&fx_solid { #binding-cells = <0>; };'),
+    "direct-effect-keymap-binding": (False, ""),
+    "triggers-present": (True, '''/ { stage14_triggers {
+        compatible = "keypaw,rgb-trigger-table";
+        edge { condition = <&fixture_latch>; on-enter = <&none>; };
+    }; };'''),
+    "triggers-disabled": (True, '''/ { stage14_triggers {
+        compatible = "keypaw,rgb-trigger-table"; status = "disabled";
+        edge { condition = <&fixture_latch>; on-enter = <&none>; };
+    }; };'''),
+    "advanced-overrides": (True, ""),
 }
 
 
 DIAGNOSTICS = {
-    "no-controller": r"exactly one enabled controller",
-    "two-controllers": r"exactly one enabled controller",
-    "controller-leds": r"whole strip|['\"]leds['\"].*not declared",
-    "removed-no-cycle": r"['\"]no-cycle['\"].*not declared",
-    "effect-reference": r"references are not supported|['\"]effect['\"].*not declared",
+    "startup-priority-99": r"RGB automatic control startup must follow matrix initialization",
+    "no-controller": r"DT_HAS_KEYPAW_RGB_MATRIX_ENABLED.*\(=n\)",
+    "two-controllers": r"exactly one enabled matrix node",
+    "overlay-wrong-parent": r"overlay must be a child of the keypaw,rgb-matrix node",
+    "missing-binding-cells": r"#binding-cells.*required|required.*#binding-cells",
+    "controller-leds": r"['\"]leds['\"].*not declared",
+    "flat-controller-child": r"matrix children must be overlays, not effects",
+    "effect-reference": r"['\"]effect['\"].*not declared",
     "missing-child": r"exactly one enabled nested effect",
     "two-enabled-children": r"exactly one enabled nested effect",
-    "duplicate-overlay": r"redeclaration of enumerator|redefinition of enumerator",
-    "persist-id-duplicate": r"redeclaration of enumerator|redefinition of enumerator",
-    "persist-id-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
-    "node-name-too-long": r"KP_RGB_PERSIST_MAX_ID_LENGTH",
+    "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
+
+for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
+    for cap in (-1, 0, 100, 101):
+        name = f"{prop}-{cap}"
+        CASES[name] = (0 <= cap <= 100, f'&rgb_matrix {{ {prop} = <({cap})>; }};')
+        DIAGNOSTICS[name] = rf'{prop} must be in 0\.\.100'
+
+for opacity in (-1, 0, 100, 101, 256):
+    name = f"overlay-opacity-{opacity}"
+    CASES[name] = (0 <= opacity <= 100,
+                   f'&fixture_overlay {{ opacity = <({opacity})>; }};')
+    DIAGNOSTICS[name] = r"overlay opacity must be 0\.\.100"
+
+for radius in (-1, 0, 65535, 65536):
+    name = f"reactive-radius-{radius}"
+    CASES[name] = (0 <= radius <= 65535,
+                   f'&fx_reactive {{ spread-radius = <({radius})>; }};')
+    DIAGNOSTICS[name] = r"reactive spread-radius must be in 0\.\.65535"
+
+
+for layer in (-1, 0, 255, 256):
+    name = f"layer-condition-{layer}"
+    CASES[name] = (0 <= layer <= 255,
+                   f"&fixture_layer {{ layer = <({layer})>; }};")
+    DIAGNOSTICS[name] = r"layer condition layer must be in 0\.\.255"
 
 for effect in ("rain", "starlight"):
     for interval in (0, -1, 65536, 1, 65535):
         name = f"{effect}-interval-{interval}"
         CASES[name] = (1 <= interval <= 65535, f'''
-&kprgb {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
-    #binding-cells = <0>; step-interval-ms = <({interval})>; }}; }};
+&preview_selector {{ interval_test {{ compatible = "keypaw,rgb-matrix-{effect}";
+    step-interval-ms = <({interval})>; }}; }};
 ''')
         DIAGNOSTICS[name] = rf"{effect} step-interval-ms must be in 1\.\.65535"
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix="rgb-config-") as directory:
-        root = Path(directory)
-        for name, (valid, fragment) in CASES.items():
-            if name == "external-effect" and not EXAMPLE.is_dir():
-                print(f"SKIP external-effect: {EXAMPLE} is not available", flush=True)
-                continue
-            modules = [str(MODULE), str(SIM / "module")]
-            if name == "external-effect":
-                modules.append(str(EXAMPLE))
-            config = root / name / "config"
-            config.mkdir(parents=True)
-            for filename in ("native_sim.conf", "native_sim.keymap"):
-                (config / filename).write_text((SIM / "config" / filename).read_text())
-            (config / "native_sim.overlay").write_text(
-                f'#include "{SIM / "config/native_sim.overlay"}"\n' + fragment
-            )
-            command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
-                       "-b", "native_sim//zmk_test_mock", "-p", "--",
-                       f"-DZMK_CONFIG={config}",
-                       f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
-            result = subprocess.run(command, cwd=WORKSPACE, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            if (result.returncode == 0) != valid:
-                raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
-                                     + result.stdout[-12000:])
-            if name.startswith("period-"):
-                assert not re.search(r"warning:[^\n]*(overflow|changes value)", result.stdout), result.stdout[-12000:]
-            if not valid:
-                output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
-                assert re.search(DIAGNOSTICS[name], output), output[-12000:]
-            print(f"PASS {name}", flush=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", choices=CASES, action="append")
+    parser.add_argument("--build-dir", type=Path)
+    args = parser.parse_args()
+    root = (args.build_dir or Path(tempfile.mkdtemp(prefix="rgb-config-"))).resolve()
+    print(f"ARTIFACTS {root}", flush=True)
+    for name in args.case or CASES:
+        valid, fragment = CASES[name]
+        if name == "external-effect" and not EXAMPLE.is_dir():
+            print(f"SKIP external-effect: {EXAMPLE} is not available", flush=True)
+            continue
+        modules = [str(MODULE), str(SIM / "module")]
+        if name == "external-effect":
+            modules.append(str(EXAMPLE))
+        config = root / name / "config"
+        config.mkdir(parents=True, exist_ok=True)
+        for filename in ("native_sim.conf", "native_sim.keymap"):
+            text = (SIM / "config" / filename).read_text()
+            if filename.endswith(".keymap") and name == "direct-effect-keymap-binding":
+                text = text.replace("                &none", "                &fx_reactive", 1)
+            if filename.endswith(".conf") and name == "advanced-overrides":
+                text += ("\nCONFIG_KEYPAW_RGB_MATRIX_TICK_MS=17\n"
+                         "CONFIG_KEYPAW_RGB_WORKQUEUE_STACK_SIZE=3072\n"
+                         "CONFIG_KEYPAW_RGB_WORKQUEUE_PRIORITY=11\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_HUE_STEP=13\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_SAT_STEP=12\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_BRT_STEP=11\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_STEP=123\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS=120\n"
+                         "CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS=9000\n")
+            if filename.endswith(".conf") and name == "no-controller":
+                text += "\nCONFIG_KEYPAW_RGB_MATRIX=y\n"
+            if filename.endswith(".conf") and name.startswith("startup-priority-"):
+                text += f"\nCONFIG_SETTINGS=n\nCONFIG_APPLICATION_INIT_PRIORITY={name.rsplit('-', 1)[1]}\n"
+            (config / filename).write_text(text)
+        (config / "native_sim.overlay").write_text(
+            f'#include "{SIM / "config/native_sim.overlay"}"\n' + fragment
+        )
+        command = [WEST, "build", "-s", "app", "-d", str(root / name / "build"),
+                   "-b", "native_sim//zmk_test_mock", "-p", "--",
+                   "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                   f"-DZMK_CONFIG={config}",
+                   f"-DZMK_EXTRA_MODULES={';'.join(modules)}"]
+        result = subprocess.run(command, cwd=WORKSPACE, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+        (root / f"{name}.log").write_text(result.stdout)
+        if (result.returncode == 0) != valid:
+            raise AssertionError(f"{name}: expected {'acceptance' if valid else 'rejection'}\n"
+                                 + result.stdout[-12000:])
+        if valid:
+            generated = (root / name / "build/zephyr/.config").read_text()
+            assert "CONFIG_CHECK_INIT_PRIORITIES=y" in generated
+            assert "CONFIG_KEYPAW_RGB_SPLIT_SYNC=y" not in generated, generated
+            assert ("CONFIG_KEYPAW_RGB_TRIGGERS=y" in generated) == (name == "triggers-present"), generated
+            if name == "advanced-overrides":
+                for symbol, value in (("MATRIX_TICK_MS", 17), ("WORKQUEUE_STACK_SIZE", 3072),
+                                      ("WORKQUEUE_PRIORITY", 11), ("MATRIX_HUE_STEP", 13),
+                                      ("MATRIX_SAT_STEP", 12), ("MATRIX_BRT_STEP", 11),
+                                      ("MATRIX_DURATION_STEP", 123), ("MATRIX_DURATION_MIN_MS", 120),
+                                      ("MATRIX_DURATION_MAX_MS", 9000)):
+                    assert f"CONFIG_KEYPAW_RGB_{symbol}={value}\n" in generated, generated
+        if not valid:
+            output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+            assert re.search(DIAGNOSTICS[name], output), output[-12000:]
+        print(f"PASS {name}", flush=True)
 
 
 if __name__ == "__main__":

@@ -8,3 +8,4 @@ description: |
   call; the condition therefore works on both halves.
 
 compatible: "keypaw,rgb-condition-caps-lock"
+include: keypaw,rgb-condition-common.yaml

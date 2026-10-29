@@ -11,4 +11,4 @@ description: |
   drop takes to cross the board (each column is jittered between duration / 3 and
   duration, so shorter is faster). Defaults are applied in the effect's C define.
 compatible: "keypaw,rgb-matrix-digital-rain"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"

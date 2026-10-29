@@ -3,7 +3,7 @@
 
 description: Radial ripple RGB matrix effect.
 compatible: "keypaw,rgb-matrix-ripple"
-include: [zero_param.yaml, "keypaw,rgb-matrix-effect-common.yaml"]
+include: "keypaw,rgb-matrix-effect-common.yaml"
 
 properties:
   background-brightness:

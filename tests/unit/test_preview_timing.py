@@ -7,11 +7,14 @@ import importlib.util
 import pathlib
 import shutil
 import struct
-import subprocess
+import sys
 import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "sim" / "render_gif.py"
+sys.path.insert(0, str(SCRIPT.parent))
+from native_process import run_logged
+LOGS = SCRIPT.parents[1] / "build/process/preview-timing"
 SPEC = importlib.util.spec_from_file_location("render_gif", SCRIPT)
 preview = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(preview)
@@ -65,7 +68,6 @@ class PreviewTimingTests(unittest.TestCase):
         width, height, images = preview.rasterize(
             coords, preview.resample_frames(frames, end_ms=50), 100, 1, 0)
         self.assertEqual((width, height), (1, 1))
-        self.assertIs(iter(images), images)
         self.assertEqual([bytes(image) for image in images], [RED] * 2)
 
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
@@ -87,11 +89,14 @@ class PreviewTimingTests(unittest.TestCase):
                     with raw.open("wb") as handle:
                         for image in images:
                             handle.write(image)
-                    preview.encode_gif(str(raw), width, height, fps, str(gif))
-                    duration = float(subprocess.check_output([
+                    preview.encode_gif(str(raw), width, height, fps, str(gif),
+                                       log_path=LOGS / f"{name}.ffmpeg.log")
+                    duration = float(run_logged([
                         "ffprobe", "-v", "error", "-min_delay", "0",
                         "-show_entries", "format=duration", "-of",
-                        "default=noprint_wrappers=1:nokey=1", str(gif)], text=True))
+                        "default=noprint_wrappers=1:nokey=1", str(gif)],
+                        text=True, check=True,
+                        log_path=LOGS / f"{name}.ffprobe.log").stdout)
                     self.assertAlmostEqual(duration,
                                            1 / fps if end_ms is None else 0.4,
                                            delta=0.001)

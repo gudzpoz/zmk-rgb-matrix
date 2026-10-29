@@ -2,56 +2,59 @@
  * Copyright (c) 2026 The ZMK Contributors
  *
  * SPDX-License-Identifier: MIT
- *
- * On-flash record codec for RGB matrix settings.
  */
 
-#include <string.h>
+#include <errno.h>
 
-#include <zephyr/settings/settings.h>
-#include <zephyr/sys/util.h>
+#include "rgb_persist_internal.h"
 
-#include <zmk/rgb_color.h>
-#include <zmk/rgb_persist.h>
-
-#define KP_RGB_PERSIST_EFFECT_PATH_LEN                                         \
-  (sizeof("keypaw/rgb_matrix/state/effects/") - 1)
-
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_blob) <= SETTINGS_MAX_VAL_LEN,
-             "the persisted global record exceeds SETTINGS_MAX_VAL_LEN");
-BUILD_ASSERT(sizeof(struct kp_rgb_persist_effect) <= SETTINGS_MAX_VAL_LEN,
-             "the persisted effect record exceeds SETTINGS_MAX_VAL_LEN");
-BUILD_ASSERT(KP_RGB_PERSIST_EFFECT_PATH_LEN + KP_RGB_PERSIST_MAX_ID_LENGTH <=
-                 SETTINGS_MAX_NAME_LEN,
-             "the persisted effect settings key exceeds SETTINGS_MAX_NAME_LEN");
-
-bool kp_rgb_persist_size_ok(size_t len) {
-  return len == sizeof(struct kp_rgb_persist_blob);
+static uint16_t kp_read_u16(const uint8_t *bytes) {
+  return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
 }
 
-bool kp_rgb_persist_version_ok(uint8_t version) {
-  return version == KP_RGB_PERSIST_VERSION;
+static void kp_write_u16(uint8_t *bytes, uint16_t value) {
+  bytes[0] = (uint8_t)value;
+  bytes[1] = (uint8_t)(value >> 8);
 }
 
-bool kp_rgb_persist_effect_valid(const struct kp_rgb_persist_effect *effect) {
-  return effect != NULL && effect->h <= KP_RGB_HUE_MAX &&
-         effect->s <= KP_RGB_SAT_MAX;
+int kp_rgb_persist_encode(const struct kp_rgb_persist_state *state,
+                          const uint16_t *selections, uint8_t *bytes, size_t len) {
+  if (state == NULL || bytes == NULL || state->brightness > 100 ||
+      (state->selection_count != 0 && selections == NULL) ||
+      len != KP_RGB_PERSIST_SIZE(state->selection_count))
+    return -EINVAL;
+
+  bytes[0] = KP_RGB_PERSIST_VERSION;
+  bytes[1] = state->user_on ? 1 : 0;
+  bytes[2] = state->brightness;
+  bytes[3] = 0;
+  kp_write_u16(bytes + 4, state->selection_count);
+  for (size_t i = 0; i < state->selection_count; i++)
+    kp_write_u16(bytes + KP_RGB_PERSIST_HEADER_SIZE + 2 * i, selections[i]);
+  return 0;
 }
 
-uint16_t kp_rgb_persist_clamp_duration(uint16_t duration_ms, uint16_t min_ms,
-                                       uint16_t max_ms) {
-  return (uint16_t)CLAMP((int32_t)duration_ms, (int32_t)min_ms,
-                         (int32_t)max_ms);
-}
+int kp_rgb_persist_decode(const uint8_t *prefix, size_t prefix_len, size_t record_len,
+                          struct kp_rgb_persist_state *state, uint16_t *selections,
+                          size_t capacity) {
+  if (prefix == NULL || state == NULL || prefix_len < KP_RGB_PERSIST_HEADER_SIZE ||
+      prefix_len > record_len || prefix[0] != KP_RGB_PERSIST_VERSION ||
+      prefix[1] > 1 || prefix[2] > 100 || prefix[3] != 0)
+    return -EINVAL;
 
-void kp_rgb_persist_pack(bool user_on, uint8_t brightness, const char *selected_id,
-                         struct kp_rgb_persist_blob *out) {
-  memset(out, 0, sizeof(*out));
-  out->version = KP_RGB_PERSIST_VERSION;
-  out->user_on = user_on;
-  out->brightness = MIN(brightness, (uint8_t)KP_RGB_BRT_MAX);
-  if (selected_id != NULL && selected_id[0] != '\0') {
-    out->has_selected = 1;
-    strncpy(out->selected_id, selected_id, sizeof(out->selected_id) - 1);
-  }
+  uint16_t count = kp_read_u16(prefix + 4);
+  size_t copied = count < capacity ? count : capacity;
+  if (record_len != KP_RGB_PERSIST_SIZE(count) ||
+      prefix_len < KP_RGB_PERSIST_SIZE(copied) ||
+      (copied != 0 && selections == NULL))
+    return -EINVAL;
+
+  for (size_t i = 0; i < copied; i++)
+    selections[i] = kp_read_u16(prefix + KP_RGB_PERSIST_HEADER_SIZE + 2 * i);
+  *state = (struct kp_rgb_persist_state){
+      .user_on = prefix[1] != 0,
+      .brightness = prefix[2],
+      .selection_count = count,
+  };
+  return 0;
 }

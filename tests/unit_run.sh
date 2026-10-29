@@ -2,13 +2,10 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 #
-# Runs the zmk-rgb-matrix host unit tests (tests/unit/test_*.py).
-#
-# Each script exercises pure helpers or production-extracted engine functions
-# by compiling them on the host with the system C toolchain, so no Zephyr SDK
-# is required. The native_sim ztest suite (tests/unit/CMakeLists.txt) is a
-# separate, heavier step (needs a ZMK checkout + west) and is intentionally not
-# part of this script.
+# Runs the host-side Python tests in tests/unit/test_*.py: codec, subprocess,
+# and preview timing. They do not require a ZMK workspace or Zephyr SDK.
+# Native_sim integration and ztest coverage run separately through
+# tests/sim/run-native.sh.
 
 set -u
 

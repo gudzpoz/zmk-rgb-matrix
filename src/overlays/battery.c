@@ -20,6 +20,8 @@
 #include <zmk/battery.h>
 #include <zmk/rgb_matrix.h>
 
+#include "../rgb_matrix_internal.h"
+
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
 #include <zmk/event_manager.h>
 #include <zmk/events/battery_state_changed.h>
@@ -35,6 +37,8 @@ struct kp_ovl_battery_config {
 };
 struct kp_ovl_battery_data {
   struct kp_rgb_overlay_common_data common;
+  size_t *canonical_order;
+  bool canonical_order_ready;
 };
 
 #if KP_LED_COUNT > 0
@@ -101,18 +105,36 @@ static bool kp_ovl_battery_render(const struct device *dev,
   if (count == 0) {
     return false;
   }
-  size_t *order = kp_ovl_battery_order_buf;
-  for (size_t i = 0; i < count; i++) {
-    order[i] = frame->targets[i];
+  struct kp_ovl_battery_data *data = dev->data;
+  const bool canonical =
+      frame->coords == kp_rgb_led_coord(0) &&
+      frame->targets == kp_rgb_overlay_targets(dev) &&
+      frame->count == KP_LED_COUNT && count == kp_rgb_overlay_target_count(dev);
+  size_t *order;
+  if (canonical) {
+    order = data->canonical_order;
+    if (!data->canonical_order_ready) {
+      for (size_t i = 0; i < count; i++) {
+        order[i] = frame->targets[i];
+      }
+      kp_ovl_battery_order(frame, order, count, cfg->reverse);
+      data->canonical_order_ready = true;
+    }
+  } else {
+    order = kp_ovl_battery_order_buf;
+    for (size_t i = 0; i < count; i++) {
+      order[i] = frame->targets[i];
+    }
+    kp_ovl_battery_order(frame, order, count, cfg->reverse);
   }
-  kp_ovl_battery_order(frame, order, count, cfg->reverse);
 
   uint8_t soc = 0;
 #if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
   soc = zmk_battery_state_of_charge();
 #endif
   soc = MIN(soc, 100);
-  const size_t lit = (count * soc + 50u) / 100u; /* rounded */
+  const size_t lit = (count / 100u) * soc +
+                     ((count % 100u) * soc + 50u) / 100u;
 
   const struct led_rgb on = kp_hex_to_rgb(cfg->color);
   const struct led_rgb off = kp_hex_to_rgb(cfg->background_color);
@@ -148,16 +170,24 @@ static const struct kp_rgb_effect_callbacks kp_ovl_battery_callbacks = {
                "`all-leds;`, `keys` or `leds`");                               \
   KP_RGB_OVERLAY_TARGET_ARRAYS(inst, kp_ovl_battery_##inst);                   \
   static const struct kp_ovl_battery_config kp_ovl_battery_##inst##_cfg = {    \
-      .common =                                                                \
-          KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst), kp_ovl_battery_##inst),     \
+      .common = KP_RGB_OVERLAY_COMMON(DT_DRV_INST(inst),                       \
+                                      &kp_ovl_battery_callbacks, true),        \
       .color = DT_PROP_OR(DT_DRV_INST(inst), color, 0x00FF00),                 \
       .background_color =                                                      \
           DT_PROP_OR(DT_DRV_INST(inst), background_color, 0x000000),           \
       .reverse = DT_PROP(DT_DRV_INST(inst), reverse),                          \
   };                                                                           \
-  static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data;              \
-  KP_RGB_OVERLAY_DEFINE(inst, &kp_ovl_battery_callbacks, true,                 \
-                        kp_ovl_battery_##inst)
+  static size_t kp_ovl_battery_##inst##_canonical_order[MAX(                   \
+      1, DT_PROP(DT_DRV_INST(inst), all_leds)                                  \
+             ? KP_LED_COUNT                                                    \
+             : MIN(KP_LED_COUNT,                                               \
+                   DT_PROP_LEN_OR(DT_DRV_INST(inst), keys, 0) +                \
+                       DT_PROP_LEN_OR(DT_DRV_INST(inst), leds, 0)))];          \
+  static struct kp_ovl_battery_data kp_ovl_battery_##inst##_data = {           \
+      KP_RGB_OVERLAY_COMMON_DATA(inst, kp_ovl_battery_##inst),                 \
+      .canonical_order = kp_ovl_battery_##inst##_canonical_order,              \
+  };                                                                           \
+  KP_RGB_OVERLAY_DEFINE(inst, kp_ovl_battery_##inst)
 
 DT_INST_FOREACH_STATUS_OKAY(KP_OVL_BATTERY_DEFINE)
 

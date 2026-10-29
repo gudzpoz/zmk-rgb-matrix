@@ -15,7 +15,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -40,17 +40,15 @@ static uint32_t kp_band_spatial(kp_band_shape_t shape, uint16_t x, uint16_t y, u
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   if (shape == DT_ENUM_CONST(shape, linear)) {
-    return (uint32_t)x * 65536u / MAX(bl, 1u);
+    return kp_rgb_spatial_linear(x, bl);
   }
   int32_t dx = (int32_t)x - cx;
   int32_t dy = (int32_t)y - cy;
   if (shape == DT_ENUM_CONST(shape, pinwheel)) { /* pinwheel: angle around the centre */
-    return (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
+    return kp_rgb_spatial_angle(dy, dx);
   }
   /* spiral: angle plus a radial term */
-  uint32_t ang = (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
-  uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
-  return ang + dist * 65536u / MAX(max_r, 1u);
+  return kp_rgb_spatial_angle(dy, dx) + kp_rgb_spatial_radius(dx, dy, MAX(max_r, 1u));
 }
 
 static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_frame *f) {
@@ -63,8 +61,8 @@ static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_fra
    * front at a single-wrap rate. */
   uint32_t phase_eff = kp_rgb_arm_phase(
       phase01, cfg->shape == DT_ENUM_CONST(shape, spiral) ? 2u : 1u);
-  uint16_t bl = MAX(f->board_length, 1u);
-  uint16_t bh = MAX(f->board_height, 1u);
+  uint16_t bl = f->board_length;
+  uint16_t bh = f->board_height;
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   uint32_t max_r = MAX(kp_rgb_isqrt((uint32_t)cx * cx + (uint32_t)cy * cy), 1u);
@@ -102,14 +100,15 @@ static const struct kp_rgb_effect_callbacks kp_eff_band_callbacks = {
     .render = kp_eff_band_render,
 };
 
+#define KP_EFF_BAND_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_BAND_DEFINE(inst)                                               \
   static const struct kp_eff_band_config kp_eff_band_##inst##_cfg = {          \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_BAND_DEFAULTS(inst)),           \
       .channel = CONV_DT_ENUM(inst, channel),                                  \
       .shape = CONV_DT_ENUM(inst, shape),                                      \
   };                                                                           \
   static struct kp_eff_band_data kp_eff_band_##inst##_data = {                 \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_BAND_DEFAULTS(inst))};                  \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_band_callbacks,              \
                        kp_eff_band_##inst)
 

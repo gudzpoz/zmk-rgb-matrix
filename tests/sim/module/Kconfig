@@ -17,3 +17,63 @@ config KEYPAW_SIM_COMPOSITE_TEST
     bool "native_sim composite strip engine integration test"
     default n
     depends on ARCH_POSIX && LED_STRIP
+
+config KEYPAW_SIM_GEOMETRY_TEST
+    bool "native_sim declared-layout geometry regression test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP
+
+config KEYPAW_SIM_SELECTOR_TEST
+    bool "native_sim selector runtime test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP
+
+config KEYPAW_SIM_SETTINGS_TEST
+    bool "native_sim scoped settings integration test"
+    default n
+    depends on ARCH_POSIX
+
+config KEYPAW_SIM_SPLIT_TEST
+    bool "native_sim scoped split transport integration test"
+    default n
+    depends on ARCH_POSIX && ZMK_SPLIT
+    depends on !KEYPAW_SIM_SELECTOR_TEST
+
+config KEYPAW_SIM_SINGLETON_SPLIT_TEST
+    bool "Native global-only transport call tracing"
+    default n
+    depends on KEYPAW_SIM_SPLIT_TEST && ZMK_SPLIT_ROLE_CENTRAL
+
+config KEYPAW_SIM_FIXED_SCENE_TEST
+    bool "native_sim fixed overlay scene integration test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP
+
+config KEYPAW_SIM_CONTRACTS
+    bool
+    depends on ARCH_POSIX
+
+config KEYPAW_SIM_ENGINE_CONTRACTS
+    bool "Native engine contracts"
+    depends on ARCH_POSIX && LED_STRIP
+    select KEYPAW_SIM_CONTRACTS
+
+config KEYPAW_SIM_CONDITION_CONTRACTS
+    bool "Native condition and trigger contracts"
+    depends on ARCH_POSIX && LED_STRIP
+    select KEYPAW_SIM_CONTRACTS
+
+config KEYPAW_SIM_CONTROL_CONTRACTS
+    bool "Native selector and parameter contracts"
+    depends on ARCH_POSIX && LED_STRIP
+    select KEYPAW_SIM_CONTRACTS
+
+config KEYPAW_SIM_EFFECT_CONTRACTS
+    bool "Native effect and owner contracts"
+    depends on ARCH_POSIX && LED_STRIP
+    select KEYPAW_SIM_CONTRACTS
+
+config KEYPAW_SIM_STATIC_METADATA_TEST
+    bool "Native static overlay metadata and iterable condition test"
+    default n
+    depends on ARCH_POSIX && LED_STRIP

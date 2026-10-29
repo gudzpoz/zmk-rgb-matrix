@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+description: Static metadata native overlay provider
+compatible: "test,rgb-static-overlay"
+include: [base.yaml, "keypaw,rgb-overlay-common.yaml"]
+properties:
+  condition:
+    type: phandle
+  zero-local-leds:
+    type: boolean

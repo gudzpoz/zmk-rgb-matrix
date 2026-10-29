@@ -15,7 +15,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -25,16 +25,15 @@ struct kp_eff_heatmap_config {
   uint16_t spread;            /* layout-unit radius for neighbour heating */
   uint8_t area_limit;         /* cap on neighbour heat contribution */
   uint8_t increase_step;      /* shades added per keypress */
-  bool slim;                  /* skip neighbour spread */
 };
 
 struct kp_eff_heatmap_data {
   struct kp_rgb_effect_common_data common;
 #if KP_LED_COUNT > 0
-  struct kp_rgb_key_event pending[16];
+  struct kp_rgb_key_event pending[KP_RGB_EFFECT_PENDING_EVENTS];
   size_t pending_count;
   uint8_t temp[KP_LED_COUNT]; /* 0..255 heat per LED */
-  uint32_t remainder[KP_LED_COUNT];
+  uint16_t remainder[KP_LED_COUNT];
 #endif
 };
 
@@ -49,13 +48,10 @@ static void kp_eff_heatmap_advance(const struct device *dev,
   }
   struct kp_eff_heatmap_data *data = dev->data;
   const struct kp_eff_heatmap_config *cfg = dev->config;
-  uint32_t delay = MAX(cfg->decrease_delay_ms, 1u);
+  uint32_t delay = cfg->decrease_delay_ms;
   uint64_t elapsed = MIN(elapsed_ms, 255u * delay);
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
-    uint64_t total = elapsed + data->remainder[i];
-    uint64_t loss = total / delay;
-    data->temp[i] = loss >= data->temp[i] ? 0 : data->temp[i] - loss;
-    data->remainder[i] = data->temp[i] ? total % delay : 0;
+    data->temp[i] = kp_rgb_decay_u8(data->temp[i], &data->remainder[i], elapsed, delay);
   }
 }
 #endif
@@ -121,7 +117,7 @@ static void kp_eff_heatmap_apply(const struct device *dev,
   }
 
   data->temp[led] = MIN(255u, (uint32_t)data->temp[led] + cfg->increase_step);
-  if (cfg->slim || cfg->spread == 0) {
+  if (cfg->spread == 0) {
     return;
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
@@ -129,15 +125,13 @@ static void kp_eff_heatmap_apply(const struct device *dev,
       continue;
     }
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
-    if (c == NULL) {
-      continue;
-    }
     int32_t dx = (int32_t)c->x - origin->x;
     int32_t dy = (int32_t)c->y - origin->y;
-    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
-    if (dist > cfg->spread) {
+    uint64_t squared = kp_rgb_coord_distance_squared(dx, dy);
+    if (squared >= (uint64_t)cfg->spread * cfg->spread) {
       continue;
     }
+    uint32_t dist = kp_rgb_coord_distance(squared);
     uint32_t contrib =
         (uint32_t)cfg->increase_step * (cfg->spread - dist) / cfg->spread;
     contrib = MIN(contrib, cfg->area_limit);
@@ -155,7 +149,7 @@ static bool kp_eff_heatmap_event(const struct device *dev,
   const struct kp_eff_heatmap_config *cfg = dev->config;
   if (!ev->pressed || cfg->increase_step == 0 ||
       kp_rgb_led_coord(kp_rgb_led_for_position(ev->position)) == NULL ||
-      data->pending_count == 16) {
+      data->pending_count == ARRAY_SIZE(data->pending)) {
     return false;
   }
   data->pending[data->pending_count++] = *ev;
@@ -188,13 +182,14 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
     .reset = kp_eff_heatmap_reset,
 };
 
+#define KP_EFF_HEATMAP_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_HEATMAP_DEFINE(inst)                                            \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25) >= 0 &&    \
                    DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25) <=     \
                        UINT16_MAX,                                             \
                "heatmap decrease-delay-ms must fit a nonnegative uint16_t");   \
-  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread, 40) >= 0 &&               \
-                   DT_PROP_OR(DT_DRV_INST(inst), spread, 40) <= UINT16_MAX,    \
+  BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), spread) >= 0 &&                      \
+                   DT_PROP(DT_DRV_INST(inst), spread) <= UINT16_MAX,           \
                "heatmap spread must fit a nonnegative uint16_t");              \
   BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) >= 0 &&           \
                    DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16) <= UINT8_MAX, \
@@ -204,16 +199,15 @@ static const struct kp_rgb_effect_callbacks kp_eff_heatmap_callbacks = {
                        UINT8_MAX,                                              \
                "heatmap increase-step must fit a nonnegative uint8_t");        \
   static const struct kp_eff_heatmap_config kp_eff_heatmap_##inst##_cfg = {    \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_HEATMAP_DEFAULTS(inst)),        \
       .decrease_delay_ms =                                                     \
-          DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25),                \
-      .spread = DT_PROP_OR(DT_DRV_INST(inst), spread, 40),                     \
+          MAX(DT_PROP_OR(DT_DRV_INST(inst), decrease_delay_ms, 25), 1),        \
+      .spread = DT_PROP(DT_DRV_INST(inst), spread),                            \
       .area_limit = DT_PROP_OR(DT_DRV_INST(inst), area_limit, 16),             \
       .increase_step = DT_PROP_OR(DT_DRV_INST(inst), increase_step, 32),       \
-      .slim = DT_PROP_OR(DT_DRV_INST(inst), slim, 0),                          \
   };                                                                           \
   static struct kp_eff_heatmap_data kp_eff_heatmap_##inst##_data = {           \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_HEATMAP_DEFAULTS(inst))};               \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_heatmap_callbacks,           \
                        kp_eff_heatmap_##inst)
 

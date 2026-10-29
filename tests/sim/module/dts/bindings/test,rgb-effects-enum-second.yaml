@@ -1,0 +1,7 @@
+description: Native second effect enum namespace fixture
+compatible: "test,rgb-effects-enum-second"
+properties:
+  mode:
+    type: string
+    required: true
+    enum: [sweep, idle, pulse]

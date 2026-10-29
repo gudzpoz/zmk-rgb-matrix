@@ -1,0 +1,4 @@
+/* SPDX-License-Identifier: MIT */
+/ {
+    chosen { zmk,matrix-transform = &geometry_transform; };
+};

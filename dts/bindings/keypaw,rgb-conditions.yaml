@@ -9,9 +9,10 @@ description: |
 
   The node itself is not a device and has no driver; it groups conditions for
   readability. Conditions have no persisted or split identity. Providers may
-  keep volatile state and must notify after coherent source changes; time-based
-  changes use absolute deadlines, not animation polling. Consumers read cached
-  snapshots. A default central-evaluated overlay pushes only its resulting on/off
-  bit; a local overlay evaluates a tree whose sources must support that half.
+  keep volatile state and must notify after coherent source changes. Conditions
+  are sampled initially and again on explicit source/dependency invalidation or
+  engine refreshes; there is no timed polling. Consumers read cached snapshots. A
+  central-evaluated overlay pushes only its resulting on/off bit; a local overlay
+  evaluates a tree whose sources must support that half.
 
 compatible: "keypaw,rgb-conditions"

@@ -49,25 +49,22 @@
         chain-length = <5>;
     };
 
-    rgb_matrix: rgb-matrix {
+    rgb_matrix: rgb {
         compatible = "keypaw,rgb-matrix";
+        #binding-cells = <2>;
         strip = <&rgb_output>;
         physical-layout = <&layout_ortho_4x12_all1u>;
         mapping = <11 4 27 9 36>;
-    };
-
-    behaviors {
-        kprgb: kprgb {
-            compatible = "keypaw,behavior-rgb-matrix";
-            #binding-cells = <2>;
-            initial-on;
-            initial-brightness = <100>;
-            max-brightness = <100>;
-            idle-brightness = <100>;
-
+        initial-on;
+        initial-brightness = <100>;
+        max-brightness = <100>;
+        idle-brightness = <100>;
+        composite_selector: composite_selector {
+            compatible = "keypaw,rgb-overlay";
+            controllable; #binding-cells = <2>; label = "rgbs";
+            all-leds;
             fx_static: fx-static {
                 compatible = "keypaw,rgb-matrix-static";
-                #binding-cells = <0>;
                 led-colors = <0x102030 0x405060 0x708090 0xa0b0c0 0xd0e0f0>;
             };
         };

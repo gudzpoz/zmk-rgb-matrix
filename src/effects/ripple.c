@@ -16,7 +16,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -88,6 +88,10 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
       continue;
     }
     int32_t half_band = MAX(radius * KP_RIPPLE_WIDTH / 100, 1);
+    uint32_t inner = (uint32_t)MAX(radius - half_band, 0);
+    uint32_t outer = (uint32_t)(radius + half_band + 1);
+    uint64_t inner_squared = (uint64_t)inner * inner;
+    uint64_t outer_squared = (uint64_t)outer * outer;
 
   /* Ease the ring out so it dims away as the trigger expires instead of being
    * cut off. */
@@ -100,10 +104,11 @@ static bool kp_eff_ripple_render(const struct device *dev, const struct kp_rgb_f
       size_t i = f->targets[target];
       int32_t dx = (int32_t)f->coords[i].x - trigger->x;
       int32_t dy = (int32_t)f->coords[i].y - trigger->y;
-      /* Linear distance, as every other spatial effect uses: comparing a squared
-       * distance against the linear `half_band` collapses the ring to a sliver
-       * narrower than the LED pitch. */
-      int32_t delta = (int32_t)kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy)) - radius;
+      uint64_t squared = kp_rgb_coord_distance_squared(dx, dy);
+      if (squared < inner_squared || squared >= outer_squared) {
+        continue;
+      }
+      int32_t delta = (int32_t)kp_rgb_coord_distance(squared) - radius;
       if (delta < 0) {
         delta = -delta;
       }
@@ -171,14 +176,15 @@ static const struct kp_rgb_effect_callbacks kp_eff_ripple_callbacks = {
     .reset = kp_eff_ripple_reset,
 };
 
+#define KP_EFF_RIPPLE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_RIPPLE_DEFINE(inst)                                             \
   static const struct kp_eff_ripple_config kp_eff_ripple_##inst##_cfg = {      \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_RIPPLE_DEFAULTS(inst)),         \
       .background_brightness = (uint8_t)CLAMP(                                 \
           DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
   };                                                                           \
   static struct kp_eff_ripple_data kp_eff_ripple_##inst##_data = {             \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_RIPPLE_DEFAULTS(inst))};                \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_ripple_callbacks,            \
                        kp_eff_ripple_##inst)
 

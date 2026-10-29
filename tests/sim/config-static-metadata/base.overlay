@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT */
+#include <dt-bindings/keypaw/rgb_matrix.h>
+&rgb_matrix {
+    /delete-node/ preview_selector;
+    /delete-node/ fixture_overlay;
+    /delete-node/ fixture_battery;
+    /delete-node/ fixture_batt_sub;
+    mapping = <3 0 KP_RGB_NO_KEY(10, 20) 3 1 9 7 6 5 4 8 10>;
+};
+&led_strip_capture { chain-length = <12>; };
+/delete-node/ &rgb_conditions;
+&kscan { events = <>; };

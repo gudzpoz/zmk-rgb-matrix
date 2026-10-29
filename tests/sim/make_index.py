@@ -100,7 +100,7 @@ ITEM = Template(
     </li>"""
 )
 
-NODE_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s*\{\s*$")
+NODE_RE = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?P<node_name>[A-Za-z_][A-Za-z0-9_]*)\s*\{\s*$")
 NAME_RE = re.compile(r'display-name\s*=\s*"([^"]+)"')
 COMPAT_RE = re.compile(r'compatible\s*=\s*"([^"]+)"')
 
@@ -127,20 +127,19 @@ def dedent(block):
 
 
 def read_effect_nodes(path):
-    """Map display-name -> (compatible, node text, first line number).
+    """Map preview name -> (compatible, node text, first line number).
 
-    The overlay is our own file in a fixed style, so a brace-matching scan over
-    the &kprgb children is enough; it fails loudly on a node without a
-    display-name rather than publishing an entry with no definition.
+    Names match the simulator: display-name when present, otherwise node name.
+    The fixture's fixed style permits a brace-matching scan of selector children.
     """
     lines = path.read_text(encoding="utf-8").splitlines()
     start = None
     for i, line in enumerate(lines):
-        if re.match(r"\s*kprgb\s*:\s*kprgb\s*\{\s*$", line):
+        if re.match(r"\s*preview_selector\s*:\s*preview_selector\s*\{\s*$", line):
             start = i
             break
     if start is None:
-        raise ValueError(f"{path}: no 'kprgb: kprgb {{' node found")
+        raise ValueError(f"{path}: no 'preview_selector: preview_selector {{' node found")
 
     nodes = {}
     depth = 0
@@ -149,6 +148,8 @@ def read_effect_nodes(path):
     for i in range(start + 1, len(lines)):
         line = lines[i]
         if current is None:
+            if line.strip() == "};":
+                break
             if depth == 0 and NODE_RE.match(line):
                 current = i
                 block = [line]
@@ -161,18 +162,18 @@ def read_effect_nodes(path):
             text = "\n".join(block)
             name = NAME_RE.search(text)
             compat = COMPAT_RE.search(text)
-            if name is None or compat is None:
+            if compat is None:
                 raise ValueError(
-                    f"{path}:{current + 1}: effect node lacks display-name or compatible"
+                    f"{path}:{current + 1}: effect node lacks compatible"
                 )
-            key = name.group(1)
+            key = name.group(1) if name else NODE_RE.match(block[0]).group("node_name")
             if key in nodes:
-                raise ValueError(f"{path}:{current + 1}: duplicate display-name '{key}'")
+                raise ValueError(f"{path}:{current + 1}: duplicate preview name '{key}'")
             nodes[key] = (compat.group(1), text, current + 1)
             current = None
             block = []
     if not nodes:
-        raise ValueError(f"{path}: found no effect nodes under &kprgb")
+        raise ValueError(f"{path}: found no effect nodes under preview_selector")
     return nodes
 
 
@@ -266,9 +267,10 @@ def main():
     if repo:
         lede += f' <a href="{repo}">Source and documentation on GitHub</a>.'
     lede += (
-        " Each node is meant to be copied into your own <code>&amp;kprgb</code> registry."
+        " Each node is meant to be copied into your own <code>&amp;preview_selector</code> registry."
         " Follow <em>fixture node</em> on an effect for a complete registry."
     )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         PAGE.substitute(title=html.escape(args.title), lede=lede, sections="\n".join(sections)),
         encoding="utf-8",

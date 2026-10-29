@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: MIT */
+&geometry_layout {
+    keys = <&key_physical_attrs 100 100 50 50 0 0 0>,
+           <&key_physical_attrs 101 (-3) 50 101 0 0 0>,
+           <&key_physical_attrs (-101) 3 150 99 0 0 0>;
+};
+&geometry_strip { chain-length = <3>; };
+&rgb_matrix { mapping = <0 1 2>; };

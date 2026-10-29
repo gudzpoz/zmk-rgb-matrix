@@ -25,7 +25,5 @@
     bad_length: composite-bad-length { compatible = "zmk,led-strip-composite"; strips = <&no_length>; chain-length = <2>; };
     bad_runtime: composite-bad-runtime { compatible = "zmk,led-strip-composite"; strips = <&mismatch>; chain-length = <2>; };
     bad_api: composite-bad-api { compatible = "zmk,led-strip-composite"; strips = <&no_api>; chain-length = <2>; };
-    bad_overlap: composite-bad-overlap { compatible = "zmk,led-strip-composite"; strips = <&many &a>; chain-length = <7>; };
     alias_c: composite-alias-c { compatible = "zmk,led-strip-composite"; strips = <&c>; chain-length = <1>; };
-    bad_siblings: composite-bad-siblings { compatible = "zmk,led-strip-composite"; strips = <&one &alias_c>; chain-length = <2>; };
 };

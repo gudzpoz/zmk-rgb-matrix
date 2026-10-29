@@ -17,7 +17,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -47,8 +47,8 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
   uint32_t period = kp_rgb_effect_period(dev);
   uint32_t phase = f->clock_ms % period;
   uint32_t phase01 = phase * 65536u / period;
-  uint16_t bl = MAX(f->board_length, 1u);
-  uint16_t bh = MAX(f->board_height, 1u);
+  uint16_t bl = f->board_length;
+  uint16_t bh = f->board_height;
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   bool dual = cfg->direction == DT_ENUM_CONST(direction, dual);
@@ -84,11 +84,11 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
       /* FLAG: a horizontal sweep (so it travels with x) plus a per-row skew of
        * up to an eighth of the hue wheel, so the bands undulate instead of
        * staying parallel. */
-      spatial = (uint32_t)x * 65536u / bl + (uint32_t)y * 65536u / (8u * bh);
+      spatial = kp_rgb_spatial_linear(x, bl) + kp_rgb_spatial_linear(y, 8u * bh);
     } else if (cfg->basis == DT_ENUM_CONST(basis, x)) {
-      spatial = (uint32_t)x * 65536u / bl;
+      spatial = kp_rgb_spatial_linear(x, bl);
     } else if (cfg->basis == DT_ENUM_CONST(basis, y)) {
-      spatial = (uint32_t)y * 65536u / bh;
+      spatial = kp_rgb_spatial_linear(y, bh);
     } else {
       int32_t dx, dy;
       if (dual && (cfg->basis == DT_ENUM_CONST(basis, radial) ||
@@ -97,8 +97,8 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
         int32_t d1y = (int32_t)y - (int32_t)cy;
         int32_t d2x = (int32_t)x - (int32_t)(3 * bl / 4);
         int32_t d2y = (int32_t)y - (int32_t)cy;
-        uint32_t r1 = kp_rgb_isqrt((uint32_t)(d1x * d1x + d1y * d1y));
-        uint32_t r2 = kp_rgb_isqrt((uint32_t)(d2x * d2x + d2y * d2y));
+        uint32_t r1 = kp_rgb_coord_distance(kp_rgb_coord_distance_squared(d1x, d1y));
+        uint32_t r2 = kp_rgb_coord_distance(kp_rgb_coord_distance_squared(d2x, d2y));
         if (r1 <= r2) {
           dx = d1x;
           dy = d1y;
@@ -112,17 +112,14 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
       }
 
       if (cfg->basis == DT_ENUM_CONST(basis, radial)) { /* radial */
-        uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
-        spatial = dist * 65536u / max_r;
+        spatial = kp_rgb_spatial_radius(dx, dy, max_r);
       } else if (cfg->basis == DT_ENUM_CONST(basis, pinwheel)) { /* pinwheel */
-        spatial = (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
+        spatial = kp_rgb_spatial_angle(dy, dx);
       } else if (cfg->basis == DT_ENUM_CONST(basis, spiral)) { /* spiral */
-        uint32_t ang = (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
-        uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
-        spatial = ang + dist * 65536u / max_r;
+        spatial = kp_rgb_spatial_angle(dy, dx) + kp_rgb_spatial_radius(dx, dy, max_r);
       } else { /* chevron */
         uint32_t ax = (x > cx) ? (uint32_t)(x - cx) : (uint32_t)(cx - x);
-        spatial = (ax + (uint32_t)y) * 65536u / MAX((uint32_t)cx + bh, 1u);
+        spatial = kp_rgb_spatial_linear(ax + (uint32_t)y, MAX((uint32_t)cx + bh, 1u));
       }
     }
 
@@ -132,7 +129,7 @@ static bool kp_eff_rainbow_render(const struct device *dev, const struct kp_rgb_
     if (cfg->direction == DT_ENUM_CONST(direction, bloom) &&
         cfg->basis == DT_ENUM_CONST(basis, x)) { /* bloom: mirror each half */
       uint32_t local = (x < cx) ? (uint32_t)x : (uint32_t)(bl - x);
-      spatial = local * 65536u / MAX(cx, 1u);
+      spatial = kp_rgb_spatial_linear(local, MAX(cx, 1u));
     }
 
     uint32_t pos = (spatial + phase01_eff) % 65536u;
@@ -158,15 +155,16 @@ static const struct kp_rgb_effect_callbacks kp_eff_rainbow_callbacks = {
     .render = kp_eff_rainbow_render,
 };
 
+#define KP_EFF_RAINBOW_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_RAINBOW_DEFINE(inst)                                            \
   static const struct kp_eff_rainbow_config kp_eff_rainbow_##inst##_cfg = {    \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_RAINBOW_DEFAULTS(inst)),        \
       .basis = CONV_DT_ENUM(inst, basis),                                      \
       .direction = CONV_DT_ENUM(inst, direction),                              \
       .palette = CONV_DT_ENUM(inst, palette),                                  \
   };                                                                           \
   static struct kp_eff_rainbow_data kp_eff_rainbow_##inst##_data = {           \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_RAINBOW_DEFAULTS(inst))};               \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rainbow_callbacks,           \
                        kp_eff_rainbow_##inst)
 

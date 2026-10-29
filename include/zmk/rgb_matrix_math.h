@@ -9,6 +9,9 @@
 #include <stdint.h>
 
 /* Adapted from QMK lib8tion/trig8.h (MIT license). */
+
+/* `dy` and `dx` must each be in -65535..65535. The result uses a 256-step
+ * angle cycle: +x = 0, +y = 64, -x = 128, -y = 192; the origin is 0. */
 static inline uint8_t kp_rgb_atan2_8(int32_t dy, int32_t dx) {
   if (dy == 0) {
     return dx >= 0 ? 0 : 128;

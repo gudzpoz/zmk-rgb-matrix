@@ -9,6 +9,7 @@ description: |
   halves; a default (central-evaluated) overlay consumes the pushed bit.
 
 compatible: "keypaw,rgb-condition-ble"
+include: keypaw,rgb-condition-common.yaml
 
 properties:
   profile:

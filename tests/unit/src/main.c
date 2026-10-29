@@ -10,11 +10,9 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
-#include <string.h>
-
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_matrix_math.h>
-#include <zmk/rgb_persist.h>
+#include "../../../src/effects/effect_math.h"
 
 static void assert_rgb(struct led_rgb got, uint8_t r, uint8_t g, uint8_t b) {
   zassert_equal(got.r, r, "r: got %u want %u", got.r, r);
@@ -64,22 +62,6 @@ ZTEST(kp_rgb_color, hsb_to_rgb_edges) {
       128, 255);
 }
 
-ZTEST(kp_rgb_color, hsb_scale_only_changes_brightness) {
-  struct kp_rgb_hsb c = {.h = 200, .s = 50, .b = 100};
-
-  struct kp_rgb_hsb half = kp_rgb_hsb_scale(c, 50);
-  zassert_equal(half.h, 200);
-  zassert_equal(half.s, 50);
-  zassert_equal(half.b, 50);
-
-  /* pct above KP_RGB_BRT_MAX clamps to 100, so brightness is unchanged. */
-  zassert_equal(kp_rgb_hsb_scale(c, 150).b, 100);
-  zassert_equal(kp_rgb_hsb_scale(c, 0).b, 0);
-  /* Rounding truncates toward zero. */
-  zassert_equal(kp_rgb_hsb_scale((struct kp_rgb_hsb){.h = 0, .s = 0, .b = 37}, 50).b,
-                18);
-}
-
 ZTEST(kp_rgb_color, rgb_scale_clamps) {
   struct led_rgb c = {.r = 200, .g = 100, .b = 50};
 
@@ -112,12 +94,6 @@ ZTEST(kp_rgb_color, rgb_mix_endpoints_and_truncation) {
                             (struct led_rgb){2, 2, 2}, 50),
              1, 1, 1);
   assert_rgb(kp_rgb_rgb_mix((struct led_rgb){10, 10, 10}, black, 50), 5, 5, 5);
-}
-
-ZTEST(kp_rgb_color, scale_macro) {
-  zassert_equal(KP_RGB_SCALE(200, 50), 100);
-  zassert_equal(KP_RGB_SCALE(1, 50), 0);
-  zassert_equal(KP_RGB_SCALE(255, 100), 255);
 }
 
 ZTEST(kp_rgb_math, isqrt) {
@@ -153,6 +129,70 @@ ZTEST(kp_rgb_math, atan2_8_cardinals) {
   zassert_equal(kp_rgb_atan2_8(5, -5), 96);
 }
 
+ZTEST(kp_rgb_math, atan2_8_coordinate_boundaries) {
+  zassert_equal(kp_rgb_atan2_8(0, 0), 0);
+  zassert_equal(kp_rgb_atan2_8(0, 65535), 0);
+  zassert_equal(kp_rgb_atan2_8(65535, 0), 64);
+  zassert_equal(kp_rgb_atan2_8(0, -65535), 128);
+  zassert_equal(kp_rgb_atan2_8(-65535, 0), 192);
+  zassert_equal(kp_rgb_atan2_8(65535, 65535), 32);
+  zassert_equal(kp_rgb_atan2_8(65535, -65535), 96);
+  zassert_equal(kp_rgb_atan2_8(-65535, -65535), 160);
+  zassert_equal(kp_rgb_atan2_8(-65535, 65535), 224);
+  zassert_equal(kp_rgb_atan2_8(32768, 32768), 32);
+  zassert_equal(kp_rgb_atan2_8(32768, -32767), 96);
+}
+
+ZTEST(kp_rgb_math, effect_distance_exact_floors) {
+  uint64_t root_92680_squared = 8589582400ULL;
+  zassert_equal(kp_rgb_coord_distance(UINT32_MAX), 65535);
+  zassert_equal(kp_rgb_coord_distance((uint64_t)UINT32_MAX + 1), 65536);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared - 1), 92679);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared), 92680);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared + 1), 92680);
+  zassert_equal(kp_rgb_coord_distance(2ULL * 65535 * 65535), 92680);
+}
+
+ZTEST(kp_rgb_math, effect_squared_coordinate_extremes) {
+  zassert_equal(kp_rgb_coord_distance_squared(65535, 0), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(-65535, 0), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(0, -65535), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(65535, -65535),
+                2ULL * 65535 * 65535);
+  zassert_equal(kp_rgb_coord_distance_squared(-65535, 65535),
+                2ULL * 65535 * 65535);
+}
+
+ZTEST(kp_rgb_math, effect_spatial_linear_wide_position) {
+  zassert_equal(kp_rgb_spatial_linear(98302, 98302), 65536);
+}
+
+ZTEST(kp_rgb_math, effect_decay_remainder_and_partitioning) {
+  uint16_t remainder = 0;
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 1, 65535), 10);
+  zassert_equal(remainder, 1);
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 65534, 65535), 9);
+  zassert_equal(remainder, 0);
+
+  uint16_t partitioned_remainder = 0;
+  uint8_t partitioned = kp_rgb_decay_u8(200, &partitioned_remainder, 12345, 1000);
+  partitioned = kp_rgb_decay_u8(partitioned, &partitioned_remainder, 67890, 1000);
+  uint16_t combined_remainder = 0;
+  uint8_t combined = kp_rgb_decay_u8(200, &combined_remainder, 80235, 1000);
+  zassert_equal(partitioned, combined);
+  zassert_equal(partitioned_remainder, combined_remainder);
+}
+
+ZTEST(kp_rgb_math, effect_decay_saturation_and_divisor_change) {
+  uint16_t remainder = 7;
+  zassert_equal(kp_rgb_decay_u8(2, &remainder, 500, 10), 0);
+  zassert_equal(remainder, 0);
+
+  remainder = 9;
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 0, 6), 9);
+  zassert_equal(remainder, 3);
+}
+
 ZTEST(kp_rgb_math, arm_phase) {
   zassert_equal(kp_rgb_arm_phase(100, 1), 100);
   zassert_equal(kp_rgb_arm_phase(100, 2), 50);
@@ -161,76 +201,5 @@ ZTEST(kp_rgb_math, arm_phase) {
   zassert_equal(kp_rgb_arm_phase(100, 4), 25);
 }
 
-ZTEST(kp_rgb_persist, rejects_wrong_size) {
-  zassert_true(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob)));
-  zassert_false(kp_rgb_persist_size_ok(sizeof(struct kp_rgb_persist_blob) - 1));
-  zassert_false(kp_rgb_persist_size_ok(0));
-}
-
-ZTEST(kp_rgb_persist, rejects_wrong_version) {
-  zassert_true(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION));
-  zassert_false(kp_rgb_persist_version_ok(0));
-  zassert_false(kp_rgb_persist_version_ok(KP_RGB_PERSIST_VERSION + 1));
-}
-
-ZTEST(kp_rgb_persist, effect_range_check) {
-  zassert_true(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX,
-                                      .s = KP_RGB_SAT_MAX}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.h = KP_RGB_HUE_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(
-      &(struct kp_rgb_persist_effect){.s = KP_RGB_SAT_MAX + 1}));
-  zassert_false(kp_rgb_persist_effect_valid(NULL));
-}
-
-ZTEST(kp_rgb_persist, duration_clamp) {
-  zassert_equal(kp_rgb_persist_clamp_duration(50, 100, 10000), 100);
-  zassert_equal(kp_rgb_persist_clamp_duration(20000, 100, 10000), 10000);
-  zassert_equal(kp_rgb_persist_clamp_duration(500, 100, 10000), 500);
-}
-
-ZTEST(kp_rgb_persist, pack_records_selection) {
-  struct kp_rgb_persist_blob blob;
-
-  kp_rgb_persist_pack(true, 88, "breathe", &blob);
-  zassert_equal(blob.version, KP_RGB_PERSIST_VERSION);
-  zassert_equal(blob.user_on, 1);
-  zassert_equal(blob.brightness, 88);
-  zassert_equal(blob.has_selected, 1);
-  zassert_str_equal(blob.selected_id, "breathe");
-  zassert_true(kp_rgb_persist_size_ok(sizeof(blob)));
-  zassert_true(kp_rgb_persist_version_ok(blob.version));
-
-  /* A missing or empty id clears the selection rather than naming one. */
-  kp_rgb_persist_pack(false, 0, NULL, &blob);
-  zassert_equal(blob.user_on, 0);
-  zassert_equal(blob.brightness, 0);
-  zassert_equal(blob.has_selected, 0);
-  zassert_equal(blob.selected_id[0], '\0');
-  kp_rgb_persist_pack(false, 0, "", &blob);
-  zassert_equal(blob.has_selected, 0);
-}
-
-ZTEST(kp_rgb_persist, pack_clamps_and_truncates) {
-  struct kp_rgb_persist_blob blob;
-
-  kp_rgb_persist_pack(true, 200, NULL, &blob);
-  zassert_equal(blob.brightness, KP_RGB_BRT_MAX);
-
-  /* An over-long id is truncated to fit and stays null-terminated. */
-  char long_id[KP_RGB_PERSIST_MAX_ID_LENGTH + 8];
-  memset(long_id, 'x', sizeof(long_id) - 1);
-  long_id[sizeof(long_id) - 1] = '\0';
-  kp_rgb_persist_pack(true, 50, long_id, &blob);
-  zassert_equal(blob.has_selected, 1);
-  zassert_equal(blob.selected_id[sizeof(blob.selected_id) - 1], '\0');
-  zassert_equal(strlen(blob.selected_id), sizeof(blob.selected_id) - 1);
-  for (size_t i = 0; i < sizeof(blob.selected_id) - 1; i++) {
-    zassert_equal(blob.selected_id[i], 'x');
-  }
-}
-
 ZTEST_SUITE(kp_rgb_color, NULL, NULL, NULL, NULL, NULL);
 ZTEST_SUITE(kp_rgb_math, NULL, NULL, NULL, NULL, NULL);
-ZTEST_SUITE(kp_rgb_persist, NULL, NULL, NULL, NULL, NULL);

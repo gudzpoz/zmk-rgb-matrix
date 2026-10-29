@@ -20,7 +20,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -45,10 +45,10 @@ struct kp_eff_reactive_config {
 struct kp_eff_reactive_data {
   struct kp_rgb_effect_common_data common;
 #if KP_LED_COUNT > 0
-  struct kp_rgb_key_event pending[16];
+  struct kp_rgb_key_event pending[KP_RGB_EFFECT_PENDING_EVENTS];
   size_t pending_count;
   uint8_t levels[KP_LED_COUNT];
-  uint32_t remainder[KP_LED_COUNT];
+  uint16_t remainder[KP_LED_COUNT];
 #endif
 };
 
@@ -62,11 +62,12 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
 
   switch (cfg->spread) {
   case DT_ENUM_CONST(spread, disc): { /* disc: filled circle, brightness falls off to the radius */
-    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
+    uint64_t squared = kp_rgb_coord_distance_squared(dx, dy);
     int32_t r = cfg->radius;
-    if (r <= 0 || (int32_t)dist >= r) {
+    if (squared >= (uint64_t)r * r) {
       return 0;
     }
+    uint32_t dist = kp_rgb_coord_distance(squared);
     return (uint8_t)(255u * (r - (int32_t)dist) / r);
   }
   case DT_ENUM_CONST(spread, cross): { /* cross: same column or row as the pressed key */
@@ -84,7 +85,7 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
      * below the key pitch times sqrt(2) would silence the effect entirely. */
     int32_t reach = MIN(ax, ay) - (int32_t)tol;
     int32_t r = cfg->radius;
-    if (r <= 0 || reach >= r) {
+    if (reach >= r) {
       return 0;
     }
     return (uint8_t)(255u * (r - reach) / r);
@@ -106,10 +107,8 @@ static void kp_eff_reactive_advance(const struct device *dev, uint32_t elapsed_m
   uint32_t period = kp_rgb_effect_period(dev);
   uint64_t elapsed = MIN(elapsed_ms, period);
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
-    uint64_t total = elapsed * 255u + data->remainder[i];
-    uint64_t loss = total / period;
-    data->levels[i] = loss >= data->levels[i] ? 0 : data->levels[i] - loss;
-    data->remainder[i] = data->levels[i] ? total % period : 0;
+    data->levels[i] =
+        kp_rgb_decay_u8(data->levels[i], &data->remainder[i], elapsed * 255u, period);
   }
 }
 #endif
@@ -136,7 +135,7 @@ static bool kp_eff_reactive_render(const struct device *dev, const struct kp_rgb
   bool evolving = false;
   struct kp_rgb_hsb base = data->common.color;
   uint8_t floor_b = KP_RGB_SCALE(base.b, cfg->background_brightness);
-  uint16_t span = MAX(f->board_length, 1u);
+  uint16_t span = f->board_length;
 
   for (size_t i = 0; i < f->count; i++) {
     evolving |= data->levels[i] != 0;
@@ -181,9 +180,6 @@ static void kp_eff_reactive_apply(const struct device *dev,
   }
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
     const struct kp_rgb_coord *c = kp_rgb_led_coord(i);
-    if (c == NULL) {
-      continue;
-    }
     uint8_t contrib = kp_reactive_shape(cfg, origin->x, origin->y, c->x, c->y);
     if (contrib == 0) {
       continue;
@@ -201,7 +197,7 @@ static bool kp_eff_reactive_event(const struct device *dev, const struct kp_rgb_
 #if KP_LED_COUNT > 0
   struct kp_eff_reactive_data *data = dev->data;
   if (!ev->pressed || kp_rgb_led_coord(kp_rgb_led_for_position(ev->position)) == NULL ||
-      data->pending_count == 16) {
+      data->pending_count == ARRAY_SIZE(data->pending)) {
     return false;
   }
   data->pending[data->pending_count++] = *ev;
@@ -233,9 +229,14 @@ static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
     .reset = kp_eff_reactive_reset,
 };
 
+#define KP_EFF_REACTIVE_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_REACTIVE_DEFINE(inst)                                           \
+  BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) >= 0 &&       \
+                   DT_PROP_OR(DT_DRV_INST(inst), spread_radius, 250) <=        \
+                       UINT16_MAX,                                             \
+               "reactive spread-radius must be in 0..65535");                  \
   static const struct kp_eff_reactive_config kp_eff_reactive_##inst##_cfg = {  \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_REACTIVE_DEFAULTS(inst)),       \
       .background_brightness = (uint8_t)CLAMP(                                 \
           DT_PROP_OR(DT_DRV_INST(inst), background_brightness, 10), 0, 100),   \
       .spread = CONV_DT_ENUM(inst, spread),                                    \
@@ -244,7 +245,7 @@ static const struct kp_rgb_effect_callbacks kp_eff_reactive_callbacks = {
       .palette = CONV_DT_ENUM(inst, palette),                                  \
   };                                                                           \
   static struct kp_eff_reactive_data kp_eff_reactive_##inst##_data = {         \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_REACTIVE_DEFAULTS(inst))};              \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_reactive_callbacks,          \
                        kp_eff_reactive_##inst)
 

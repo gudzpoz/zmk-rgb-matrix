@@ -29,8 +29,8 @@ struct probe_config {
 struct probe_frame {
   struct led_rgb pixels[PIXEL_CAPACITY];
   size_t count;
-  int64_t timestamp;
   unsigned sequence;
+  int result;
 };
 
 struct probe_data {
@@ -57,9 +57,9 @@ static int probe_update(const struct device *dev, struct led_rgb *pixels, size_t
   struct probe_frame *frame = &data->frames[data->count++];
   memcpy(frame->pixels, pixels, count * sizeof(*pixels));
   frame->count = count;
-  frame->timestamp = k_uptime_get();
   frame->sequence = sequence++;
-  int result = data->failures ? -EIO : 0;
+  frame->result = data->failures ? -EIO : 0;
+  int result = frame->result;
   if (data->failures) {
     data->failures--;
   }
@@ -108,17 +108,17 @@ static struct probe_frame probe_snapshot(const struct device *dev, unsigned inde
   return frame;
 }
 
-static void fail_twice(void) {
+static void fail_next(unsigned count) {
   struct probe_data *data = keys->data;
   k_spinlock_key_t key = k_spin_lock(&probe_lock);
-  data->failures = 2;
+  data->failures = count;
   k_spin_unlock(&probe_lock, key);
 }
 
 static void await_count(unsigned count) {
   int64_t deadline = k_uptime_get() + 1500;
   while (probe_count(keys) < count || probe_count(glow) < count) {
-    require(k_uptime_get() < deadline, "output retry timeout");
+    require(k_uptime_get() < deadline, "output count timeout");
     k_sleep(K_MSEC(1));
   }
   k_sleep(K_MSEC(5));
@@ -140,13 +140,13 @@ static void check_frame(unsigned index, bool black) {
   }
 }
 
-static void check_retry_delays(unsigned start) {
-  struct probe_frame first = probe_snapshot(keys, start);
-  struct probe_frame second = probe_snapshot(keys, start + 1);
-  struct probe_frame third = probe_snapshot(keys, start + 2);
-  require(second.timestamp - first.timestamp >= 100, "first retry backoff");
-  require(third.timestamp - second.timestamp >= 200, "second retry backoff");
+static int prepare_automatic_output(void) {
+  require(probe_count(keys) == 1 && probe_count(glow) == 1, "startup black before boundary");
+  check_frame(0, true);
+  fail_next(2);
+  return 0;
 }
+SYS_INIT(prepare_automatic_output, APPLICATION, 98);
 
 static void composite_test(void *a, void *b, void *c) {
   ARG_UNUSED(a);
@@ -166,32 +166,57 @@ static void composite_test(void *a, void *b, void *c) {
             "combined normalized geometry");
   }
 
-  await_count(1);
-  check_frame(0, true);
+  await_count(2);
+  check_frame(1, false);
+  require(probe_snapshot(keys, 1).result == -EIO, "first color failure");
+  require(probe_snapshot(glow, 1).result == 0, "later child executes after first child failure");
+  k_sleep(K_MSEC(250));
+  require(probe_count(keys) == 2 && probe_count(glow) == 2,
+          "failed output does not retry autonomously");
 
-  fail_twice();
-  zmk_rgb_matrix_start();
+  zmk_rgb_matrix_flush();
+  await_count(3);
+  check_frame(2, false);
+  require(probe_snapshot(keys, 2).result == -EIO, "second color failure");
+  require(probe_snapshot(glow, 2).result == 0, "later child executes after first child failure");
+  k_sleep(K_MSEC(250));
+  require(probe_count(keys) == 3 && probe_count(glow) == 3,
+          "second failed output does not retry autonomously");
+
+  zmk_rgb_matrix_flush();
   await_count(4);
-  for (unsigned i = 1; i < 4; i++) {
-    check_frame(i, false);
-  }
-  check_retry_delays(1);
+  check_frame(3, false);
+  require(probe_snapshot(keys, 3).result == 0, "color output succeeds");
   k_sleep(K_MSEC(250));
   require(probe_count(keys) == 4 && probe_count(glow) == 4, "settled static output sleeps");
 
-  fail_twice();
+  fail_next(1);
   require(zmk_rgb_matrix_off() == 0, "off request");
-  await_count(7);
-  for (unsigned i = 4; i < 7; i++) {
-    check_frame(i, true);
-  }
-  check_retry_delays(4);
+  await_count(5);
+  check_frame(4, true);
+  require(probe_snapshot(keys, 4).result == -EIO, "black output failure");
   k_sleep(K_MSEC(250));
-  require(probe_count(keys) == 7 && probe_count(glow) == 7, "black debt settled");
+  require(probe_count(keys) == 5 && probe_count(glow) == 5,
+          "failed black output does not retry autonomously");
+
+  zmk_rgb_matrix_flush();
+  k_sleep(K_MSEC(250));
+  require(probe_count(keys) == 5 && probe_count(glow) == 5, "off flush submits no output");
 
   require(zmk_rgb_matrix_on() == 0, "on request");
+  await_count(6);
+  check_frame(5, false);
+  require(probe_snapshot(keys, 5).result == 0, "resume output succeeds");
+
+  require(zmk_rgb_matrix_off() == 0, "second off request");
+  await_count(7);
+  check_frame(6, true);
+  require(probe_snapshot(keys, 6).result == 0, "black output succeeds");
+
+  require(zmk_rgb_matrix_on() == 0, "second on request");
   await_count(8);
   check_frame(7, false);
+  require(probe_snapshot(keys, 7).result == 0, "second resume output succeeds");
   k_sleep(K_MSEC(250));
   require(probe_count(keys) == 8 && probe_count(glow) == 8, "resume settled");
   printk("PASS composite engine integration\n");

@@ -16,7 +16,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -46,7 +46,7 @@ struct kp_eff_rain_data {
   uint8_t val[KP_LED_COUNT];  /* current brightness 0..255 */
   uint16_t hue[KP_LED_COUNT]; /* per-LED hue, 0..KP_RGB_HUE_MAX */
   uint8_t sat[KP_LED_COUNT];  /* per-LED saturation while lit */
-  uint32_t fade_remainder[KP_LED_COUNT];
+  uint16_t fade_remainder[KP_LED_COUNT];
 #endif
   uint32_t step_remainder_ms;
   uint32_t flow_idx;
@@ -75,15 +75,8 @@ static void kp_eff_rain_fade(struct kp_eff_rain_data *data, size_t count,
     return;
   }
   for (size_t i = 0; i < count; i++) {
-    uint64_t progress = (uint64_t)elapsed_ms * 255u + data->fade_remainder[i];
-    uint64_t decay = progress / period;
-    if (decay >= data->val[i]) {
-      data->val[i] = 0;
-      data->fade_remainder[i] = 0;
-    } else {
-      data->val[i] -= decay;
-      data->fade_remainder[i] = progress % period;
-    }
+    data->val[i] = kp_rgb_decay_u8(data->val[i], &data->fade_remainder[i],
+                                   (uint64_t)elapsed_ms * 255u, period);
   }
 }
 #endif /* KP_LED_COUNT > 0 */
@@ -97,11 +90,8 @@ static bool kp_eff_rain_render(const struct device *dev, const struct kp_rgb_fra
   const struct kp_eff_rain_config *cfg = dev->config;
   uint32_t period = kp_rgb_effect_period(dev);
   struct kp_rgb_hsb base = data->common.color;
-  uint16_t bl = MAX(f->board_length, 1u);
+  uint16_t bl = f->board_length;
 
-  if (f->count == 0) {
-    return true;
-  }
   if (cfg->mode == DT_ENUM_CONST(mode, drops) && !data->drops_seeded) {
     for (size_t i = 0; i < f->count; i++) {
       data->val[i] = 255;
@@ -203,17 +193,18 @@ static const struct kp_rgb_effect_callbacks kp_eff_rain_callbacks = {
     .reset = kp_eff_rain_reset,
 };
 
+#define KP_EFF_RAIN_DEFAULTS(inst) KP_RGB_EFFECT_DEFAULTS(inst, 0xFFFFFF, 0)
 #define KP_EFF_RAIN_DEFINE(inst)                                               \
   BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), step_interval_ms) > 0 &&             \
                    DT_PROP(DT_DRV_INST(inst), step_interval_ms) <= UINT16_MAX, \
                "rain step-interval-ms must be in 1..65535");                   \
   static const struct kp_eff_rain_config kp_eff_rain_##inst##_cfg = {          \
-      KP_RGB_EFFECT_COMMON_CONFIG(inst),                                       \
+      KP_RGB_EFFECT_COMMON_CONFIG(inst, KP_EFF_RAIN_DEFAULTS(inst)),           \
       .mode = CONV_DT_ENUM(inst, mode),                                        \
       .step_interval_ms = DT_PROP(DT_DRV_INST(inst), step_interval_ms),        \
   };                                                                           \
   static struct kp_eff_rain_data kp_eff_rain_##inst##_data = {                 \
-      KP_RGB_EFFECT_COMMON_DATA(inst, 0xFFFFFF, 0)};                           \
+      KP_RGB_EFFECT_COMMON_DATA(KP_EFF_RAIN_DEFAULTS(inst))};                  \
   KP_RGB_EFFECT_DEFINE(DT_DRV_INST(inst), &kp_eff_rain_callbacks,              \
                        kp_eff_rain_##inst)
 

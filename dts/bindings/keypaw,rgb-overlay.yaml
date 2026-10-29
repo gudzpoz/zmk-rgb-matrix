@@ -2,22 +2,47 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Generic RGB matrix overlay: a compositor. While its condition is active it
-  renders exactly one effect and blends the result onto the targeted LEDs, over
-  whatever the active effect painted.
-
-  Declare exactly one enabled effect child of this node. It is a private
-  preset: not selectable, not persisted, and unaffected by the controller's
-  hue/brightness/duration commands.
+  Composites a nested effect onto its targets over earlier output. A private
+  composition owns exactly one enabled effect and is an ordinary device.
+  A controllable composition owns one or more enabled effects and is itself a
+  GLOBAL behavior. It retains selection while hidden, OFF or inhibited. The
+  composition and every enabled child must be initialized before RGB control starts.
 
 compatible: "keypaw,rgb-overlay"
-
-include: ["keypaw,rgb-overlay-common.yaml"]
+include: ["base.yaml", "keypaw,rgb-overlay-common.yaml", "behavior-metadata.yaml"]
 
 properties:
+  controllable:
+    type: boolean
+    description: |
+      Enable selection, color, period and reset commands, selection persistence
+      and split repair. Requires an explicit #binding-cells = <2>.
+      Private compositions do not participate in these services, even when
+      #binding-cells is supplied.
+
+  "#binding-cells":
+    type: int
+    const: 2
+
+  label:
+    type: string
+    description: |
+      Optional device/behavior endpoint name. Controlled endpoints must be at
+      most eight bytes and match on both halves. This does not change the
+      node-name identity used for saved selections.
+
   condition:
     type: phandle
-    required: false
+    description: Condition gating contribution; omit for unconditional output.
+
+  initial-effect:
+    type: int
+    default: 0
     description: |
-      Predicate (a keypaw,rgb-condition-* node) that gates the compositor.
-      Omit it for an overlay that composites unconditionally.
+      Initial controlled child slot in declaration order among enabled children,
+      0..65535. An out-of-range slot falls back to slot 0.
+      Ignored by private compositions.
+
+binding-cells:
+  - param1
+  - param2

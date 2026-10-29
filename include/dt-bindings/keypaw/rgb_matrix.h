@@ -6,31 +6,23 @@
 
 #pragma once
 
-/* Reuse upstream's RGB_*_CMD numbering so &kprgb accepts the same mnemonics as
- * &rgb_ug, and so the four ported effects keep their original indices.
- */
 #include <dt-bindings/zmk/rgb.h>
 
-/* Module-local, internal command: param2 carries one 16-bit word of overlay
- * on/off state (word index in the high half, bits in the low half), encoded
- * with RGB_OVL_STATE_VAL/WORD/BITS from src/rgb_matrix_internal.h.
- *
- * BEHAVIOR_LOCALITY_GLOBAL like every &kprgb command, but deliberately not
- * persisted: the handler returns before the kp_rgb_save_state() the other
- * commands end with, so a layer change never schedules a flash write. */
+/* Internal matrix transport command, not a keymap command. param1's upper
+ * 16 bits select a gate word; param2 contains its 32 bits. Words follow dense
+ * enabled-overlay order. Receiving a word does not save settings. */
 #define RGB_OVL_STATE_CMD 0x101
 
-/* User-bindable: clear every RGB behavior's persisted state on this half and
- * restore the devicetree defaults, so a reflash or a reordered effect registry
- * starts clean. &kprgb is BEHAVIOR_LOCALITY_GLOBAL, so one press on the central
- * reaches each half, and each half deletes only its own keys. */
+/* Restore defaults for the addressed selector, or global state and all selectors
+ * through the global control. param2 must be zero. With settings enabled,
+ * selection/global defaults are saved asynchronously; parameter defaults are
+ * runtime-only. Obsolete settings records are not deleted. */
 #define RGB_RESET_CMD 0x102
 #define RGB_RESET RGB_RESET_CMD 0
 
-/* Module-local, internal command: param2 is the low 32 bits of the central's
- * monotonic uptime. A peripheral derives its shared animation-clock offset from
- * it (see kp_rgb_clock_ms). Deliberately not persisted: the handler returns
- * before the kp_rgb_save_state() the other commands end with. */
+/* Internal matrix transport command, not a keymap command. param2 is the low
+ * 32 bits of the central's monotonic uptime in milliseconds. Updates the shared
+ * animation-clock offset without saving settings. */
 #define RGB_CLOCK_CMD 0x103
 
 /* A "mapping" entry is one of two things:
