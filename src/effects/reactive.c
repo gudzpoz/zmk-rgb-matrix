@@ -20,7 +20,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -45,10 +45,10 @@ struct kp_eff_reactive_config {
 struct kp_eff_reactive_data {
   struct kp_rgb_effect_common_data common;
 #if KP_LED_COUNT > 0
-  struct kp_rgb_key_event pending[16];
+  struct kp_rgb_key_event pending[KP_RGB_EFFECT_PENDING_EVENTS];
   size_t pending_count;
   uint8_t levels[KP_LED_COUNT];
-  uint32_t remainder[KP_LED_COUNT];
+  uint16_t remainder[KP_LED_COUNT];
 #endif
 };
 
@@ -62,11 +62,12 @@ static uint8_t kp_reactive_shape(const struct kp_eff_reactive_config *cfg,
 
   switch (cfg->spread) {
   case DT_ENUM_CONST(spread, disc): { /* disc: filled circle, brightness falls off to the radius */
-    uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
+    uint64_t squared = kp_rgb_coord_distance_squared(dx, dy);
     int32_t r = cfg->radius;
-    if ((int32_t)dist >= r) {
+    if (squared >= (uint64_t)r * r) {
       return 0;
     }
+    uint32_t dist = kp_rgb_coord_distance(squared);
     return (uint8_t)(255u * (r - (int32_t)dist) / r);
   }
   case DT_ENUM_CONST(spread, cross): { /* cross: same column or row as the pressed key */
@@ -106,10 +107,8 @@ static void kp_eff_reactive_advance(const struct device *dev, uint32_t elapsed_m
   uint32_t period = kp_rgb_effect_period(dev);
   uint64_t elapsed = MIN(elapsed_ms, period);
   for (size_t i = 0; i < KP_LED_COUNT; i++) {
-    uint64_t total = elapsed * 255u + data->remainder[i];
-    uint64_t loss = total / period;
-    data->levels[i] = loss >= data->levels[i] ? 0 : data->levels[i] - loss;
-    data->remainder[i] = data->levels[i] ? total % period : 0;
+    data->levels[i] =
+        kp_rgb_decay_u8(data->levels[i], &data->remainder[i], elapsed * 255u, period);
   }
 }
 #endif
@@ -198,7 +197,7 @@ static bool kp_eff_reactive_event(const struct device *dev, const struct kp_rgb_
 #if KP_LED_COUNT > 0
   struct kp_eff_reactive_data *data = dev->data;
   if (!ev->pressed || kp_rgb_led_coord(kp_rgb_led_for_position(ev->position)) == NULL ||
-      data->pending_count == 16) {
+      data->pending_count == ARRAY_SIZE(data->pending)) {
     return false;
   }
   data->pending[data->pending_count++] = *ev;

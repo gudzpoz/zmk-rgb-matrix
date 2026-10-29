@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <stdint.h>
+#include <zephyr/sys/util.h>
 #define DT_DRV_COMPAT keypaw_rgb_condition_layer
 
 #include <zmk/events/layer_state_changed.h>
@@ -19,7 +21,7 @@
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 struct layer_cfg {
-  uint16_t layer;
+  uint8_t layer;
   bool only_topmost;
 };
 
@@ -48,6 +50,9 @@ ZMK_SUBSCRIPTION(kp_cond_layer_state, zmk_layer_state_changed);
 static const struct kp_rgb_condition_api api = {
     .scope = KP_RGB_CONDITION_CENTRAL_ONLY, .sample = sample};
 #define DEFINE(inst)                                                           \
+  BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), layer) >= 0 &&                       \
+                   DT_PROP(DT_DRV_INST(inst), layer) <= UINT8_MAX,             \
+               "layer condition layer must be in 0..255");                     \
   static const struct layer_cfg cfg_##inst = {                                 \
       DT_PROP(DT_DRV_INST(inst), layer),                                       \
       DT_PROP(DT_DRV_INST(inst), only_topmost)};                               \

@@ -16,7 +16,7 @@ properties:
     type: boolean
     description: |
       Enable selection, color, period and reset commands, selection persistence
-      and split repair. Declare #binding-cells = <2> to use behavior bindings.
+      and split repair. Requires an explicit #binding-cells = <2>.
       Private compositions do not participate in these services, even when
       #binding-cells is supplied.
 

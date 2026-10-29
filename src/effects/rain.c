@@ -16,7 +16,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -46,7 +46,7 @@ struct kp_eff_rain_data {
   uint8_t val[KP_LED_COUNT];  /* current brightness 0..255 */
   uint16_t hue[KP_LED_COUNT]; /* per-LED hue, 0..KP_RGB_HUE_MAX */
   uint8_t sat[KP_LED_COUNT];  /* per-LED saturation while lit */
-  uint32_t fade_remainder[KP_LED_COUNT];
+  uint16_t fade_remainder[KP_LED_COUNT];
 #endif
   uint32_t step_remainder_ms;
   uint32_t flow_idx;
@@ -75,15 +75,8 @@ static void kp_eff_rain_fade(struct kp_eff_rain_data *data, size_t count,
     return;
   }
   for (size_t i = 0; i < count; i++) {
-    uint64_t progress = (uint64_t)elapsed_ms * 255u + data->fade_remainder[i];
-    uint64_t decay = progress / period;
-    if (decay >= data->val[i]) {
-      data->val[i] = 0;
-      data->fade_remainder[i] = 0;
-    } else {
-      data->val[i] -= decay;
-      data->fade_remainder[i] = progress % period;
-    }
+    data->val[i] = kp_rgb_decay_u8(data->val[i], &data->fade_remainder[i],
+                                   (uint64_t)elapsed_ms * 255u, period);
   }
 }
 #endif /* KP_LED_COUNT > 0 */

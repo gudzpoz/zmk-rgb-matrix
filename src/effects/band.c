@@ -15,7 +15,7 @@
 #include <zephyr/sys/util.h>
 
 #include <zmk/rgb_matrix.h>
-#include <zmk/rgb_matrix_math.h>
+#include "effect_math.h"
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
@@ -40,17 +40,15 @@ static uint32_t kp_band_spatial(kp_band_shape_t shape, uint16_t x, uint16_t y, u
   uint16_t cx = bl / 2;
   uint16_t cy = bh / 2;
   if (shape == DT_ENUM_CONST(shape, linear)) {
-    return (uint32_t)x * 65536u / bl;
+    return kp_rgb_spatial_linear(x, bl);
   }
   int32_t dx = (int32_t)x - cx;
   int32_t dy = (int32_t)y - cy;
   if (shape == DT_ENUM_CONST(shape, pinwheel)) { /* pinwheel: angle around the centre */
-    return (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
+    return kp_rgb_spatial_angle(dy, dx);
   }
   /* spiral: angle plus a radial term */
-  uint32_t ang = (uint32_t)kp_rgb_atan2_8(dy, dx) * 256u;
-  uint32_t dist = kp_rgb_isqrt((uint32_t)(dx * dx + dy * dy));
-  return ang + dist * 65536u / MAX(max_r, 1u);
+  return kp_rgb_spatial_angle(dy, dx) + kp_rgb_spatial_radius(dx, dy, MAX(max_r, 1u));
 }
 
 static bool kp_eff_band_render(const struct device *dev, const struct kp_rgb_frame *f) {

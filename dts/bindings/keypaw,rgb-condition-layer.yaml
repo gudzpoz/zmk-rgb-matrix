@@ -18,7 +18,7 @@ properties:
     type: int
     required: true
     description: |
-      Layer id this condition watches.
+      Layer id this condition watches (0..255).
 
   only-topmost:
     type: boolean

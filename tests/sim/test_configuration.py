@@ -116,6 +116,13 @@ for radius in (-1, 0, 65535, 65536):
                    f'&fx_reactive {{ spread-radius = <({radius})>; }};')
     DIAGNOSTICS[name] = r"reactive spread-radius must be in 0\.\.65535"
 
+
+for layer in (-1, 0, 255, 256):
+    name = f"layer-condition-{layer}"
+    CASES[name] = (0 <= layer <= 255,
+                   f"&fixture_layer {{ layer = <({layer})>; }};")
+    DIAGNOSTICS[name] = r"layer condition layer must be in 0\.\.255"
+
 for effect in ("rain", "starlight"):
     for interval in (0, -1, 65536, 1, 65535):
         name = f"{effect}-interval-{interval}"

@@ -47,6 +47,8 @@ BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS <=
                  CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS,
              "KEYPAW_RGB_MATRIX_DURATION_MIN_MS must not exceed "
              "KEYPAW_RGB_MATRIX_DURATION_MAX_MS");
+BUILD_ASSERT(CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS <= UINT16_MAX,
+             "KEYPAW_RGB_MATRIX_DURATION_MAX_MS must fit uint16_t");
 BUILD_ASSERT(DT_PROP(KP_RGB_NODE, max_brightness) >= 0 &&
                  DT_PROP(KP_RGB_NODE, max_brightness) <= KP_RGB_BRT_MAX,
              "max-brightness must be in 0..100");

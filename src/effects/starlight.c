@@ -34,7 +34,7 @@ struct kp_eff_starlight_data {
 #if KP_LED_COUNT > 0
   uint8_t cur[KP_LED_COUNT];  /* current brightness 0..255 */
   uint8_t target[KP_LED_COUNT]; /* target brightness */
-  uint32_t fade_remainder[KP_LED_COUNT];
+  uint16_t fade_remainder[KP_LED_COUNT];
   int8_t hue_off[KP_LED_COUNT]; /* -30..30 */
   int8_t sat_off[KP_LED_COUNT]; /* -30..30 */
 #endif

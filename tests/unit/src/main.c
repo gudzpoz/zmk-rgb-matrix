@@ -12,6 +12,7 @@
 
 #include <zmk/rgb_color.h>
 #include <zmk/rgb_matrix_math.h>
+#include "../../../src/effects/effect_math.h"
 
 static void assert_rgb(struct led_rgb got, uint8_t r, uint8_t g, uint8_t b) {
   zassert_equal(got.r, r, "r: got %u want %u", got.r, r);
@@ -126,6 +127,70 @@ ZTEST(kp_rgb_math, atan2_8_cardinals) {
   zassert_equal(kp_rgb_atan2_8(-1, 1), 224);
   zassert_equal(kp_rgb_atan2_8(-5, -5), 160);
   zassert_equal(kp_rgb_atan2_8(5, -5), 96);
+}
+
+ZTEST(kp_rgb_math, atan2_8_coordinate_boundaries) {
+  zassert_equal(kp_rgb_atan2_8(0, 0), 0);
+  zassert_equal(kp_rgb_atan2_8(0, 65535), 0);
+  zassert_equal(kp_rgb_atan2_8(65535, 0), 64);
+  zassert_equal(kp_rgb_atan2_8(0, -65535), 128);
+  zassert_equal(kp_rgb_atan2_8(-65535, 0), 192);
+  zassert_equal(kp_rgb_atan2_8(65535, 65535), 32);
+  zassert_equal(kp_rgb_atan2_8(65535, -65535), 96);
+  zassert_equal(kp_rgb_atan2_8(-65535, -65535), 160);
+  zassert_equal(kp_rgb_atan2_8(-65535, 65535), 224);
+  zassert_equal(kp_rgb_atan2_8(32768, 32768), 32);
+  zassert_equal(kp_rgb_atan2_8(32768, -32767), 96);
+}
+
+ZTEST(kp_rgb_math, effect_distance_exact_floors) {
+  uint64_t root_92680_squared = 8589582400ULL;
+  zassert_equal(kp_rgb_coord_distance(UINT32_MAX), 65535);
+  zassert_equal(kp_rgb_coord_distance((uint64_t)UINT32_MAX + 1), 65536);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared - 1), 92679);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared), 92680);
+  zassert_equal(kp_rgb_coord_distance(root_92680_squared + 1), 92680);
+  zassert_equal(kp_rgb_coord_distance(2ULL * 65535 * 65535), 92680);
+}
+
+ZTEST(kp_rgb_math, effect_squared_coordinate_extremes) {
+  zassert_equal(kp_rgb_coord_distance_squared(65535, 0), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(-65535, 0), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(0, -65535), 4294836225ULL);
+  zassert_equal(kp_rgb_coord_distance_squared(65535, -65535),
+                2ULL * 65535 * 65535);
+  zassert_equal(kp_rgb_coord_distance_squared(-65535, 65535),
+                2ULL * 65535 * 65535);
+}
+
+ZTEST(kp_rgb_math, effect_spatial_linear_wide_position) {
+  zassert_equal(kp_rgb_spatial_linear(98302, 98302), 65536);
+}
+
+ZTEST(kp_rgb_math, effect_decay_remainder_and_partitioning) {
+  uint16_t remainder = 0;
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 1, 65535), 10);
+  zassert_equal(remainder, 1);
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 65534, 65535), 9);
+  zassert_equal(remainder, 0);
+
+  uint16_t partitioned_remainder = 0;
+  uint8_t partitioned = kp_rgb_decay_u8(200, &partitioned_remainder, 12345, 1000);
+  partitioned = kp_rgb_decay_u8(partitioned, &partitioned_remainder, 67890, 1000);
+  uint16_t combined_remainder = 0;
+  uint8_t combined = kp_rgb_decay_u8(200, &combined_remainder, 80235, 1000);
+  zassert_equal(partitioned, combined);
+  zassert_equal(partitioned_remainder, combined_remainder);
+}
+
+ZTEST(kp_rgb_math, effect_decay_saturation_and_divisor_change) {
+  uint16_t remainder = 7;
+  zassert_equal(kp_rgb_decay_u8(2, &remainder, 500, 10), 0);
+  zassert_equal(remainder, 0);
+
+  remainder = 9;
+  zassert_equal(kp_rgb_decay_u8(10, &remainder, 0, 6), 9);
+  zassert_equal(remainder, 3);
 }
 
 ZTEST(kp_rgb_math, arm_phase) {

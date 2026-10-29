@@ -254,7 +254,7 @@ static void variants(void) {
     KP_CHECK(kinds[RAINBOW] == 67 && kinds[STARLIGHT] == 28 && kinds[BAND] == 10);
     KP_CHECK(kinds[BREATHE] == 10 && kinds[RAIN] == 20 && kinds[SOLID] == 7);
     KP_CHECK(kinds[STATIC] == 1 && kinds[SPECTRUM] == 1 && kinds[REACTIVE] == 11);
-    KP_CHECK(kinds[RIPPLE] == 1 && kinds[HEATMAP] == 4 && kinds[DIGITAL] == 2);
+    KP_CHECK(kinds[RIPPLE] == 1 && kinds[HEATMAP] == 6 && kinds[DIGITAL] == 2);
     KP_CHECK(kinds[EXAMPLE] == DT_NODE_EXISTS(DT_NODELABEL(effects_example)));
 }
 static uint8_t peak(struct led_rgb rgb) { return MAX(rgb.r, MAX(rgb.g, rgb.b)); }
@@ -843,6 +843,107 @@ static void battery(void) {
         for (size_t t = 0; t < frame.target_count; t++) KP_CHECK(rgb_equal(pixels[targets[t]], on));
         sentinels();
     }
+    if (KP_LED_COUNT) {
+        const uint8_t levels[] = {0, 50, 100, 255};
+        for (size_t level = 0; level < ARRAY_SIZE(levels); level++) {
+            for (size_t d = 0; d < ARRAY_SIZE(devs); d++) {
+                const struct kp_rgb_effect_callbacks *cb = overlay_callbacks(devs[d]);
+                frame.coords = kp_rgb_led_coord(0);
+                frame.targets = kp_rgb_overlay_targets(devs[d]);
+                frame.target_count = kp_rgb_overlay_target_count(devs[d]);
+                battery_soc = levels[level];
+                memset(pixels, 0xa5, sizeof(pixels));
+                KP_CHECK(!cb->render(devs[d], &frame));
+                KP_CHECK(rgb_equal(pixels[2], level == 0 ? off : level == 1 && d ? off : on));
+                KP_CHECK(rgb_equal(pixels[3], level == 0 ? off : level == 1 && !d ? off : on));
+                sentinels();
+                memcpy(reference, pixels, sizeof(pixels));
+
+                memcpy(coords, frame.coords, KP_LED_COUNT * sizeof(coords[0]));
+                frame.coords = coords;
+                memset(pixels, 0xa5, sizeof(pixels));
+                KP_CHECK(!cb->render(devs[d], &frame));
+                KP_CHECK(memcmp(reference, pixels, sizeof(pixels)) == 0);
+
+                coords[2] = coords[3] = (struct kp_rgb_coord){0, 0};
+                battery_soc = 50;
+                memset(pixels, 0xa5, sizeof(pixels));
+                KP_CHECK(!cb->render(devs[d], &frame));
+                KP_CHECK(rgb_equal(pixels[2], on));
+                KP_CHECK(rgb_equal(pixels[3], off));
+                sentinels();
+
+                frame.coords = kp_rgb_led_coord(0);
+                battery_soc = levels[level];
+                memset(pixels, 0xa5, sizeof(pixels));
+                KP_CHECK(!cb->render(devs[d], &frame));
+                KP_CHECK(memcmp(reference, pixels, sizeof(pixels)) == 0);
+            }
+        }
+    }
+}
+static void spatial(void) {
+    const struct device *default_heat = DEV(effects_heat_default);
+    const struct device *explicit_heat = DEV(effects_heat_explicit_150);
+    if (KP_LED_COUNT) {
+        const struct device *ripple = DEV(fx_ripple);
+        reset_device(ripple, 0);
+        inject(ripple, 0, 0);
+        frame.target_count = 1;
+        frame.board_length = 1000;
+        frame.local_ms = kp_rgb_effect_period(ripple) / 2;
+        frame.elapsed_ms = 0;
+        struct kp_rgb_hsb background = kp_rgb_effect_data(ripple)->color;
+        background.b = background.b * DT_PROP(DT_NODELABEL(fx_ripple), background_brightness) / 100;
+        struct led_rgb expected_background = kp_rgb_hsb_to_rgb(background);
+        const struct kp_rgb_coord far[] = {{32768, 32768}, {65535, 65535}};
+        for (size_t i = 0; i < ARRAY_SIZE(far); i++) {
+            coords[0] = far[i];
+            clear_targets(); kp_rgb_effect_render(ripple, &frame);
+            KP_CHECK(rgb_equal(pixels[0], expected_background));
+            sentinels();
+        }
+        const struct kp_rgb_coord *origin = kp_rgb_led_coord(kp_rgb_led_for_position(0));
+        const uint16_t distances[] = {199, 200, 204, 500, 796, 800, 801};
+        const bool lit[] = {false, false, true, true, true, false, false};
+        for (size_t i = 0; i < ARRAY_SIZE(distances); i++) {
+            coords[0] = (struct kp_rgb_coord){origin->x + distances[i], origin->y};
+            clear_targets(); kp_rgb_effect_render(ripple, &frame);
+            KP_CHECK(rgb_equal(pixels[0], expected_background) == !lit[i]);
+        }
+
+        coords[0] = (struct kp_rgb_coord){65535, 65535};
+        frame.board_length = frame.board_height = 65535;
+        frame.clock_ms = 0;
+        const struct {
+            const struct device *dev;
+            uint16_t hue;
+            uint8_t brightness;
+        } cases[] = {
+            {DEV(effects_rbow_rainbow_out_radial), 180, 100},
+            {DEV(effects_rbow_rainbow_out_pinwheel), 225, 100},
+            {DEV(effects_rbow_rainbow_out_spiral), 225, 100},
+            {DEV(effects_rbow_rainbow_out_chevron), 180, 100},
+            {DEV(effects_band_val_spiral), 180, 74},
+        };
+        for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+            reset_device(cases[i].dev, 0);
+            clear_targets(); kp_rgb_effect_render(cases[i].dev, &frame);
+            struct kp_rgb_hsb expected = {.h = cases[i].hue, .s = 100, .b = cases[i].brightness};
+            KP_CHECK(rgb_equal(pixels[0], kp_rgb_hsb_to_rgb(expected)));
+            sentinels();
+        }
+        geometry();
+    }
+    reset_device(default_heat, 0); reset_device(explicit_heat, 0);
+    inject(default_heat, 0, 0); inject(explicit_heat, 0, 0);
+    for (unsigned step = 0; step < 8; step++) {
+        frame.local_ms = step * 25; frame.elapsed_ms = step ? 25 : 0;
+        clear_targets(); kp_rgb_effect_render(default_heat, &frame);
+        memcpy(reference, pixels, sizeof(pixels));
+        clear_targets(); kp_rgb_effect_render(explicit_heat, &frame);
+        KP_CHECK(memcmp(reference, pixels, sizeof(pixels)) == 0);
+    }
 }
 void kp_test_effects_run(void) {
     geometry();
@@ -859,6 +960,7 @@ void kp_test_effects_run(void) {
     else if (kp_test_case("effects-private")) private_parameters();
     else if (kp_test_case("effects-enums")) enums();
     else if (kp_test_case("effects-battery")) battery();
+    else if (kp_test_case("effects-spatial")) spatial();
     else KP_CHECK(false);
     kp_rgb_matrix_unlock();
 }

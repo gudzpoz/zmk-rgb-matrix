@@ -12,7 +12,7 @@ from native_build import MODULE, SIM, WORKSPACE, build, run
 SCENARIOS = CASES = (
     "effects-variants", "effects-targets", "effects-phase", "effects-random",
     "effects-feedback", "effects-instances", "effects-dispatch", "effects-overlay",
-    "effects-brightness", "effects-private", "effects-enums", "effects-battery",
+    "effects-brightness", "effects-private", "effects-enums", "effects-battery", "effects-spatial",
 )
 CONF = """
 CONFIG_KEYPAW_SIM_EFFECT_CONTRACTS=y
@@ -64,6 +64,8 @@ def fragment(zero=False, example=True):
            'spread = "disc"; spread-radius = <0>; background-brightness = <0>;')
     effect("effects_reactive_nexus_zero", "reactive",
            'spread = "nexus"; spread-radius = <0>; background-brightness = <0>;')
+    effect("effects_heat_default", "heatmap", 'decrease-delay-ms = <25>; increase-step = <32>;')
+    effect("effects_heat_explicit_150", "heatmap", 'spread = <150>; decrease-delay-ms = <25>; increase-step = <32>;')
     effect("effects_heat_no_spread", "heatmap", 'spread = <0>; decrease-delay-ms = <25>; increase-step = <32>;')
     effect("effects_heat_zero_delay", "heatmap", 'spread = <0>; decrease-delay-ms = <0>; increase-step = <32>;')
     effect("effects_digital", "digital-rain")
