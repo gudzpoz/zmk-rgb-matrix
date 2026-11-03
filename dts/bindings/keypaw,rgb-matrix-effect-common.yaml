@@ -15,5 +15,5 @@ properties:
     default: 0
     description: |
       Animation period in milliseconds; shorter means faster. Zero uses the
-      common 1000 ms fallback. The resulting default is clamped to the configured
+      common 4000 ms fallback. The resulting default is clamped to the configured
       duration bounds before the effect device is initialized.

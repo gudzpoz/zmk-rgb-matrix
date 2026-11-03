@@ -219,9 +219,9 @@ static void early_prepare(void) {
     KP_CHECK(device_is_ready(DEV(probe_a)));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == NULL);
     KP_CHECK(kp_test_reset(DEV(selector_a)) == -ENODEV);
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
-    KP_CHECK(kp_rgb_effect_period(DEV(control_unowned)) == 1000);
+    KP_CHECK(kp_rgb_effect_period(DEV(control_unowned)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
 
     struct kp_rgb_hsb color = {123, 45, 67};
     KP_CHECK(kp_test_set_color(DEV(probe_a), &color) == 0);
@@ -239,13 +239,13 @@ static void early(void) {
     KP_CHECK(kp_rgb_effect_period(DEV(control_late)) == 2345);
 }
 static void duration_defaults(void) {
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
     KP_CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
     wait_ready();
     KP_CHECK(kp_test_set_period(DEV(probe_a), 2345) == 0);
     KP_CHECK(kp_test_reset(DEV(selector_a)) == 0);
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_a)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
 }
 
@@ -707,7 +707,7 @@ static void scoped_reset(void) {
     KP_CHECK(kp_test_set_period(DEV(private_white), 3456) == 0);
     KP_CHECK(kp_test_reset(DEV(selector_a)) == 0);
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_a)) == DEV(probe_a));
-    KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
+    KP_CHECK(kp_rgb_effect_period(DEV(probe_c)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(zmk_rgb_selector_get_selected(DEV(selector_b)) == DEV(probe_d));
     KP_CHECK(kp_rgb_effect_period(DEV(probe_d)) == 3000);
     KP_CHECK(kp_rgb_effect_period(DEV(private_white)) == 3456);
@@ -725,7 +725,7 @@ static void check_reset_parameters(void) {
     const struct kp_rgb_effect_common_data *c = kp_rgb_effect_data(DEV(probe_c));
     KP_CHECK(a->color.h == 120 && a->color.s == 100 && a->color.b == 100);
     KP_CHECK(c->color.h == 240 && c->color.s == 100 && c->color.b == 100);
-    KP_CHECK(a->duration_ms == 1000 && c->duration_ms == 1000);
+    KP_CHECK(a->duration_ms == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS) && c->duration_ms == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
 }
 static void prestart_reset_prepare(void) {
     struct kp_rgb_selector *a = NULL;

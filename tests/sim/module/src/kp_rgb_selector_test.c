@@ -331,7 +331,7 @@ static void reset_controls(void) {
   unsigned a_resets = DATA(probe_c)->resets;
   invoke(DEV(selector_a), RGB_RESET_CMD, 0);
   CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_a))) == DEV(probe_a));
-  CHECK(kp_rgb_effect_period(DEV(probe_c)) == 1000);
+  CHECK(kp_rgb_effect_period(DEV(probe_c)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
   CHECK(kp_rgb_selector_selected(kp_rgb_selector_overlay_state_locked(DEV(selector_b))) == DEV(probe_d));
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == 3000);
   CHECK(kp_rgb_effect_data(DEV(probe_d))->color.h == 42);
@@ -533,7 +533,7 @@ static void scenario(void *a, void *b, void *c) {
   kp_rgb_matrix_lock();
   CHECK(DATA(probe_a)->renders > 0 && DATA(probe_b)->renders > 0);
   CHECK(DATA(probe_c)->renders == 0 && DATA(probe_d)->renders == 0);
-  CHECK(kp_rgb_effect_period(DEV(probe_a)) == 1000);
+  CHECK(kp_rgb_effect_period(DEV(probe_a)) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
   CHECK(kp_rgb_effect_period(DEV(probe_b)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   CHECK(kp_rgb_effect_period(DEV(probe_d)) == CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS);
   struct kp_rgb_selector *selector_a_state = kp_rgb_selector_overlay_state_locked(DEV(selector_a));

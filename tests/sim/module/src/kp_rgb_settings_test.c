@@ -497,7 +497,7 @@ static void scenario(void *a, void *b, void *c) {
       const struct kp_rgb_hsb *color = &kp_rgb_effect_data(effects[i])->color;
       CHECK(color->h == hues[i] && color->s == 100 && color->b == 100);
       CHECK(kp_rgb_effect_period(effects[i]) ==
-          (i == 0 || i == 2 ? CLAMP(1000, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
+          (i == 0 || i == 2 ? CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS,
                                    CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS)
                            : CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     }

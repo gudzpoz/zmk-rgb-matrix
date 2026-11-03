@@ -788,7 +788,7 @@ static void flush_isr(const void *arg) {
 static void private_parameters(void) {
     const struct device *dev = DEV(effects_fallback);
     KP_CHECK(device_is_ready(dev));
-    KP_CHECK(kp_rgb_effect_period(dev) == CLAMP(1000, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
+    KP_CHECK(kp_rgb_effect_period(dev) == CLAMP(KP_RGB_EFFECT_PERIOD_FALLBACK_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MIN_MS, CONFIG_KEYPAW_RGB_MATRIX_DURATION_MAX_MS));
     KP_CHECK(rgb_equal(kp_rgb_hsb_to_rgb(kp_rgb_effect_data(dev)->color), kp_rgb_hsb_to_rgb((struct kp_rgb_hsb)KP_RGB_HSB_FROM_HEX(0x07111f))));
     kp_rgb_matrix_unlock();
     struct kp_rgb_hsb color = {.h = 120, .s = 90, .b = 80};

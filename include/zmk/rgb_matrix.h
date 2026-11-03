@@ -233,7 +233,7 @@ kp_rgb_effect_cfg(const struct device *dev) {
 }
 
 /* Default period when duration_ms is zero; clamped to configured duration bounds. */
-#define KP_RGB_EFFECT_PERIOD_FALLBACK_MS 1000u
+#define KP_RGB_EFFECT_PERIOD_FALLBACK_MS 4000u
 
 /* The effect's animation period in milliseconds; never 0, so an effect can use
  * it as a modulus without a guard. */
@@ -269,7 +269,7 @@ static inline uint32_t kp_rgb_effect_period(const struct device *dev) {
  * Initialize a per-instance defaults expression with KP_RGB_EFFECT_DEFAULTS and
  * use it in both KP_RGB_EFFECT_COMMON_CONFIG and KP_RGB_EFFECT_COMMON_DATA.
  * The color property overrides the color fallback; duration overrides its fallback,
- * with zero using the common 1000 ms fallback. Duration is clamped to configured
+ * with zero using the common 4000 ms fallback. Duration is clamped to configured
  * bounds before narrowing. Selector reset copies only these common defaults into
  * effect data. Lifecycle reset preserves user parameters. */
 #define KP_RGB_EFFECT_DEFINE(node_id, callbacks_expr, cfg_inst)                \
