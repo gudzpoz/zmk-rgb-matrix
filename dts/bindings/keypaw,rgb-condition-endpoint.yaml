@@ -1,0 +1,56 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Central-only host transport condition. Shared nodes compile on peripherals,
+  where host capabilities are not required and the condition is false.
+  BLE tests require ZMK_BLE on the host side. USB tests require USB_DEVICE_STACK;
+  USB connected additionally requires ZMK_USB.
+
+  Routed USB connected follows the selected endpoint. Routed BLE tests are
+  suppressed by OUT_NONE, or by USB preference while USB is HID-ready. Thus BLE
+  open/disconnected can match while USB is selected as a fallback under OUT_BLE.
+  The any transport tests selected-endpoint availability, not physical links;
+  under OUT_NONE its connected test is false and disconnected test is true.
+
+  Preference is sampled shortly after position presses and releases and during
+  transport-triggered reevaluation. Delayed macros, encoders, direct API calls,
+  or settings reloads can leave a preference-only change stale until another
+  key or transport event. Sampling is best-effort, not behavior-completion
+  ordering; there is no periodic idle polling.
+
+compatible: "keypaw,rgb-condition-endpoint"
+include: keypaw,rgb-condition-common.yaml
+
+properties:
+  transport:
+    type: string
+    default: "ble"
+    enum: ["ble", "usb", "any"]
+    description: Host transport to test.
+
+  state:
+    type: string
+    default: "connected"
+    enum: ["any", "connected", "disconnected", "open", "powered"]
+    description: |
+      BLE connected tests the active profile link; disconnected negates it;
+      open tests for an unbonded profile; any ignores its link state.
+      USB connected tests HID readiness subject to routing; disconnected tests
+      absent VBUS; powered tests VBUS without HID enumeration. These last two
+      USB states are physical tests independent of routing, including OUT_NONE.
+      The any transport supports only connected and disconnected.
+
+  profile:
+    type: int
+    default: -1
+    description: |
+      Active BLE profile index (0-based), or -1 for any profile. Values below
+      -1 are invalid. Indices beyond the configured profile count never match.
+      Other transports require -1.
+
+  ignore-routing:
+    type: boolean
+    description: |
+      Test physical state regardless of output preference, including OUT_NONE.
+      Defaults to false. Valid only for BLE or USB connected.

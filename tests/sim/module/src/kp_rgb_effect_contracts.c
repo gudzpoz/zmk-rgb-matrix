@@ -881,6 +881,42 @@ static void battery(void) {
             }
         }
     }
+    const struct device *hue_devs[] = {
+        DEV(effects_battery_hue), DEV(effects_battery_hue_down), DEV(effects_battery_hue_long),
+    };
+    const uint8_t levels[] = {0, 1, 50, 100, 255};
+    const uint16_t hues[][5] = {
+        {0, 1, 60, 120, 120}, {300, 298, 180, 60, 60}, {10, 13, 180, 350, 350},
+    };
+    const uint8_t opacity[] = {100, 37, 100};
+    const struct led_rgb under = {165, 165, 165};
+    frame.targets = targets;
+    /* Hue does not require geometry, including for an owner-supplied target view. */
+    frame.coords = NULL;
+    for (size_t d = 0; d < ARRAY_SIZE(hue_devs); d++) {
+        frame.target_count = KP_LED_COUNT ? (d == 0 ? 1 : 2) : 0;
+        const struct kp_rgb_effect_callbacks *cb = overlay_callbacks(hue_devs[d]);
+        for (size_t level = 0; level < ARRAY_SIZE(levels); level++) {
+            battery_soc = levels[level];
+            memset(pixels, 0xa5, sizeof(pixels));
+            KP_CHECK(!cb->render(hue_devs[d], &frame));
+            const struct led_rgb color = kp_rgb_hsb_to_rgb(
+                (struct kp_rgb_hsb){.h = hues[d][level], .s = 100, .b = 100});
+            const struct led_rgb expected = kp_rgb_rgb_mix(under, color, opacity[d]);
+            for (size_t i = 0; i < ARRAY_SIZE(pixels); i++) {
+                const bool targeted = frame.target_count &&
+                    (i == targets[0] || (frame.target_count > 1 && i == targets[1]));
+                KP_CHECK(rgb_equal(pixels[i], targeted ? expected : under));
+            }
+            KP_CHECK(targets[0] == 2 && targets[1] == 3);
+            sentinels();
+        }
+        frame.target_count = 0;
+        memset(pixels, 0xa5, sizeof(pixels));
+        KP_CHECK(!cb->render(hue_devs[d], &frame));
+        for (size_t i = 0; i < ARRAY_SIZE(pixels); i++) KP_CHECK(rgb_equal(pixels[i], under));
+    }
+    frame.coords = coords;
 }
 static void spatial(void) {
     const struct device *default_heat = DEV(effects_heat_default);

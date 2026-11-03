@@ -89,6 +89,23 @@ side-effecting samples are outside the contract. Dependency, scope and root fail
 require specific diagnostics. Split fixtures own transport assertions; engine
 fixtures own the comprehensive input/lifecycle assertions.
 
+Unfiltered condition-family runs also invoke `sim/test_source_contracts.py`:
+
+- Endpoint routing, physical queries, profile filtering and OUT_NONE, observed
+  through overlay gates in standalone/central images.
+- Deferred preference observation on press/release, coalescing under sustained
+  input, transport-driven observation baselines, and the documented idle-staleness
+  limitation. An unchanged observation does not resample the conditions.
+- Battery thresholds, SOC clamping and USB power updates; power-only operation
+  without SOC reporting and local peripheral gates.
+- Central-only endpoint rejection on peripherals; USB-stack-only physical queries
+  and rejection of USB-connected predicates without USB endpoint support.
+
+These fixtures double external host-transport and battery services while keeping
+production provider sources, actual headers/DTS, event dispatch and RGB queues.
+They do not exercise physical USB/BLE drivers or prove that every key-initiated
+preference change is detected.
+
 ## Effects
 
 `sim/test_effect_contracts.py` exercises every built-in mode in full-strip and
@@ -103,8 +120,10 @@ required missing checkout fails. Coverage includes:
 - Stochastic bulk versus partitioned time, interval boundaries, bounded catch-up and fade.
 - Instance lifecycle, independent clocks and raw dispatch preserving supplied buffers
   and timing.
-- Owner forwarding, opacity and terminal black; battery fill ordering, sparse targets,
-  clamping and zero LEDs. Battery listener-to-engine flush is outside this owner-local test.
+- Owner forwarding, opacity and terminal black; battery bar fill ordering and hue
+  endpoints/interpolation (including descending and long numeric arcs), single and
+  multiple targets, untouched pixels, clamping and zero LEDs. Battery
+  listener-to-engine flush is outside this owner-local test.
 
 ## Authoring and configuration
 
@@ -118,7 +137,9 @@ required missing checkout fails. Coverage includes:
 | `api-only-split-local` | Peripheral local conditions, trigger/split-sync suppression and captured scene transitions. |
 
 Configuration tests check controller count, placement, child cardinality, targets
-and supported schema constraints. Native role fixtures check service enablement.
+and supported schema constraints, including endpoint combinations/capabilities,
+battery intervals/service requirements, hue ranges, ignored opposite-mode
+properties, and a hue-only topology. Native role fixtures check service enablement.
 
 ## Metadata and geometry
 

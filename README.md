@@ -532,16 +532,105 @@ Every effect accepts `color` and `duration` properties.
 | Caps Lock condition | `keypaw,rgb-condition-caps-lock` | Active while the host reports Caps Lock |
 | Layer condition | `keypaw,rgb-condition-layer` | Active while a keymap layer is active |
 | Selected-effect condition | `keypaw,rgb-condition-effect-selected` | Matches retained selection; `selector` and enabled child `effect` phandles; local source on either half |
-| BLE condition | `keypaw,rgb-condition-ble` | Central-only; matches the active BLE profile index and connection state |
+| Endpoint condition | `keypaw,rgb-condition-endpoint` | Central-only; BLE profile, USB state, or selected-endpoint availability |
+| Battery condition | `keypaw,rgb-condition-battery` | This half's charge thresholds and/or USB power |
 | Latch condition | `keypaw,rgb-condition-latch` | Stateful; toggled by the behavior nested under it |
 | And condition | `keypaw,rgb-condition-and` | All listed conditions active |
 | Or condition | `keypaw,rgb-condition-or` | Any listed condition active |
 | Overlay toggle | `keypaw,behavior-rgb-overlay-toggle` | Child of `keypaw,rgb-condition-latch`. Node name ≤ 8 chars |
-| Battery gauge | `keypaw,rgb-overlay-battery` | Level bar from this half's charge |
+| Battery gauge | `keypaw,rgb-overlay-battery` | Bar or uniform charge-dependent hue from this half's charge |
 
 The generic `keypaw,rgb-overlay` compositor is the other overlay kind: it
 renders one effect while its condition holds. Omit `condition` on an overlay or
 trigger to make it unconditional.
+
+### Examples
+
+Here are some common examples showcasing conditions and per-key overlays:
+
+- CapsLock indicator LED:
+
+  ```dts
+  &rgb_conditions {
+      cond_caps: cond_caps {
+          compatible = "keypaw,rgb-condition-caps-lock";
+      };
+  };
+
+  &rgb_matrix {
+      caps: caps {
+          compatible = "keypaw,rgb-overlay";
+          condition = <&cond_caps>;
+          keys = <41>;
+          fx_caps {
+              compatible = "keypaw,rgb-matrix-solid";
+              color = <0x00FFFF>;
+          };
+      };
+  };
+  ```
+
+- Low-battery indicator (`below = <20>;` and `state = "discharging";`), with the
+  hue of the LED (`key = <0>;`) indicating battery percentage (`mode = "hue";`):
+
+  ```dts
+  &rgb_conditions {
+      battery_low: battery_low {
+          compatible = "keypaw,rgb-condition-battery";
+          below = <20>;
+          state = "discharging";
+      };
+  };
+
+  &rgb_matrix {
+      battery_led: battery_led {
+          compatible = "keypaw,rgb-overlay-battery";
+          condition = <&battery_low>;
+          local;
+          keys = <0>;
+          mode = "hue";
+      };
+  };
+  ```
+
+- Bluetooth profile (`state = "disconnected;"`) indicators:
+
+  ```dts
+  #define BLE_COND(cond_ble_0_off, profile_num)     \
+  cond_ble_0_off: cond_ble_0_off {                  \
+      compatible = "keypaw,rgb-condition-endpoint"; \
+      profile = <0>;                                \
+      state = "disconnected";                       \
+  }
+  #define BLE_INDICATOR(ble_p0_connecting, cond_ble_0_off, led_keys) \
+  ble_p0_connecting: ble_p0_connecting {                             \
+      compatible = "keypaw,rgb-overlay";                             \
+      condition = <&cond_ble_0_off>;                                 \
+      keys = <led_keys>;                                             \
+      effect {                                                       \
+          compatible = "keypaw,rgb-matrix-breathe";                  \
+          mode = "brightness";                                       \
+          color = <0x00FF00>;                                        \
+          duration = <1500>;                                         \
+      };                                                             \
+  }
+
+  &rgb_conditions {
+      BLE_COND(cond_ble_0_off, 0);
+      BLE_COND(cond_ble_1_off, 1);
+      BLE_COND(cond_ble_2_off, 2);
+      BLE_COND(cond_ble_3_off, 3);
+      BLE_COND(cond_ble_4_off, 4);
+  };
+
+  &rgb_matrix {
+      BLE_INDICATOR(ble_p0_connecting, cond_ble_0_off, 5 6);
+      BLE_INDICATOR(ble_p1_connecting, cond_ble_1_off, 4 7);
+      BLE_INDICATOR(ble_p2_connecting, cond_ble_2_off, 3 8);
+      BLE_INDICATOR(ble_p3_connecting, cond_ble_3_off, 2 9);
+      BLE_INDICATOR(ble_p4_connecting, cond_ble_4_off, 1 10);
+  };
+  ```
 
 ## Custom effects and conditions
 

@@ -63,6 +63,21 @@ config KEYPAW_SIM_CONDITION_CONTRACTS
     depends on ARCH_POSIX && LED_STRIP
     select KEYPAW_SIM_CONTRACTS
 
+config KEYPAW_SIM_SOURCE_CONTRACTS
+    bool "Native endpoint and battery provider contracts"
+    depends on ARCH_POSIX && LED_STRIP
+    select KEYPAW_SIM_CONTRACTS
+
+config KEYPAW_SIM_SOURCE_SOC
+    bool "Provide the simulated SOC service"
+    default y
+    depends on KEYPAW_SIM_SOURCE_CONTRACTS
+
+config KEYPAW_SIM_SOURCE_USB_HID
+    bool "Provide the simulated USB HID endpoint"
+    default y
+    depends on KEYPAW_SIM_SOURCE_CONTRACTS
+
 config KEYPAW_SIM_CONTROL_CONTRACTS
     bool "Native selector and parameter contracts"
     depends on ARCH_POSIX && LED_STRIP

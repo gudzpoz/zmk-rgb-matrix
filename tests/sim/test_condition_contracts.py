@@ -246,6 +246,10 @@ def main():
         if role == roles[0] and (args.reject or not args.scenario):
             reject_graphs(root, role, fragment, conf, args.reject or REJECTIONS,
                           VARIANTS['external-timer'] in groups)
+    if not args.scenario and not args.reject:
+        from test_source_contracts import run_suite
+        source_roles = roles + (('power-only', 'stack-only') if 'standalone' in roles else ())
+        run_suite(root / 'sources', source_roles)
 
 
 if __name__ == '__main__':

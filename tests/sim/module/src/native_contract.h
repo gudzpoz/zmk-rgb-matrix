@@ -20,5 +20,6 @@ static inline void kp_test_complete(void) {
 }
 void kp_test_engine_run(void);
 void kp_test_conditions_run(void);
+void kp_test_sources_run();
 void kp_test_controls_run(void);
 void kp_test_effects_run(void);

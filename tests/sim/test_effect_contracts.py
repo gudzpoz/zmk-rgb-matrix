@@ -110,6 +110,18 @@ def fragment(zero=False, example=True):
         compatible = "keypaw,rgb-overlay-battery"; leds = <2 3>; reverse;
         color = <0xc94965>; background-color = <0x07111f>;
     };
+    effects_battery_hue: effects_battery_hue {
+        compatible = "keypaw,rgb-overlay-battery"; leds = <2>; mode = "hue";
+        reverse; color = <0x123456>; background-color = <0xabcdef>;
+    };
+    effects_battery_hue_down: effects_battery_hue_down {
+        compatible = "keypaw,rgb-overlay-battery"; leds = <2 3>; mode = "hue";
+        hue-empty = <300>; hue-full = <60>; opacity = <37>;
+    };
+    effects_battery_hue_long: effects_battery_hue_long {
+        compatible = "keypaw,rgb-overlay-battery"; leds = <2 3>; mode = "hue";
+        hue-empty = <10>; hue-full = <350>;
+    };
 };
 """
     if zero:

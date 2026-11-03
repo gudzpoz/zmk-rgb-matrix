@@ -2,17 +2,36 @@
 # SPDX-License-Identifier: MIT
 
 description: |
-  Battery-gauge overlay: paints a positional level bar from this half's battery
-  state of charge, blending the lit part over its target LEDs and the rest
-  toward black, so the bar keeps a defined empty track.
-
-  Each half reads its own charge in the renderer, which runs on that half.
+  Battery gauge using this half's state of charge. Bar mode paints a positional
+  level bar; hue mode paints every target with a charge-dependent hue.
+  Without battery reporting, the charge is treated as zero.
 
 compatible: "keypaw,rgb-overlay-battery"
 
 include: ["keypaw,rgb-overlay-common.yaml"]
 
 properties:
+  mode:
+    type: string
+    default: "bar"
+    enum: ["bar", "hue"]
+    description: |
+      Bar uses color, background-color and reverse; hue ignores those properties.
+      Hue uses hue-empty and hue-full; bar ignores those properties.
+
+  hue-empty:
+    type: int
+    default: 0
+    description: |
+      Hue at 0% charge, in degrees (0..359). Hue mode interpolates directly
+      between the numeric endpoints, not along the shortest path around the
+      wheel, at full saturation and brightness before opacity is applied.
+
+  hue-full:
+    type: int
+    default: 120
+    description: Hue at 100% charge, in degrees (0..359).
+
   condition:
     type: phandle
     required: false

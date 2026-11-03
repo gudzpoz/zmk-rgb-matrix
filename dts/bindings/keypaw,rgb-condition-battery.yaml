@@ -1,0 +1,43 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Tests this half's reported battery percentage and/or USB power. A local
+  overlay evaluates each half independently; a central-evaluated consumer
+  uses the central half's state.
+
+  SOC thresholds require CONFIG_ZMK_BATTERY_REPORTING. The initial ZMK value
+  is zero until a successful measurement; this condition uses that value.
+  Measurements can remain stale during IDLE/SLEEP. Threshold changes take
+  effect when an updated measurement is reported, not immediately when the
+  physical charge changes. Power-only predicates do not require reporting.
+
+  Charging/discharging require CONFIG_USB_DEVICE_STACK on each evaluating
+  half. They describe USB power presence, not charger telemetry or battery
+  current. No reporting or USB subsystem is enabled by this condition.
+
+compatible: "keypaw,rgb-condition-battery"
+include: keypaw,rgb-condition-common.yaml
+
+properties:
+  below:
+    type: int
+    default: 101
+    description: |
+      Require SOC strictly below this value (1..101). The default imposes no
+      upper bound. Together with above, the integer interval must be nonempty.
+
+  above:
+    type: int
+    default: -1
+    description: |
+      Require SOC strictly above this value (-1..99). The default imposes no
+      lower bound. With both default bounds, state must not be any.
+
+  state:
+    type: string
+    default: "any"
+    enum: ["any", "charging", "discharging"]
+    description: |
+      Any ignores USB power; charging requires VBUS present (including HID
+      hosts); discharging requires VBUS absent.

@@ -99,6 +99,39 @@ DIAGNOSTICS = {
     "direct-effect-keymap-binding": r"fx_reactive.*lacks #binding-cells",
 }
 
+SOURCE_CASES = {
+    'endpoint-any': (True, 'endpoint', 'transport = "any";', ''),
+    'endpoint-profile-low': (False, 'endpoint', 'transport = "any"; profile = <(-2)>;', 'endpoint profile must be >= -1'),
+    'endpoint-profile-transport': (False, 'endpoint', 'transport = "any"; profile = <0>;', 'endpoint profile requires BLE'),
+    'endpoint-open-transport': (False, 'endpoint', 'transport = "any"; state = "open";', 'endpoint open/any requires BLE'),
+    'endpoint-any-transport': (False, 'endpoint', 'transport = "any"; state = "any";', 'endpoint open/any requires BLE'),
+    'endpoint-powered-transport': (False, 'endpoint', 'transport = "any"; state = "powered";', 'endpoint powered requires USB'),
+    'endpoint-ignore-any': (False, 'endpoint', 'transport = "any"; ignore-routing;', 'endpoint ignore-routing requires BLE or USB connected'),
+    'endpoint-ignore-powered': (False, 'endpoint', 'transport = "usb"; state = "powered"; ignore-routing;', 'endpoint ignore-routing requires BLE or USB connected'),
+    'endpoint-ignore-disconnected': (False, 'endpoint', 'transport = "usb"; state = "disconnected"; ignore-routing;', 'endpoint ignore-routing requires BLE or USB connected'),
+    'endpoint-no-ble': (False, 'endpoint', '', 'endpoint BLE requires CONFIG_ZMK_BLE on host side'),
+    'endpoint-no-usb': (False, 'endpoint', 'transport = "usb";', 'endpoint USB requires CONFIG_USB_DEVICE_STACK on host side'),
+    'battery-below-low': (False, 'battery', 'below = <0>;', 'battery below must be in 1..101'),
+    'battery-below-high': (False, 'battery', 'below = <102>;', 'battery below must be in 1..101'),
+    'battery-above-low': (False, 'battery', 'above = <(-2)>;', 'battery above must be in -1..99'),
+    'battery-above-high': (False, 'battery', 'above = <100>;', 'battery above must be in -1..99'),
+    'battery-empty': (False, 'battery', 'above = <19>; below = <20>;', 'battery threshold interval must not be empty'),
+    'battery-unconstrained': (False, 'battery', '', 'battery condition must constrain SOC or power'),
+    'battery-no-reporting': (False, 'battery', 'below = <20>;', 'battery SOC requires CONFIG_ZMK_BATTERY_REPORTING'),
+    'battery-no-usb': (False, 'battery', 'state = "charging";', 'battery power requires CONFIG_USB_DEVICE_STACK'),
+}
+for name, (valid, kind, properties, diagnostic) in SOURCE_CASES.items():
+    CASES[name] = (valid, f'&rgb_conditions {{ source_test {{ compatible = "keypaw,rgb-condition-{kind}"; {properties} }}; }};')
+    DIAGNOSTICS[name] = re.escape(diagnostic)
+
+CASES['battery-hue-ignores-bar-properties'] = (True, '&fixture_battery { mode = "hue"; color = <0x123456>; background-color = <0xabcdef>; reverse; };')
+CASES['battery-bar-ignores-hue-properties'] = (True, '&fixture_battery { hue-empty = <359>; hue-full = <0>; };')
+CASES['battery-hue-only'] = (True, '&fixture_batt_sub { status = "disabled"; }; &fixture_battery { mode = "hue"; };')
+for prop, value in (('hue-empty', -1), ('hue-full', 360)):
+    name = f'battery-{prop}-invalid'
+    CASES[name] = (False, f'&fixture_battery {{ {prop} = <({value})>; }};')
+    DIAGNOSTICS[name] = r'battery hue endpoints must be in 0\.\.359'
+
 for prop in ("max-brightness", "idle-brightness", "initial-brightness"):
     for cap in (-1, 0, 100, 101):
         name = f"{prop}-{cap}"

@@ -35,3 +35,26 @@ endif()
 if(CONFIG_KEYPAW_SIM_SINGLETON_SPLIT_TEST)
   zephyr_ld_options(-Wl,--wrap=zmk_behavior_invoke_binding)
 endif()
+
+if(CONFIG_KEYPAW_SIM_SOURCE_CONTRACTS)
+  zephyr_library_sources(kp_rgb_source_contracts.c)
+  # Native_sim has no USB controller or battery: double only those external services.
+  set(rgb_source_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../../../src)
+  set_property(SOURCE ${rgb_source_dir}/conditions/endpoint.c
+    DIRECTORY ${rgb_source_dir} APPEND PROPERTY COMPILE_DEFINITIONS
+    CONFIG_ZMK_BLE=1 CONFIG_USB_DEVICE_STACK=1)
+  if(CONFIG_KEYPAW_SIM_SOURCE_USB_HID)
+    set_property(SOURCE ${rgb_source_dir}/conditions/endpoint.c
+      DIRECTORY ${rgb_source_dir} APPEND PROPERTY COMPILE_DEFINITIONS CONFIG_ZMK_USB=1)
+  endif()
+  set_property(SOURCE ${rgb_source_dir}/conditions/battery.c
+    DIRECTORY ${rgb_source_dir} APPEND PROPERTY COMPILE_DEFINITIONS CONFIG_USB_DEVICE_STACK=1)
+  if(CONFIG_KEYPAW_SIM_SOURCE_SOC)
+    set_property(SOURCE ${rgb_source_dir}/conditions/battery.c
+      DIRECTORY ${rgb_source_dir} APPEND PROPERTY COMPILE_DEFINITIONS CONFIG_ZMK_BATTERY_REPORTING=1)
+  endif()
+  zephyr_ld_options(-Wl,--wrap=zmk_endpoint_get_preferred_transport
+    -Wl,--wrap=zmk_endpoint_get_selected -Wl,--wrap=zmk_endpoint_is_connected
+    -Wl,--wrap=zmk_ble_active_profile_index -Wl,--wrap=zmk_ble_active_profile_is_connected
+    -Wl,--wrap=zmk_ble_active_profile_is_open)
+endif()

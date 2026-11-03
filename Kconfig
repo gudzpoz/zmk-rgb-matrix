@@ -100,17 +100,20 @@ config KEYPAW_RGB_CONDITION_CAPS_LOCK
       keypaw,rgb-condition-caps-lock node. Selects ZMK_HID_INDICATORS, which is
       what the host sets when Caps Lock is on.
 
-# BLE host-profile state exists only on the central, so the condition reads it
-# there and returns false on a peripheral.
-config KEYPAW_RGB_CONDITION_BLE
+config KEYPAW_RGB_CONDITION_ENDPOINT
     bool
     default y
-    depends on DT_HAS_KEYPAW_RGB_CONDITION_BLE_ENABLED
+    depends on DT_HAS_KEYPAW_RGB_CONDITION_ENDPOINT_ENABLED
     help
-      Bluetooth profile condition. Enabled by the presence of a
-      keypaw,rgb-condition-ble node. Matches the active profile index and
-      connection state; a build without Bluetooth compiles the condition to a
-      constant false.
+      Host transport and routing condition, evaluated on the central half.
+
+config KEYPAW_RGB_CONDITION_BATTERY
+    bool
+    default y
+    depends on DT_HAS_KEYPAW_RGB_CONDITION_BATTERY_ENABLED
+    help
+      Local battery state-of-charge and USB-power condition. SOC thresholds
+      require battery reporting; power predicates require the USB device stack.
 
 endif # KEYPAW_RGB_MATRIX
 

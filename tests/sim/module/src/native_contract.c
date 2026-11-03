@@ -22,6 +22,8 @@ static void scenario(void *a, void *b, void *c) {
     kp_test_engine_run();
 #elif defined(CONFIG_KEYPAW_SIM_CONDITION_CONTRACTS)
     kp_test_conditions_run();
+#elif defined(CONFIG_KEYPAW_SIM_SOURCE_CONTRACTS)
+    kp_test_sources_run();
 #elif defined(CONFIG_KEYPAW_SIM_CONTROL_CONTRACTS)
     kp_test_controls_run();
 #elif defined(CONFIG_KEYPAW_SIM_EFFECT_CONTRACTS)
